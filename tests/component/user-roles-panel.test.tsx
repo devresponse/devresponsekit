@@ -125,15 +125,50 @@ describe("RolePicker", () => {
 
 describe("UserRolesPanel", () => {
   it("is read-only without admin.roles.assign (no assign or remove controls)", async () => {
-    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign={false} />);
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign={false} canReadRoles canReadOrgs />);
     await screen.findByText("Viewer"); // grid loaded
     expect(screen.queryByRole("button", { name: "Assign role" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
   });
 
+  /**
+   * F-67: the picker reads GET /api/administrator/roles (`admin.roles.read`),
+   * and the role and organization names open pages guarded on
+   * `admin.roles.read` / `admin.orgs.read`. The user page checks none of
+   * them: the seeded Limited Admin clicked through to 404s, each writing an
+   * access-denied row. Removing needs only `admin.roles.assign`.
+   */
+  it("offers Remove but no picker, and plain names, without the read permissions", async () => {
+    renderWithIntl(
+      <UserRolesPanel userId={USER_ID} canAssign canReadRoles={false} canReadOrgs={false} />,
+    );
+
+    expect(await screen.findByText("Viewer")).toBeInTheDocument();
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign role" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).includes("/api/administrator/roles")),
+    ).toBe(false);
+  });
+
+  it("links the role and the organization to their pages for a viewer who may open them", async () => {
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canReadRoles canReadOrgs />);
+
+    expect(await screen.findByRole("link", { name: "Viewer" })).toHaveAttribute(
+      "href",
+      expect.stringContaining(`/app/administrator/roles/${ROLE}`),
+    );
+    expect(screen.getByRole("link", { name: "Acme" })).toHaveAttribute(
+      "href",
+      expect.stringContaining(`/app/administrator/organizations/${ORG}`),
+    );
+  });
+
   it("assigns a role, posting the role + its derived org", async () => {
     const user = userEvent.setup();
-    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign />);
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign canReadRoles canReadOrgs />);
 
     await user.click(await screen.findByRole("button", { name: "Assign role" }));
     await screen.findByText("Assign a role"); // dialog open
@@ -150,7 +185,7 @@ describe("UserRolesPanel", () => {
 
   it("removes a role assignment via DELETE", async () => {
     const user = userEvent.setup();
-    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign />);
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign canReadRoles canReadOrgs />);
 
     await user.click(await screen.findByRole("button", { name: "Remove" }));
 
@@ -179,7 +214,7 @@ describe("UserRolesPanel", () => {
         return Promise.resolve(jsonOk(ROLE_ROWS));
       return Promise.resolve(jsonOk({ items: [], total: 0 }));
     });
-    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign />);
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign canReadRoles canReadOrgs />);
 
     await user.click(await screen.findByRole("button", { name: "Remove" }));
 
@@ -195,7 +230,7 @@ describe("UserRolesPanel", () => {
         return Promise.resolve(jsonOk(ROLE_ROWS));
       return Promise.resolve(jsonOk({ items: [], total: 0 }));
     });
-    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign />);
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign canReadRoles canReadOrgs />);
 
     await user.click(await screen.findByRole("button", { name: "Remove" }));
 

@@ -333,6 +333,7 @@
         "saving": "Enregistrement…",
         "saved": "Rôles mis à jour.",
         "noResults": "Aucun rôle correspondant.",
+        "catalogHidden": "Le catalogue des rôles de l'organisation n'est pas affiché : cela nécessite l'autorisation de lire les rôles.",
         "errorToast": "Impossible de mettre à jour les rôles.",
         "forbidden": "Vous ne pouvez ajouter ou retirer que des rôles dont vous détenez vous-même les permissions."
       },

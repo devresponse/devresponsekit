@@ -333,6 +333,7 @@
         "saving": "A guardar…",
         "saved": "Funções atualizadas.",
         "noResults": "Não há funções correspondentes.",
+        "catalogHidden": "O catálogo de funções da organização não é apresentado: requer permissão para ler funções.",
         "errorToast": "Não foi possível atualizar as funções.",
         "forbidden": "Você só pode adicionar ou remover funções cujas permissões você mesmo possui."
       },

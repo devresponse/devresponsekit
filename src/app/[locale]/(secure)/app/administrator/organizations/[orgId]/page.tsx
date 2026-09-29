@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
-import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, hasCrossOrgReach, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { AdminError, loadOrgOrThrow } from "@/lib/admin/orgs.server";
 import { getDefaultOrganization } from "@/lib/default-organization.server";
@@ -50,7 +50,7 @@ export const dynamic = "force-dynamic";
  *   - Providers      — paginated grid of provider bindings
  *   - Authentication — per-org sign-up policy editor (0007); this page
  *                      also loads the org's auth settings + platform defaults
- *   - Settings       — name/slug/status editor
+ *   - Settings       — name/slug/status editor; SUPERADMIN-only writes (F-66)
  */
 export default async function AdministratorOrganizationDetailPage({
   params,
@@ -85,7 +85,17 @@ export default async function AdministratorOrganizationDetailPage({
 
   const t = await getTranslations({ locale, namespace: "administrator.orgs" });
 
+  // Members, invitations, provider unbinding and the Authentication policy
+  // are org-scoped writes: `admin.orgs.update` in this org is enough.
   const canUpdate = guard.access.permissions.includes("admin.orgs.update");
+  // F-66: the Settings form PATCHes the organization row itself, which the
+  // route refuses without cross-org reach (403). Sharing `canUpdate` left it
+  // editable for every org admin, and every save failed.
+  const canEditSettings = canUpdate && hasCrossOrgReach(guard.access);
+  // F-67: the invite dialog lists the org's roles from GET /roles, and each
+  // member links to the user page. This page checks neither permission.
+  const canReadRoles = guard.access.permissions.includes("admin.roles.read");
+  const canReadUsers = guard.access.permissions.includes("admin.users.read");
 
   // F-40: whether this org is THE default, the one unmapped sign-ups resolve
   // to, rather than merely flagged. They differ only in a legacy database
@@ -145,6 +155,9 @@ export default async function AdministratorOrganizationDetailPage({
           bindingCount: org.binding_count,
         }}
         canUpdate={canUpdate}
+        canEditSettings={canEditSettings}
+        canReadRoles={canReadRoles}
+        canReadUsers={canReadUsers}
         authSettings={toAuthPolicyJson(authSettings)}
         platformAuthDefaults={toAuthPolicyJson(platformAuthDefaults)}
       />

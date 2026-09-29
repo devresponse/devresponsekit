@@ -84,7 +84,7 @@ const ROLE_CATALOG = [
 
 const groupEditor: Harness = {
   name: "GroupRolesEditor",
-  render: () => <GroupRolesEditor groupId="g1" canAssign />,
+  render: () => <GroupRolesEditor groupId="g1" canAssign canReadRoles />,
   saveUrl: "/api/administrator/groups/g1/roles",
   bodyKey: "roleIds",
   initial: ["role-ban", "role-read"],

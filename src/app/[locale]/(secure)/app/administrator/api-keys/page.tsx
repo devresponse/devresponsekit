@@ -28,6 +28,8 @@ export default async function AdministratorApiKeysPage({
     notFound();
   }
   const canManage = guard.access.permissions.includes("admin.apikeys.manage");
+  // F-67: each owner links to the user page, guarded on `admin.users.read`.
+  const canReadUsers = guard.access.permissions.includes("admin.users.read");
 
   const t = await getTranslations({ locale, namespace: "administrator.apiKeys" });
 
@@ -40,6 +42,7 @@ export default async function AdministratorApiKeysPage({
       <AdministratorApiKeysGrid
         locale={locale}
         canManage={canManage}
+        canReadUsers={canReadUsers}
         headerActions={
           canManage ? (
             <Button asChild size="sm">

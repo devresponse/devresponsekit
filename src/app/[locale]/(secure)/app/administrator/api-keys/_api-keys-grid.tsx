@@ -15,8 +15,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
+import { PermittedLink } from "../_components/permitted-link";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
 
@@ -34,6 +34,9 @@ const API_KEY_STATUSES = ["active", "revoked"] as const;
  *
  * Secrets are never present in list data; rotation surfaces the new
  * plaintext exactly once through {@link ApiKeyRevealDialog}.
+ *
+ * The owner's email links to the user page only for a viewer who holds
+ * `admin.users.read`, that page's guard; otherwise it is plain text (F-67).
  */
 interface ApiKeyRow {
   id: string;
@@ -56,10 +59,12 @@ interface ApiKeyRow {
 export function AdministratorApiKeysGrid({
   locale,
   canManage,
+  canReadUsers,
   headerActions,
 }: {
   locale: string;
   canManage: boolean;
+  canReadUsers: boolean;
   headerActions?: ReactNode;
 }) {
   const t = useTranslations("administrator.apiKeys");
@@ -148,13 +153,16 @@ export function AdministratorApiKeysGrid({
         header: () => t("columns.owner"),
         cell: ({ row }) =>
           row.original.owner_email ? (
-            <LocaleLink
-              locale={locale}
-              href={`/app/administrator/users/${row.original.app_user_id}`}
-              className="text-primary text-xs underline-offset-4 hover:underline"
-            >
-              {row.original.owner_email}
-            </LocaleLink>
+            <span className="text-xs">
+              <PermittedLink
+                permitted={canReadUsers}
+                locale={locale}
+                href={`/app/administrator/users/${row.original.app_user_id}`}
+                className="text-primary underline-offset-4 hover:underline"
+              >
+                {row.original.owner_email}
+              </PermittedLink>
+            </span>
           ) : (
             <span className="text-muted-foreground text-xs">{row.original.app_user_id}</span>
           ),
@@ -233,7 +241,7 @@ export function AdministratorApiKeysGrid({
         ),
       },
     ],
-    [t, locale, format, canManage, onRotate, onRevoke],
+    [t, locale, format, canManage, canReadUsers, onRotate, onRevoke],
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(

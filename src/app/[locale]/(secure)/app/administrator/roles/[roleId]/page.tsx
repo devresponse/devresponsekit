@@ -57,6 +57,8 @@ export default async function AdministratorRoleDetailPage({
   const t = await getTranslations({ locale, namespace: "administrator.roles" });
 
   const canUpdate = guard.access.permissions.includes("admin.roles.update");
+  // F-67: each member links to the user page, guarded on `admin.users.read`.
+  const canReadUsers = guard.access.permissions.includes("admin.users.read");
 
   return (
     <section className="space-y-4 p-6">
@@ -83,6 +85,7 @@ export default async function AdministratorRoleDetailPage({
           memberCount: role.memberCount,
         }}
         canUpdate={canUpdate}
+        canReadUsers={canReadUsers}
       />
     </section>
   );

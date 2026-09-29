@@ -51,6 +51,8 @@ function render(user: UserDetailJson, overrides: Partial<TabPermissions> = {}) {
       user={user}
       canReadSessions={false}
       canReadGroups={false}
+      canReadRoles={false}
+      canReadOrgs={false}
       canAssignRoles={false}
       canManageGroups={false}
       canUpdateMemberships={false}
@@ -63,6 +65,8 @@ function render(user: UserDetailJson, overrides: Partial<TabPermissions> = {}) {
 type TabPermissions = {
   canReadSessions: boolean;
   canReadGroups: boolean;
+  canReadRoles: boolean;
+  canReadOrgs: boolean;
   canAssignRoles: boolean;
   canManageGroups: boolean;
   canUpdateMemberships: boolean;

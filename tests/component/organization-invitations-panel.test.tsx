@@ -73,7 +73,7 @@ describe("OrganizationInvitationsPanel resend (F-149)", () => {
       return json({ items: [{ ...ROW, status }], page: 1, pageSize: 10, total: 1, sort: [] });
     });
     const user = userEvent.setup();
-    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate />);
+    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate canReadRoles />);
 
     await user.click(await screen.findByRole("button", { name: "Resend" }));
 
@@ -103,7 +103,7 @@ describe("OrganizationInvitationsPanel budgets (F-64)", () => {
       });
     });
     const user = userEvent.setup();
-    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate />);
+    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate canReadRoles />);
 
     await user.click(await screen.findByRole("button", { name: "Resend" }));
 
@@ -124,7 +124,7 @@ describe("OrganizationInvitationsPanel budgets (F-64)", () => {
       return json({ items: [], page: 1, pageSize: 10, total: 0, sort: [] });
     });
     const user = userEvent.setup();
-    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate />);
+    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate canReadRoles />);
 
     await user.click(await screen.findByRole("button", { name: "Invite member" }));
     await user.type(await screen.findByRole("textbox", { name: /Email address/ }), "ada@corp.test");
@@ -133,5 +133,43 @@ describe("OrganizationInvitationsPanel budgets (F-64)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Too many requests. Please slow down.",
     );
+  });
+});
+
+/**
+ * F-67: the invite dialog's role select reads GET /api/administrator/roles,
+ * which needs `admin.roles.read`; the organization page checks only
+ * `admin.orgs.*`. Without the permission the roles are neither requested nor
+ * offered, and the invitation is sent without one.
+ */
+describe("OrganizationInvitationsPanel role select (F-67)", () => {
+  it("neither reads nor offers roles without admin.roles.read", async () => {
+    fetchMock.mockImplementation(async (input: unknown, init?: { method?: string }) => {
+      const url = new URL(String(input), "http://test.local");
+      if (url.pathname === "/api/administrator/roles") return json({}, 403);
+      if (init?.method === "POST") return json({ ok: true }, 201);
+      return json({ items: [], page: 1, pageSize: 10, total: 0, sort: [] });
+    });
+    const user = userEvent.setup();
+    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate canReadRoles={false} />);
+
+    await user.click(await screen.findByRole("button", { name: "Invite member" }));
+    await user.type(await screen.findByRole("textbox", { name: /Email address/ }), "ada@corp.test");
+    expect(screen.queryByText("Role (optional)")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Roles couldn't be loaded/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send invitation" }));
+
+    expect(await screen.findByText("Invitation sent.")).toBeInTheDocument();
+    const paths = fetchMock.mock.calls.map(
+      ([input]) => new URL(String(input), "http://x").pathname,
+    );
+    expect(paths).not.toContain("/api/administrator/roles");
+    const post = fetchMock.mock.calls.find(
+      ([, init]) => (init as { method?: string } | undefined)?.method === "POST",
+    );
+    expect(JSON.parse((post![1] as { body: string }).body)).toEqual({
+      email: "ada@corp.test",
+      roleId: null,
+    });
   });
 });

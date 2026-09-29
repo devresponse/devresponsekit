@@ -68,6 +68,19 @@ areas (§8). It follows the same `FlexSidebar` pattern as the root secure shell
 and is filtered server-side by the caller's permissions, so an org admin only
 sees the areas they can act on.
 
+The top menubar (`_components/administrator-top-header.tsx`) lists the same
+areas plus quick-create actions. An action's gate equals its destination page's
+guard; **New organization** is also superadmin-only, because that page and
+`POST /organizations` both refuse a caller without cross-org reach (F-66).
+Inside the pages the same rule holds. Each page derives its actions, pickers and
+cross-links from the permission the API or destination page enforces and passes
+them to the client as booleans. An org admin holding `admin.orgs.create`,
+`.delete` or `.update`, or `admin.permissions.manage`, is therefore not offered
+organization create, delete or Settings edits, or permission-catalog writes, all
+of which need cross-org reach (F-66). A picker that reads another area's list
+is left out, and a link to another area's record (a user, role or organization)
+is plain text, for a viewer without that area's read permission (F-67).
+
 ### 2.5 Rate limiting of admin mutations
 
 Every Administrator **mutation** (POST / PATCH / PUT / DELETE) is throttled by a
@@ -1023,7 +1036,7 @@ Manages the tenant entity and its memberships.
 | --- | --- | --- |
 | `GET /organizations` | `admin.orgs.read` | List with member counts; an org admin sees only their own org row |
 | `POST /organizations` | `admin.orgs.create` | **Superadmin-only** (the tenant entity); `admin.organization.created` |
-| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below); `isDefault: true` moves the default here, `isDefault: false` on the current default returns 409 `organization_is_default` and emits `.update_blocked` (on a legacy extra default it clears that flag), and a DELETE of a flagged org returns 409 `organization_is_default` (F-40, see *The default organization* below) |
+| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | PATCH and DELETE are **Superadmin-only** (cross-org reach); `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below); `isDefault: true` moves the default here, `isDefault: false` on the current default returns 409 `organization_is_default` and emits `.update_blocked` (on a legacy extra default it clears that flag), and a DELETE of a flagged org returns 409 `organization_is_default` (F-40, see *The default organization* below) |
 | `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`). PATCH/DELETE are rank-gated (REVOKE-1, whole batch refused with 403) and may return 409 `last_superadmin` (REVOKE-2). DELETE also deletes each member's roles and group memberships in this org and is conferral-gated on them (F-12, §8.3) |
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` (POST: + **superadmin**) | IdP org links and email-domain routing; creating one is a platform-wide claim, so POST also requires cross-org reach (F-04) and validates the provider, lowercases an `email` domain and refuses consumer mailbox domains; `admin.organization.provider_bound` / `.provider_bind_denied` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
@@ -1331,7 +1344,7 @@ identical for every tenant.
 | --- | --- | --- |
 | `GET /permissions` | `admin.roles.read` | List with usage counts (any admin may read it to compose roles) |
 | `POST /permissions` | `admin.permissions.manage` | **Superadmin-only**; `admin.permission.created` |
-| `PATCH/DELETE /permissions/[id]` | `admin.permissions.manage` | `admin.permission.updated` / `.deleted`; delete is blocked while in use (`.delete_blocked`) |
+| `PATCH/DELETE /permissions/[id]` | `admin.permissions.manage` | **Superadmin-only**; `admin.permission.updated` / `.deleted`; delete is blocked while in use (`.delete_blocked`) |
 
 ### 8.6 Groups
 

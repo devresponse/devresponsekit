@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { AuthPolicyForm, type AuthPolicySettingsJson } from "@/components/admin/auth-policy-form";
@@ -24,8 +24,9 @@ export const dynamic = "force-dynamic";
  * `/api/administrator/organizations` for paginated data.
  *
  * The "New organization" CTA is hidden (not just disabled) when the caller
- * lacks `admin.orgs.create` so the screen never advertises an action
- * the user cannot complete.
+ * cannot create one, so the screen never advertises an action the user
+ * cannot complete. Creating and deleting an organization need cross-org
+ * reach as well as the key (F-66), exactly as the API decides.
  */
 export default async function AdministratorOrganizationsPage({
   params,
@@ -37,8 +38,14 @@ export default async function AdministratorOrganizationsPage({
   if (guard === "denied" || guard === "unauthenticated") {
     notFound();
   }
-  const canCreate = guard.access.permissions.includes("admin.orgs.create");
-  const canDelete = guard.access.permissions.includes("admin.orgs.delete");
+  // F-66: an organization is the tenant entity itself, so POST /organizations
+  // and DELETE /organizations/[id] refuse any caller without cross-org reach
+  // (403) after the key check passes. Deriving these from the keys alone
+  // offered every org admin on the seeded `admin.platform` role (which holds
+  // every `admin.*` key) a New button and a Delete action that always failed.
+  const reach = hasCrossOrgReach(guard.access);
+  const canCreate = reach && guard.access.permissions.includes("admin.orgs.create");
+  const canDelete = reach && guard.access.permissions.includes("admin.orgs.delete");
 
   // Platform sign-up defaults (0007): SUPERADMIN-only card — editing this row
   // changes the signup workflow of every org without its own override.

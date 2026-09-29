@@ -410,10 +410,10 @@ i18n: run `en` + `uk`; field labels and the created/updated line localize; the i
 
 - Route: `/app/administrator/users/[userId]` (Roles tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-roles-panel.tsx:41`
 - Purpose: Lists the application role assignments the user holds (role name, key, organization, assigned date). With the right permission, the operator can assign a role (dialog + picker) or remove one.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:39`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:75`, `_user-roles-panel.tsx:160`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:92`, `:191`).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:39`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:75`, `_user-roles-panel.tsx:160`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:92`, `:191`). The **Assign** button also needs `admin.roles.read`, because its picker lists roles from `GET /api/administrator/roles`; Remove does not. The role name links to the role page only for a holder of `admin.roles.read`, and the organization to its page only for a holder of `admin.orgs.read`; otherwise both are plain text (F-67).
 - Access matrix:
   - Member → 404 (page).
-  - Limited Admin → **sees the assignments list** (has `admin.users.read`) but **no** Assign button and **no** per-row Remove (lacks `admin.roles.assign`).
+  - Limited Admin → **sees the assignments list** (has `admin.users.read`) but **no** Assign button and **no** per-row Remove (lacks `admin.roles.assign`); role and organization names are plain text (lacks `admin.roles.read` and `admin.orgs.read`, F-67).
   - Org Admin / Superadmin → list + Assign + Remove. An org admin may assign only roles in their own org, and (privilege-escalation guard) only roles whose conferred permissions are a subset of their own (`api/.../app-roles/route.ts:165`).
 - Preconditions & test data: a user in ORG A; at least one assignable ORG A role. The `dev-init` Engineering group confers the `admin` role, so ORG A has assignable roles.
 
@@ -437,6 +437,7 @@ User stories
     |---|---|---|
     | 1 | Sign in as a Limited Admin; open a user's detail; click **Roles**. | The assignments grid renders (read works). |
     | 2 | Look for an **Assign** button and a per-row **Remove**. | Neither is present. |
+    | 3 | Look at the role and organization names. | Plain text, not links: this persona cannot open the role or organization pages (F-67). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -445,6 +446,7 @@ Negative & edge cases
 3. Remove is idempotent → removing an already-removed assignment still returns success (`api/.../app-roles/route.ts:190`).
 4. Inline error → a failed remove surfaces `role="alert"` text above the grid (`_user-roles-panel.tsx:184`).
 5. Superadmin, many orgs → sign in as Superadmin, open a user's Roles tab, click **Assign**, and in the picker type an org's name, then a role key. The picker lists the server's matches (role key, role name or the role's org name), offers only org-scoped roles, and shows "Showing N of M" while more match than are listed (F-41).
+6. A role holding `admin.users.read` + `admin.roles.assign` but not `admin.roles.read` (a custom role) → per-row **Remove** is offered, **Assign** is not, and the audit log records no `administrator.access.denied` for opening the tab (F-67).
 
 Accessibility: the assign dialog traps focus and closes on Esc; the picker is labelled; the destructive remove uses a confirm dialog. No axe violations.
 i18n: run `en` + `uk`; column headers, buttons, dialog text, and error messages localize; assigned dates localize.
@@ -500,10 +502,10 @@ i18n: run `en` + `uk`; title, buttons, dialog, empty and error text localize.
 
 - Route: `/app/administrator/users/[userId]` (Memberships tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-memberships-panel.tsx:28`
 - Purpose: Lists the user's organization memberships (org slug/name, status, source provider, joined date). With permission, the operator can remove a membership.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:35`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:77`, `_user-memberships-panel.tsx:111`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:326`).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:35`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:77`, `_user-memberships-panel.tsx:111`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:326`). The organization slug links to the organization page only for a holder of `admin.orgs.read`, that page's guard, and is plain text otherwise (F-67).
 - Access matrix:
   - Member → 404 (page).
-  - Limited Admin → sees the memberships list (`admin.users.read`) but **no** Remove action (lacks `admin.users.update`).
+  - Limited Admin → sees the memberships list (`admin.users.read`) but **no** Remove action (lacks `admin.users.update`), and org slugs are plain text (lacks `admin.orgs.read`, F-67).
   - Org Admin / Superadmin → list + Remove (org admin scoped to ORG A memberships).
 - Preconditions & test data: a cross-org member (`multi1@shared.local`) belongs to all three orgs — good for exercising multi-row lists and scope.
 
@@ -527,6 +529,7 @@ User stories
     |---|---|---|
     | 1 | Sign in as a Limited Admin; open a user's detail; click **Memberships**. | The memberships grid renders. |
     | 2 | Look for a per-row **Remove** action. | None is present. |
+    | 3 | Look at the organization column. | Slugs are plain text, not links (F-67). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -684,7 +687,7 @@ Legend: **view** = can open/read the screen; **act** = can perform the screen's 
 | Create user | `admin.users.create` | 404 | 404 | act | act |
 | User detail | `admin.users.read` | 404 | view | view | view |
 | — Overview tab | `admin.users.read` | 404 | view | view | view |
-| — Roles tab | read `admin.users.read`; act `admin.roles.assign` | 404 | view; no act | view + act | view + act |
+| — Roles tab | read `admin.users.read`; act `admin.roles.assign` (Assign also `admin.roles.read`) | 404 | view; no act; plain names (F-67) | view + act | view + act |
 | — Groups tab | read `admin.groups.read`; act `admin.groups.assign` | 404 | tab absent (#76); API 403 | view + act | view + act |
 | — Memberships tab | read `admin.users.read`; act `admin.users.update` | 404 | view; no act | view + act | view + act |
 | — Sessions tab | `admin.users.sessions` (read + act) | 404 | tab absent (#76); API 403 | view + act (shared-target caveat) | view + act |

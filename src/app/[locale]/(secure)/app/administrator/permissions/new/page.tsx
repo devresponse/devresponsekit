@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { NewPermissionForm } from "./_new-permission-form";
 
 export const dynamic = "force-dynamic";
@@ -8,10 +9,12 @@ export const dynamic = "force-dynamic";
 /**
  * Administrator → New permission page (docs/admin-manager.md §8.5).
  *
- * RSC entry point that gates on `admin.permissions.manage` and renders
- * a client-side form (`NewPermissionForm`), following the same
- * new-record pattern as `users/new`. The form `POST`s to
- * `/api/administrator/permissions`.
+ * RSC entry point that gates on `admin.permissions.manage` AND cross-org
+ * reach and renders a client-side form (`NewPermissionForm`), following the
+ * same new-record pattern as `users/new`. The form `POST`s to
+ * `/api/administrator/permissions`, which is SUPERADMIN-only, so the page
+ * guard must equal the mutation's authority (F-66, as review #73 did for the
+ * email-template editor).
  */
 export default async function AdministratorNewPermissionPage({
   params,
@@ -22,6 +25,10 @@ export default async function AdministratorNewPermissionPage({
 
   const guard = await checkAdminPermissionServer("admin.permissions.manage");
   if (guard === "denied" || guard === "unauthenticated") {
+    notFound();
+  }
+  // F-66: an org admin holding the key got a form whose every submit 403'd.
+  if (!hasCrossOrgReach(guard.access)) {
     notFound();
   }
 

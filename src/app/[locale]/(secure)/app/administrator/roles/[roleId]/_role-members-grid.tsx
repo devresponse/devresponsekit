@@ -2,9 +2,9 @@
 
 import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
+import { PermittedLink } from "../../_components/permitted-link";
 
 /**
  * Members tab for the role detail (docs/admin-manager.md §8.4 — Members).
@@ -12,7 +12,9 @@ import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
  * Reuses the shared `DataGrid` so URL-state, pagination and a11y
  * behave identically to the parent users grid. Each row's email is a
  * link into the user-detail page so the operator can pivot from
- * "users with role X" to the user's full surface in one click.
+ * "users with role X" to the user's full surface in one click, for a
+ * viewer who may open that page (`admin.users.read`); anyone else sees
+ * the email as plain text (F-67).
  */
 interface MemberRow {
   app_user_id: string;
@@ -24,7 +26,13 @@ interface MemberRow {
   created_at: string;
 }
 
-export function RoleMembersGrid({ roleId }: { roleId: string }) {
+export function RoleMembersGrid({
+  roleId,
+  canReadUsers,
+}: {
+  roleId: string;
+  canReadUsers: boolean;
+}) {
   const t = useTranslations("administrator.roles.members");
   const locale = useLocale();
   // F-37: the viewer's zone and date format.
@@ -37,13 +45,14 @@ export function RoleMembersGrid({ roleId }: { roleId: string }) {
         accessorKey: "primary_email",
         header: () => t("columns.email"),
         cell: ({ row }) => (
-          <LocaleLink
+          <PermittedLink
+            permitted={canReadUsers}
             locale={locale}
             href={`/app/administrator/users/${row.original.app_user_id}`}
             className="text-primary underline-offset-4 hover:underline"
           >
             {row.original.primary_email}
-          </LocaleLink>
+          </PermittedLink>
         ),
       },
       {
@@ -65,7 +74,7 @@ export function RoleMembersGrid({ roleId }: { roleId: string }) {
         cell: ({ row }) => format.date(row.original.created_at),
       },
     ],
-    [t, locale, format],
+    [t, locale, format, canReadUsers],
   );
 
   return (

@@ -7,6 +7,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
+import { PermittedLink } from "../_components/permitted-link";
 
 /** Membership statuses — the allow-listed `status` filter values. */
 const MEMBERSHIP_STATUSES = ["active", "pending_approval", "blocked", "suspended"] as const;
@@ -15,6 +16,8 @@ const MEMBERSHIP_STATUSES = ["active", "pending_approval", "blocked", "suspended
  * Client-side memberships grid (docs/admin-manager.md §8.3).
  *
  * Cross-org search for memberships with links to both user and org details.
+ * The page itself requires `admin.orgs.read`, the org page's guard; the user
+ * page needs `admin.users.read`, so without it the user is plain text (F-67).
  */
 interface MembershipRow {
   id: string;
@@ -28,7 +31,13 @@ interface MembershipRow {
   created_at: string;
 }
 
-export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
+export function AdministratorMembershipsGrid({
+  locale,
+  canReadUsers,
+}: {
+  locale: string;
+  canReadUsers: boolean;
+}) {
   const t = useTranslations("administrator.memberships");
   const tGrid = useTranslations("administrator.grid");
   // F-37: the viewer's zone and date format.
@@ -55,13 +64,14 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
         accessorKey: "user_display_name",
         header: () => t("columns.user"),
         cell: ({ row }) => (
-          <LocaleLink
+          <PermittedLink
+            permitted={canReadUsers}
             locale={locale}
             href={`/app/administrator/users/${row.original.app_user_id}`}
             className="text-primary underline-offset-4 hover:underline"
           >
             {row.original.user_display_name ?? row.original.app_user_id}
-          </LocaleLink>
+          </PermittedLink>
         ),
       },
       {
@@ -83,7 +93,7 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
         cell: ({ row }) => format.date(row.original.created_at),
       },
     ],
-    [t, locale, format],
+    [t, locale, format, canReadUsers],
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(

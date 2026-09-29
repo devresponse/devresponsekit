@@ -299,6 +299,26 @@ describe("administrator/users/[userId] page — per-tab permission gating (revie
       false,
     );
   });
+
+  /**
+   * F-67 — inside the Roles and Memberships tabs, the role picker reads
+   * GET /roles and the role and organization names link to pages guarded on
+   * `admin.roles.read` / `admin.orgs.read`. The seeded Limited Admin holds
+   * neither, so the page passes both as false and the tabs render plain names.
+   */
+  it("passes the roles and organizations read permissions down, for the pickers and links", async () => {
+    const limited = await renderWith([
+      "admin.users.read",
+      "admin.users.manage",
+      "admin.audit.read",
+    ]);
+    expect(limited.canReadRoles).toBe(false);
+    expect(limited.canReadOrgs).toBe(false);
+
+    const full = await renderWith(["admin.users.read", "admin.roles.read", "admin.orgs.read"]);
+    expect(full.canReadRoles).toBe(true);
+    expect(full.canReadOrgs).toBe(true);
+  });
 });
 
 /**

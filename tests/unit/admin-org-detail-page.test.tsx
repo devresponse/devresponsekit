@@ -21,6 +21,7 @@ const notFoundMock = vi.fn(() => {
 const checkAdminPermissionServer = vi.fn();
 const canAccessOrg = vi.fn();
 const isSuperadmin = vi.fn();
+const hasCrossOrgReach = vi.fn();
 const getOrgAuthSettingsRow = vi.fn();
 const loadOrgOrThrow = vi.fn();
 const getDefaultOrganization = vi.fn();
@@ -35,6 +36,7 @@ vi.mock("@/lib/admin/permissions.server", () => ({
 vi.mock("@/lib/admin/access-scope.server", () => ({
   canAccessOrg: (...a: unknown[]) => canAccessOrg(...a),
   isSuperadmin: (...a: unknown[]) => isSuperadmin(...a),
+  hasCrossOrgReach: (...a: unknown[]) => hasCrossOrgReach(...a),
 }));
 vi.mock("@/lib/admin/auth-settings.server", () => ({
   getOrgAuthSettingsRow: (...a: unknown[]) => getOrgAuthSettingsRow(...a),
@@ -105,6 +107,7 @@ beforeEach(async () => {
     checkAdminPermissionServer,
     canAccessOrg,
     isSuperadmin,
+    hasCrossOrgReach,
     getOrgAuthSettingsRow,
     loadOrgOrThrow,
     getDefaultOrganization,
@@ -114,6 +117,7 @@ beforeEach(async () => {
   checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-admin", access: ACCESS });
   canAccessOrg.mockReturnValue(true);
   isSuperadmin.mockReturnValue(false);
+  hasCrossOrgReach.mockReturnValue(false);
   loadOrgOrThrow.mockResolvedValue(ORG_ROW);
   // organizationId === null is the platform-default row.
   getOrgAuthSettingsRow.mockImplementation(async (id: string | null) =>
@@ -183,5 +187,52 @@ describe("administrator/organizations/[orgId] — the resolved default (F-40)", 
   it("an unflagged org is neither, and costs no lookup", async () => {
     expect(await orgProp()).toMatchObject({ isDefault: false, isResolvedDefault: false });
     expect(getDefaultOrganization).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-66: the Settings form PATCHes the organization row itself, and
+ * PATCH /organizations/[id] refuses any caller without cross-org reach (403)
+ * after its `admin.orgs.update` check passes. The page handed the Settings form
+ * the same `canUpdate` as the members, invitations and auth-policy panels, so
+ * every org admin on the seeded `admin.platform` role got an editable form
+ * whose saves all failed. F-67: the invite dialog lists roles from GET /roles
+ * and members link to the user page; the flags for both come from the
+ * permissions those need, which this page does not otherwise check.
+ */
+describe("administrator/organizations/[orgId] — viewer flags (F-66, F-67)", () => {
+  const tabsProps = async (permissions: string[]) => {
+    checkAdminPermissionServer.mockResolvedValue({
+      betterAuthUserId: "ba-admin",
+      access: { ...ACCESS, permissions },
+    });
+    return findTabsProps(await Page(params(ORG_ID)))!;
+  };
+
+  it("keeps the org-scoped writes but not the Settings form for an org admin holding admin.orgs.update", async () => {
+    const props = await tabsProps(["admin.orgs.read", "admin.orgs.update"]);
+    expect(props.canUpdate).toBe(true);
+    expect(props.canEditSettings).toBe(false);
+  });
+
+  it("lets a caller with cross-org reach edit Settings", async () => {
+    hasCrossOrgReach.mockReturnValue(true);
+    const props = await tabsProps(["admin.orgs.read", "admin.orgs.update", "superuser"]);
+    expect(props.canEditSettings).toBe(true);
+  });
+
+  it("still needs admin.orgs.update for Settings, reach or not", async () => {
+    hasCrossOrgReach.mockReturnValue(true);
+    expect((await tabsProps(["admin.orgs.read"])).canEditSettings).toBe(false);
+  });
+
+  it("derives the role-select and member-link flags from roles.read and users.read", async () => {
+    const without = await tabsProps(["admin.orgs.read", "admin.orgs.update"]);
+    expect(without.canReadRoles).toBe(false);
+    expect(without.canReadUsers).toBe(false);
+
+    const withBoth = await tabsProps(["admin.orgs.read", "admin.roles.read", "admin.users.read"]);
+    expect(withBoth.canReadRoles).toBe(true);
+    expect(withBoth.canReadUsers).toBe(true);
   });
 });

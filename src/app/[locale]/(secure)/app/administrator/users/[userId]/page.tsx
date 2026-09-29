@@ -26,7 +26,8 @@ export const dynamic = "force-dynamic";
  *      the permission ITS OWN API enforces (review #76) — Groups on
  *      `admin.groups.read`, Sessions on `admin.users.sessions`, Audit on
  *      `admin.audit.read` — so a permitted reader is never walked into a 403
- *      by clicking a tab. The flags are derived below and passed down.
+ *      by clicking a tab. The flags are derived below and passed down, and
+ *      so are the ones the tabs' pickers and cross-links need (F-67).
  */
 export default async function AdministratorUserDetailPage({
   params,
@@ -101,6 +102,13 @@ export default async function AdministratorUserDetailPage({
   // enforces, exactly as the Audit tab already does.
   const canReadSessions = guard.access.permissions.includes("admin.users.sessions");
   const canReadGroups = guard.access.permissions.includes("admin.groups.read");
+  // F-67, the same rule one level down: inside the Roles and Memberships tabs,
+  // the role picker reads GET /roles, and the role and organization names
+  // link to pages guarded on `admin.roles.read` and `admin.orgs.read`. The
+  // seeded Limited Admin (`admin.users.read` + `.manage`) held neither and
+  // clicked through to a 404 that wrote an access-denied row.
+  const canReadRoles = guard.access.permissions.includes("admin.roles.read");
+  const canReadOrgs = guard.access.permissions.includes("admin.orgs.read");
   const isSelfTarget = guard.betterAuthUserId === user.better_auth_user_id;
 
   // ISO-string-ify timestamps so the value crosses the RSC/client
@@ -145,6 +153,8 @@ export default async function AdministratorUserDetailPage({
         user={userJson}
         canReadSessions={canReadSessions}
         canReadGroups={canReadGroups}
+        canReadRoles={canReadRoles}
+        canReadOrgs={canReadOrgs}
         canAssignRoles={canAssignRoles}
         canManageGroups={canManageGroups}
         canUpdateMemberships={canUpdateMemberships}

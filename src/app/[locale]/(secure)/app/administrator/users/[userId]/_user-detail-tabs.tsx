@@ -23,7 +23,9 @@ import { UserAuditPanel } from "./_user-audit-panel";
  * `admin.users.sessions`, Groups needs `admin.groups.read`, Audit needs
  * `admin.audit.read`. The parent RSC derives each flag; showing the tab to
  * everyone did not leak anything (the API is the boundary) but walked a
- * permitted reader straight into a 403.
+ * permitted reader straight into a 403. The same holds inside a tab (F-67):
+ * `canReadRoles` and `canReadOrgs` decide whether the Roles tab offers the role
+ * picker and whether role and organization names link to their pages.
  */
 export interface UserDetailJson {
   id: string;
@@ -47,6 +49,8 @@ export function UserDetailTabs({
   user,
   canReadSessions,
   canReadGroups,
+  canReadRoles,
+  canReadOrgs,
   canAssignRoles,
   canManageGroups,
   canUpdateMemberships,
@@ -55,6 +59,8 @@ export function UserDetailTabs({
   user: UserDetailJson;
   canReadSessions: boolean;
   canReadGroups: boolean;
+  canReadRoles: boolean;
+  canReadOrgs: boolean;
   canAssignRoles: boolean;
   canManageGroups: boolean;
   canUpdateMemberships: boolean;
@@ -115,7 +121,12 @@ export function UserDetailTabs({
       </TabsContent>
 
       <TabsContent value="roles" className="mt-4">
-        <UserRolesPanel userId={user.id} canAssign={canAssignRoles} />
+        <UserRolesPanel
+          userId={user.id}
+          canAssign={canAssignRoles}
+          canReadRoles={canReadRoles}
+          canReadOrgs={canReadOrgs}
+        />
       </TabsContent>
       {canReadGroups ? (
         <TabsContent value="groups" className="mt-4">
@@ -123,7 +134,11 @@ export function UserDetailTabs({
         </TabsContent>
       ) : null}
       <TabsContent value="memberships" className="mt-4">
-        <UserMembershipsPanel userId={user.id} canUpdate={canUpdateMemberships} />
+        <UserMembershipsPanel
+          userId={user.id}
+          canUpdate={canUpdateMemberships}
+          canReadOrgs={canReadOrgs}
+        />
       </TabsContent>
 
       {canReadSessions ? (

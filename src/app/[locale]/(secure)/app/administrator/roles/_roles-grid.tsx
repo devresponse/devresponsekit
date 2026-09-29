@@ -10,6 +10,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
+import { PermittedLink } from "../_components/permitted-link";
 
 /** Role scopes — the allow-listed `scope` filter values. */
 const ROLE_SCOPES = ["global", "org"] as const;
@@ -22,7 +23,9 @@ const ROLE_SCOPES = ["global", "org"] as const;
  * / "Duplicate" actions are inline buttons gated by the caller's
  * permissions. Per-row destructive actions go through a confirm prompt
  * and surface the canonical `role_in_use` 409 inline so the user
- * immediately sees why a delete was refused.
+ * immediately sees why a delete was refused. A role's organization links to
+ * its page only for a viewer who holds `admin.orgs.read`, that page's guard;
+ * otherwise it is plain text (F-67).
  */
 interface RoleRow {
   id: string;
@@ -40,11 +43,13 @@ export function AdministratorRolesGrid({
   locale,
   canDelete,
   canDuplicate,
+  canReadOrgs,
   headerActions,
 }: {
   locale: string;
   canDelete: boolean;
   canDuplicate: boolean;
+  canReadOrgs: boolean;
   headerActions?: ReactNode;
 }) {
   const t = useTranslations("administrator.roles");
@@ -152,13 +157,14 @@ export function AdministratorRolesGrid({
         // (e.g. four "admin / Administrator" rows). Global roles have no org.
         cell: ({ row }) =>
           row.original.organization_id && row.original.organization_name ? (
-            <LocaleLink
+            <PermittedLink
+              permitted={canReadOrgs}
               locale={locale}
               href={`/app/administrator/organizations/${row.original.organization_id}`}
               className="text-primary underline-offset-4 hover:underline"
             >
               {row.original.organization_name}
-            </LocaleLink>
+            </PermittedLink>
           ) : (
             <span className="text-muted-foreground">—</span>
           ),
@@ -219,7 +225,7 @@ export function AdministratorRolesGrid({
           ]
         : []),
     ],
-    [t, locale, format, canDelete, canDuplicate, onDelete, onDuplicate],
+    [t, locale, format, canDelete, canDuplicate, canReadOrgs, onDelete, onDuplicate],
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { NewOrganizationForm } from "./_new-organization-form";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,9 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/organizations/new
  *
  * Server entry for the create-organization form (docs/admin-manager.md §8.2).
- * Gated on `admin.orgs.create`.
+ * Gated on `admin.orgs.create` AND cross-org reach: the POST this form drives
+ * is SUPERADMIN-only, so the page guard must equal the mutation's authority
+ * (F-66, as review #73 did for the email-template editor).
  */
 export default async function AdministratorNewOrganizationPage({
   params,
@@ -19,6 +22,11 @@ export default async function AdministratorNewOrganizationPage({
   const { locale } = await params;
   const guard = await checkAdminPermissionServer("admin.orgs.create");
   if (guard === "denied" || guard === "unauthenticated") {
+    notFound();
+  }
+  // F-66: an org admin holding the key got a form whose every submit 403'd.
+  // notFound() (not 403), like the rest of the admin tree.
+  if (!hasCrossOrgReach(guard.access)) {
     notFound();
   }
 

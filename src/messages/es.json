@@ -333,6 +333,7 @@
         "saving": "Guardando…",
         "saved": "Roles actualizados.",
         "noResults": "No hay roles coincidentes.",
+        "catalogHidden": "El catálogo de roles de la organización no se muestra: requiere permiso para leer roles.",
         "errorToast": "No se pudieron actualizar los roles.",
         "forbidden": "Solo puede añadir o quitar roles cuyos permisos usted mismo tenga."
       },

@@ -24,6 +24,7 @@ const auditMock = vi.fn();
 const logErrMock = vi.fn();
 const captureMock = vi.fn();
 const signerConfigured = vi.hoisted(() => ({ value: true }));
+const selfIssuer = vi.hoisted(() => ({ value: true }));
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -48,6 +49,7 @@ vi.mock("@/lib/observability/pre-auth-refusal.server", () => ({
 }));
 vi.mock("@/lib/jwt-handoff.server", () => ({
   isSsoHandoffSignerConfigured: () => signerConfigured.value,
+  isSsoHandoffSelfIssuer: () => signerConfigured.value && selfIssuer.value,
 }));
 vi.mock("@/lib/observability/logger.server", () => ({
   logServerError: (...args: unknown[]) => logErrMock(...args),
@@ -107,6 +109,7 @@ beforeEach(async () => {
   logErrMock.mockReset();
   captureMock.mockReset();
   signerConfigured.value = true;
+  selfIssuer.value = true;
   shared.keys.length = 0;
   shared.limiter = undefined;
   // A fresh module graph per test also resets the in-memory limiter buckets.
@@ -287,6 +290,39 @@ describe("GET /api/sso/launch — no signing key configured (review #5)", () => 
     const res = await GET(makeRequest("http://localhost/api/sso/launch?applicationId=portal"));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("/sign-in");
+  });
+});
+
+describe("GET /api/sso/launch — a key on a deployment that is not the issuer (F-80)", () => {
+  it("fails closed with 503 sso_not_configured under its own reason, before any mint", async () => {
+    // An env copied from the kit's onto a satellite: the key is there, but
+    // SSO_HANDOFF_ISSUER names another origin, so whatever it signed would
+    // carry the kit's `iss` and every sibling would accept it.
+    selfIssuer.value = false;
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+
+    const res = await GET(
+      makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=en"),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "sso_not_configured" });
+    expect(createRedirect).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "sso.launch.failure",
+        outcome: "error",
+        reason: "not_the_issuer",
+        actorBetterAuthUserId: "ba-1",
+        targetApplicationId: "portal",
+      }),
+    );
+    const requestId = res.headers.get("x-request-id");
+    expect(logErrMock).toHaveBeenCalledWith(
+      "sso.launch.config_error",
+      expect.objectContaining({ reason: "not_the_issuer", requestId }),
+    );
+    expect(captureMock).toHaveBeenCalledWith(expect.any(Error), { requestId, status: 503 });
   });
 });
 

@@ -583,6 +583,87 @@ describe("PATCH /api/administrator/enterprise-apps/:id", () => {
   });
 });
 
+/**
+ * F-83: the catalog must never make this deployment an SSO target of itself.
+ * Its consume route accepts a handoff for its own SSO_HANDOFF_APPLICATION_ID
+ * under `<prefix>:<id>`, so a row carrying both let any member mint a fresh
+ * session past the absolute-lifetime cap, or send a victim a one-click consume
+ * link that swapped their session for the sender's account. The suite's env
+ * (tests/setup/vitest.setup.ts) makes this deployment `portal` under
+ * `devresponse-app`.
+ */
+describe("enterprise apps — this deployment is never its own SSO target (F-83)", () => {
+  const OWN_ORIGIN = "https://primary.example.com";
+
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue(null); // no OTHER row owns anything
+    insertExecute.mockResolvedValue(undefined);
+    updateExecute.mockResolvedValue(undefined);
+    vi.stubEnv("BETTER_AUTH_URL", OWN_ORIGIN);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  const create = (overrides: Record<string, unknown>) =>
+    POST(
+      jsonReq({
+        id: "docs",
+        label: "Docs",
+        origin: "https://docs.example.com",
+        subdomain: "docs",
+        sso_audience: "devresponse-app:docs",
+        ...overrides,
+      }),
+    );
+
+  it("refuses to create a row under this deployment's own application id", async () => {
+    const res = await create({ id: "portal", sso_audience: "devresponse-app:portal-x" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "id_taken" });
+    expect(insertExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses this deployment's own audience on create, though no row owns it", async () => {
+    const res = await create({ sso_audience: "devresponse-app:portal" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "audience_taken" });
+    expect(insertExecute).not.toHaveBeenCalled();
+  });
+
+  it("refuses this deployment's own origin on create", async () => {
+    const res = await create({ origin: OWN_ORIGIN });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "origin_not_allowed" });
+    expect(insertExecute).not.toHaveBeenCalled();
+  });
+
+  it("still creates an ordinary row (control)", async () => {
+    expect((await create({})).status).toBe(201);
+  });
+
+  it("refuses to move an existing row's audience onto this deployment's own", async () => {
+    selectFirst.mockResolvedValueOnce({ id: "docs", organization_id: null }); // existing row
+    const res = await PATCH(idReq("docs", { sso_audience: "devresponse-app:portal" }), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "audience_taken" });
+    expect(updateExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move an existing row's origin onto this deployment's own", async () => {
+    const res = await PATCH(idReq("docs", { origin: OWN_ORIGIN }), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "origin_not_allowed" });
+    expect(updateExecute).not.toHaveBeenCalled();
+  });
+});
+
 describe("DELETE /api/administrator/enterprise-apps/:id", () => {
   it("returns 403 when caller lacks admin.apps.manage", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });

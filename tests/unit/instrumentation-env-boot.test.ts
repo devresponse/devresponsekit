@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * runs in the Node runtime before the F-22 key import and before any
  * process-level handler, it throws (so Next fails startup) with the key and
  * its rule but never the value, and it is skipped during `next build` and in
- * the Edge runtime.
+ * the Edge runtime. F-80: the SSO handoff key check runs right after the key
+ * import, and a key on a deployment that is not the issuer fails boot.
  */
 describe("instrumentation register() validates the server env (F-26)", () => {
   const order: string[] = [];
@@ -22,6 +23,9 @@ describe("instrumentation register() validates the server env (F-26)", () => {
     vi.doMock("@/sentry.edge.config", () => ({}));
     vi.doMock("@/lib/env-signing-keys.server", () => ({
       assertSigningKeysImport: () => order.push("keys"),
+    }));
+    vi.doMock("@/lib/jwt-handoff.server", () => ({
+      assertSsoHandoffSignerIsIssuer: () => order.push("sso-issuer"),
     }));
     vi.doMock("@/lib/shutdown.server", () => ({
       registerGracefulShutdown: () => order.push("shutdown"),
@@ -37,6 +41,7 @@ describe("instrumentation register() validates the server env (F-26)", () => {
     vi.doUnmock("@/sentry.server.config");
     vi.doUnmock("@/sentry.edge.config");
     vi.doUnmock("@/lib/env-signing-keys.server");
+    vi.doUnmock("@/lib/jwt-handoff.server");
     vi.doUnmock("@/lib/shutdown.server");
     vi.doUnmock("@/lib/process-errors.server");
     vi.doUnmock("@/lib/client-ip-source-warning.server");
@@ -55,7 +60,7 @@ describe("instrumentation register() validates the server env (F-26)", () => {
     nodeServer();
     const { register } = await import("@/instrumentation");
     await register();
-    expect(order).toEqual(["env", "keys", "shutdown", "process-errors", "client-ip"]);
+    expect(order).toEqual(["env", "keys", "sso-issuer", "shutdown", "process-errors", "client-ip"]);
   });
 
   it("throws on an invalid env, naming the key and never the value, and nothing after it runs", async () => {
@@ -81,7 +86,27 @@ describe("instrumentation register() validates the server env (F-26)", () => {
     nodeServer();
     const { register } = await import("@/instrumentation");
     await register();
-    expect(order).toEqual(["keys", "shutdown", "process-errors", "client-ip"]);
+    expect(order).toEqual(["keys", "sso-issuer", "shutdown", "process-errors", "client-ip"]);
+  });
+
+  it("fails boot when the SSO handoff key sits on a deployment that is not the issuer (F-80)", async () => {
+    nodeServer();
+    // The real check: the key is the suite's ephemeral one, and this
+    // deployment's own origin is no longer the issuer's.
+    vi.doUnmock("@/lib/jwt-handoff.server");
+    vi.stubEnv("BETTER_AUTH_URL", "https://satellite.example.com");
+    const { register } = await import("@/instrumentation");
+    const failure = await register().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /^SSO_HANDOFF_PRIVATE_KEY is set, but this deployment is not the issuer/,
+    );
+    // Never the key material.
+    expect((failure as Error).message).not.toContain(process.env.SSO_HANDOFF_PRIVATE_KEY!);
+    expect(order).toEqual(["keys"]);
   });
 
   it("skips it during `next build` and in the Edge runtime", async () => {

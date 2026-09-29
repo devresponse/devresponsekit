@@ -29,9 +29,17 @@ export function isSsoAudienceUniqueViolation(err: unknown): boolean {
  * Two apps sharing an audience could be registered to accept each other's
  * tokens by copy-paste or by an org admin shadowing another org's satellite.
  *
+ * This deployment's OWN audience, `<SSO_HANDOFF_AUDIENCE_PREFIX>:<SSO_HANDOFF_APPLICATION_ID>`
+ * (what its `/api/sso/consume` accepts), is always taken, on create and on
+ * update alike (F-83): a row carrying it makes the deployment an SSO target of
+ * itself (see `isOwnSsoApplicationId`).
+ *
  * @param excludeId the app being updated (its own row is not a conflict).
  */
 export async function isSsoAudienceTaken(audience: string, excludeId?: string): Promise<boolean> {
+  const prefix = process.env.SSO_HANDOFF_AUDIENCE_PREFIX;
+  const applicationId = process.env.SSO_HANDOFF_APPLICATION_ID;
+  if (prefix && applicationId && audience === `${prefix}:${applicationId}`) return true;
   let query = db
     .selectFrom("app_enterprise_applications")
     .select(["id"])

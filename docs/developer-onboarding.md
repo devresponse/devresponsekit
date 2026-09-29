@@ -47,7 +47,7 @@ Then set, at minimum, `BETTER_AUTH_SECRET` in `.env` to a strong random value (t
 openssl rand -base64 32
 ```
 
-To *launch* SSO handoffs locally (the satellite rig, or the SSO e2e) the primary also needs `SSO_HANDOFF_PRIVATE_KEY` — an Ed25519 private JWK:
+To *launch* SSO handoffs locally (the satellite rig, or the SSO e2e) the primary also needs `SSO_HANDOFF_PRIVATE_KEY` — an Ed25519 private JWK — and then `SSO_HANDOFF_ISSUER` must be its own `BETTER_AUTH_URL` origin, not the demo primary `.env.example` names; the dev server refuses to start with the key otherwise (F-80):
 
 ```bash
 node -e "import('jose').then(async j=>{const {privateKey}=await j.generateKeyPair('EdDSA',{extractable:true});console.log(JSON.stringify(await j.exportJWK(privateKey)))})"
@@ -258,7 +258,7 @@ To debug cross-subdomain SSO (or any multi-app flow) on one machine, use the **s
 | App can't reach the database | Is `pnpm db:up` running? Is the port `5444` (not 5432)? Check `DATABASE_URL`. |
 | Boot error about a secret/JWK | `BETTER_AUTH_SECRET` unset, `API_JWT_ENABLED=1` without `API_JWT_PRIVATE_KEY`, or an Ed25519 key (`SSO_HANDOFF_*` / `API_JWT_*`, previous keys included) that cannot be used: the schema checks each one's shape and the Node boot hook imports it, so a truncated value, a stray quote or a mismatched `x` fails here. The error names the variable and the rule. |
 | Boot error about a URL | An origin-valued variable (`BETTER_AUTH_URL`, `SSO_HANDOFF_ISSUER`, `ADMIN_TRUSTED_ORIGINS`, …) is not an http(s) origin, or `COOKIE_DOMAIN` does not cover `BETTER_AUTH_URL`. `http://localhost:3000` is always fine; see [Configuration §1](./configuration.md#1-how-configuration-is-loaded). |
-| `/api/sso/launch` returns `503 sso_not_configured` | No `SSO_HANDOFF_PRIVATE_KEY` on this instance — it can consume handoffs but not issue them. |
+| `/api/sso/launch` returns `503 sso_not_configured` | No `SSO_HANDOFF_PRIVATE_KEY` on this instance — it can consume handoffs but not issue them. (A key under an `SSO_HANDOFF_ISSUER` that is not this instance's origin fails boot instead, F-80.) |
 | `403`/`404` on an admin call you expected to work | Tenant scope — a non-superadmin only sees their own org; out-of-scope resources return **404 by design**. |
 | Tables ended up in `public` instead of `auth` | `DB_SEARCH_PATH_VIA_OPTIONS=0` is set locally — a pooler-only setting. Unset it, drop the strays, re-run `pnpm db:reset:reload` (see §9.2). |
 | Locale-parity test fails | A new text key is missing from one of the 8 locale files (en, fr, es, uk, pt, zh, hi, ja). Add it everywhere. |

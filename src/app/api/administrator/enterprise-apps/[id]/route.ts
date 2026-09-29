@@ -116,6 +116,7 @@ export const PATCH = withAdminRoute(async function PATCH(
     return adminErrorResponse("invalid_origin", 400, request);
   }
   // P2-5: confine the SSO redirect target to the trusted host allow-list.
+  // F-83: never this deployment's own origin.
   if (input.origin !== undefined && !isAllowedEnterpriseOrigin(input.origin)) {
     return adminErrorResponse("origin_not_allowed", 400, request);
   }
@@ -144,6 +145,8 @@ export const PATCH = withAdminRoute(async function PATCH(
     });
   }
   // Review #15: an audience may not be moved onto a value another app owns.
+  // F-83: nor onto this deployment's own audience. The id cannot change here,
+  // so this is how an existing row could still become a self-target.
   if (input.sso_audience !== undefined && (await isSsoAudienceTaken(input.sso_audience, id))) {
     return adminErrorResponse("audience_taken", 409, request);
   }

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   allowedOriginSuffixes,
   isAllowedEnterpriseOrigin,
@@ -47,6 +47,17 @@ describe("isAllowedEnterpriseOrigin", () => {
   it("fails closed when nothing is configured", () => {
     expect(allowedOriginSuffixes()).toEqual([]);
     expect(isAllowedEnterpriseOrigin("https://app.devresponse.com")).toBe(false);
+  });
+
+  it("never allows this deployment's own origin, even under an allowed suffix (F-83)", () => {
+    process.env.SSO_ALLOWED_ORIGIN_SUFFIXES = "devresponse.com";
+    vi.stubEnv("BETTER_AUTH_URL", "https://app.devresponse.com/");
+    try {
+      expect(isAllowedEnterpriseOrigin("https://app.devresponse.com")).toBe(false);
+      expect(isAllowedEnterpriseOrigin("https://portal.devresponse.com")).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

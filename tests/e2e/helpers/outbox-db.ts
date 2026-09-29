@@ -16,6 +16,9 @@ import { Pool } from "pg";
  * It also resets a shared rate-limit bucket a spec spends as the seeded admin
  * ({@link resetSharedRateLimitBucket}).
  *
+ * The same trust boundary lets the SSO e2e write the one catalog row the admin
+ * API refuses on purpose (F-83), {@link ensureSelfTargetApp}.
+ *
  * Mirrors `src/db/schema-config.ts`: every table lives in `DB_SCHEMA`
  * (default `auth`), applied through the libpq `search_path` option.
  */
@@ -91,5 +94,31 @@ export async function resetSharedRateLimitBucket(input: {
     `delete from app_rate_limits
       where key in (select $1::text || ':' || id from "user" where lower(email) = lower($2))`,
     [input.scope, input.email],
+  );
+}
+
+/**
+ * Writes the enterprise-app row that makes this deployment an SSO target of
+ * ITSELF, unless it exists: its `id` is the deployment's own
+ * SSO_HANDOFF_APPLICATION_ID and its audience the deployment's own. A single
+ * instance can only round-trip a handoff through such a row, and the admin API
+ * refuses to create one (F-83: in production it would let a member reset the
+ * session lifetime cap or send a one-click session-swap link), so the e2e
+ * writes it here, as the local seed writes its demo rows. A global row
+ * (organization_id null), as the admin API used to create it.
+ */
+export async function ensureSelfTargetApp(app: {
+  id: string;
+  label: string;
+  origin: string;
+  subdomain: string;
+  ssoAudience: string;
+}): Promise<void> {
+  await getPool().query(
+    `insert into app_enterprise_applications
+       (id, label, origin, subdomain, sso_audience, status, sort_order)
+     values ($1, $2, $3, $4, $5, 'available', 100)
+     on conflict (id) do nothing`,
+    [app.id, app.label, app.origin, app.subdomain, app.ssoAudience],
   );
 }

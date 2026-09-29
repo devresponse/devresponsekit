@@ -158,9 +158,10 @@ function privateKeyEnv(): string | undefined {
 }
 
 /**
- * True when THIS deployment can issue handoffs (a private key is configured).
- * Launch fails closed with a clear error when false; SSO consumption does not
- * need it.
+ * True when a handoff signing key is configured on THIS deployment. Launch
+ * fails closed with a clear error when false; SSO consumption does not need
+ * it. A key alone is not enough to sign: the deployment must also be the
+ * issuer ({@link isSsoHandoffSelfIssuer}, F-80).
  */
 export function isSsoHandoffSignerConfigured(): boolean {
   return privateKeyEnv() !== undefined;
@@ -274,6 +275,31 @@ export function isSsoHandoffSelfIssuer(): boolean {
 }
 
 /**
+ * Refuses a signing key on a deployment that is not the issuer (F-80). Every
+ * consumer accepts what the key signs under `iss` = SSO_HANDOFF_ISSUER, so a
+ * satellite that holds it (an environment copied from the kit's, a key set by
+ * hand) could mint handoffs for any user into every sibling, which is the
+ * lateral forgery review #5 removed. The only guard used to be drk-deploy's
+ * release check, which a hand deploy or a preview never passes through.
+ *
+ * Called at boot (the kit's `src/instrumentation.ts`, so such a deployment
+ * fails to start) and again by {@link signSsoHandoff}, the signing chokepoint.
+ * It lives here rather than in the env schema because the satellite forks copy
+ * this file byte for byte and their schemas do not declare the key. A no-op on
+ * a consumer, which holds no key.
+ */
+export function assertSsoHandoffSignerIsIssuer(): void {
+  if (isSsoHandoffSignerConfigured() && !isSsoHandoffSelfIssuer()) {
+    throw new Error(
+      "SSO_HANDOFF_PRIVATE_KEY is set, but this deployment is not the issuer: SSO_HANDOFF_ISSUER's origin " +
+        "is not this deployment's own (BETTER_AUTH_URL). Only the issuer may hold the handoff signing key. " +
+        "Remove it here, and rotate the issuer's key if it was copied from there; or, if this IS the issuer, " +
+        "set SSO_HANDOFF_ISSUER to its own origin",
+    );
+  }
+}
+
+/**
  * The key resolver `jwtVerify` selects from by the token's `kid`:
  *   - self-issuer → a local JWK Set (current + optional previous key);
  *   - otherwise   → the issuer's published JWKS at
@@ -321,7 +347,9 @@ async function getVerificationKeys(): Promise<JWTVerifyGetKey> {
  *   - The `aud` claim MUST exactly match the target application's
  *     `sso_audience`; the consumer rejects mismatches.
  *   - Only a deployment holding `SSO_HANDOFF_PRIVATE_KEY` can sign; every
- *     other party (every satellite) holds public material only.
+ *     other party (every satellite) holds public material only. And it signs
+ *     only as ITSELF: a key-holder that is not the issuer SSO_HANDOFF_ISSUER
+ *     names is refused (F-80, {@link assertSsoHandoffSignerIsIssuer}).
  */
 export async function signSsoHandoff(input: SignSsoHandoffInput): Promise<string> {
   const issuer = issuerEnv();
@@ -336,6 +364,9 @@ export async function signSsoHandoff(input: SignSsoHandoffInput): Promise<string
       "SSO_HANDOFF_ISSUER must be exactly an http(s) origin (scheme://host[:port], no trailing slash) to sign handoffs",
     );
   }
+  // F-80: sign as the issuer only when this deployment IS the issuer, whatever
+  // the caller checked and whether or not the boot check ran.
+  assertSsoHandoffSignerIsIssuer();
   const { privateKey, kid } = await getSignerMaterial();
   const ttl = clampSsoHandoffTtl(input.ttlSeconds);
 

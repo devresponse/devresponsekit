@@ -91,16 +91,51 @@ function warnRejectedEntries(rejected: string[]): void {
  * True when `origin` is a valid HTTPS origin AND its host falls within the
  * allow-list. **Fails closed** when nothing is configured — register no
  * app rather than trust an arbitrary origin.
+ *
+ * This deployment's own origin (`BETTER_AUTH_URL`) is never a target, even
+ * under an allowed suffix (F-83): the catalog lists applications this
+ * deployment hands users OFF to, and the primary is not one of them.
  */
 export function isAllowedEnterpriseOrigin(origin: string): boolean {
   if (!isHttpsOrigin(origin)) return false;
   let host: string;
+  let parsed: string;
   try {
-    host = new URL(origin).hostname.toLowerCase();
+    const url = new URL(origin);
+    host = url.hostname.toLowerCase();
+    parsed = url.origin;
   } catch {
     return false;
   }
+  if (parsed === ownOrigin()) return false;
   const suffixes = allowedOriginSuffixes();
   if (suffixes.length === 0) return false;
   return suffixes.some((s) => host === s || host.endsWith(`.${s}`));
+}
+
+/** This deployment's own origin, from `BETTER_AUTH_URL`, or null when unusable. */
+function ownOrigin(): string | null {
+  try {
+    const url = new URL(process.env.BETTER_AUTH_URL ?? "");
+    // Any other scheme's `origin` is the STRING "null" (F-22).
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `id` is this deployment's own `SSO_HANDOFF_APPLICATION_ID` (F-83).
+ *
+ * The consume route accepts a handoff whose `targetApplicationId` is that id
+ * and whose audience is `<prefix>:<id>`, so a catalog row carrying both makes
+ * this deployment a target of itself: any member can launch it for a fresh
+ * session past the absolute-lifetime cap, or send a victim a consume link
+ * that swaps their session for the sender's account (login CSRF behind one
+ * click). Registration refuses the id here, and the audience in
+ * `isSsoAudienceTaken`; the id cannot change after creation.
+ */
+export function isOwnSsoApplicationId(id: string): boolean {
+  const own = process.env.SSO_HANDOFF_APPLICATION_ID;
+  return Boolean(own) && id === own;
 }

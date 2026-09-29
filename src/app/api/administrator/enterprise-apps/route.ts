@@ -6,7 +6,11 @@ import { isForeignKeyViolation, isUniqueViolation } from "@/db/pg-errors";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { createEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
-import { isAllowedEnterpriseOrigin, isHttpsOrigin } from "@/lib/admin/enterprise-apps.server";
+import {
+  isAllowedEnterpriseOrigin,
+  isHttpsOrigin,
+  isOwnSsoApplicationId,
+} from "@/lib/admin/enterprise-apps.server";
 import {
   isSsoAudienceTaken,
   isSsoAudienceUniqueViolation,
@@ -138,12 +142,15 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  * `admin.apps.manage`.
  *
  * Body fields:
- *   - id: text, app id (lowercase, hyphens/dots/underscores)
+ *   - id: text, app id (lowercase, hyphens/dots/underscores); never this
+ *     deployment's own `SSO_HANDOFF_APPLICATION_ID` (409 `id_taken`, F-83)
  *   - label: text, human-readable label
  *   - description: optional text
- *   - origin: HTTPS origin (scheme + authority only, §8.7)
+ *   - origin: HTTPS origin (scheme + authority only, §8.7); never this
+ *     deployment's own origin (400 `origin_not_allowed`, F-83)
  *   - subdomain: hostname-safe DNS label (§8.7)
- *   - sso_audience: text; MUST be unique across the catalog (409 `audience_taken`)
+ *   - sso_audience: text; MUST be unique across the catalog and differ from
+ *     this deployment's own audience (409 `audience_taken`, F-83)
  *   - status: "available" | "disabled" (default "available")
  *   - sort_order: integer (default 100)
  *   - organization_id: optional UUID scope (null = global)
@@ -192,12 +199,19 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     return adminErrorResponse("invalid_origin", 400, request);
   }
   // P2-5: the origin drives the SSO handoff redirect target — confine it to
-  // the trusted host allow-list, not any HTTPS URL.
+  // the trusted host allow-list, not any HTTPS URL. F-83: never this
+  // deployment's own origin.
   if (!isAllowedEnterpriseOrigin(input.origin)) {
     return adminErrorResponse("origin_not_allowed", 400, request);
   }
+  // F-83: this deployment's own application id is taken by the deployment
+  // itself; a row under it would make the primary an SSO target of itself.
+  if (isOwnSsoApplicationId(input.id)) {
+    return adminErrorResponse("id_taken", 409, request);
+  }
   // Review #15: the audience is what a satellite's consume route trusts; two
   // rows sharing one would let a token minted for either app reach the other.
+  // F-83: this deployment's own audience counts as taken.
   if (await isSsoAudienceTaken(input.sso_audience)) {
     return adminErrorResponse("audience_taken", 409, request);
   }

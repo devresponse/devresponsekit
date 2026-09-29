@@ -125,7 +125,7 @@ i18n: run in `en` and `uk`; column headers, the Status filter options, the "Glob
 User stories
 
 - UAT-ADMIN-AEK-APPS-NEW-S1 — As an Org Admin, I want to register a new app, so that users in my org can launch it via SSO.
-  - Acceptance criteria: Given valid values, when I submit, then I am redirected to the new app's detail page; given the id is taken, then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:204`; form maps it at `_new-enterprise-app-form.tsx:80`).
+  - Acceptance criteria: Given valid values, when I submit, then I am redirected to the new app's detail page; given the id is taken, including this deployment's own application id (F-83), then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:204`; form maps it at `_new-enterprise-app-form.tsx:80`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -137,7 +137,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-NEW-S2 — As an Org Admin, I want the form to stop me submitting a non-HTTPS or untrusted origin, so that SSO redirects stay safe.
-  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:177`; mapped at `_new-enterprise-app-form.tsx:89`).
+  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, or is this deployment's own origin (F-83), then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:177`; mapped at `_new-enterprise-app-form.tsx:89`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|

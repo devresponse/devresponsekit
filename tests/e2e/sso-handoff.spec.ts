@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { ADMIN_API_HEADERS, SEED_ADMIN, signInAsSeedAdmin } from "./helpers/admin-auth";
+import { ensureSelfTargetApp } from "./helpers/outbox-db";
 
 /**
  * E2E — the cross-subdomain SSO handoff end to end against the real DB
@@ -16,7 +17,9 @@ import { ADMIN_API_HEADERS, SEED_ADMIN, signInAsSeedAdmin } from "./helpers/admi
  * nonce burn is predicated on that id. For a single-instance round trip the
  * registered app's `id` must therefore BE the deployment's application id. CI's
  * `browser` job sets `SSO_HANDOFF_APPLICATION_ID=portal` and
- * `SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app`, hence the values below.
+ * `SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app`, hence the values below. The
+ * admin API refuses exactly that row (F-83), so it is written to the database
+ * directly, and the refusal is asserted on the way.
  *
  * Signing (review #5): the token is EdDSA-signed with the ephemeral
  * `SSO_HANDOFF_PRIVATE_KEY` CI mints at runtime; because `SSO_HANDOFF_ISSUER`
@@ -53,33 +56,42 @@ test("sso handoff: the public JWKS is served, cacheable, and carries no private 
  * Ensures the destination app exists. The row's id is fixed (see above) and a
  * launched handoff leaves a nonce row referencing it, so the cleanup delete is
  * refused (`application_in_use`) and a previous test or project run may have
- * left the row behind — look it up first and only create when absent. Its
- * origin must fall under the configured SSO_ALLOWED_ORIGIN_SUFFIXES
- * (devresponse.com); no test here ever reaches that host.
+ * left the row behind — it is written only when absent. Its origin sits under
+ * the configured SSO_ALLOWED_ORIGIN_SUFFIXES (devresponse.com); no test here
+ * ever reaches that host.
+ *
+ * F-83: the admin API refuses this row (409 `id_taken`, the deployment's own
+ * id), whether or not it exists, so it goes in through the database.
  */
 async function ensurePortalApp(api: APIRequestContext): Promise<void> {
+  const refused = await api.post("/api/administrator/enterprise-apps", {
+    headers: ADMIN_API_HEADERS,
+    data: {
+      id: APP_ID,
+      label: "E2E SSO portal",
+      origin: PORTAL_ORIGIN,
+      subdomain: "portal",
+      sso_audience: AUDIENCE,
+      status: "available",
+    },
+  });
+  expect(refused.status(), await refused.text()).toBe(409);
+  expect(((await refused.json()) as { error: string }).error).toBe("id_taken");
+
+  await ensureSelfTargetApp({
+    id: APP_ID,
+    label: "E2E SSO portal",
+    origin: PORTAL_ORIGIN,
+    subdomain: "portal",
+    ssoAudience: AUDIENCE,
+  });
   const existingRes = await api.get(`/api/administrator/enterprise-apps/${APP_ID}`, {
     headers: ADMIN_API_HEADERS,
   });
-  if (existingRes.status() === 404) {
-    const createRes = await api.post("/api/administrator/enterprise-apps", {
-      headers: ADMIN_API_HEADERS,
-      data: {
-        id: APP_ID,
-        label: "E2E SSO portal",
-        origin: PORTAL_ORIGIN,
-        subdomain: "portal",
-        sso_audience: AUDIENCE,
-        status: "available",
-      },
-    });
-    expect(createRes.ok(), await createRes.text()).toBe(true);
-  } else {
-    expect(existingRes.ok(), await existingRes.text()).toBe(true);
-    const existing = (await existingRes.json()) as { sso_audience: string; origin: string };
-    expect(existing.sso_audience).toBe(AUDIENCE);
-    expect(existing.origin).toBe(PORTAL_ORIGIN);
-  }
+  expect(existingRes.ok(), await existingRes.text()).toBe(true);
+  const existing = (await existingRes.json()) as { sso_audience: string; origin: string };
+  expect(existing.sso_audience).toBe(AUDIENCE);
+  expect(existing.origin).toBe(PORTAL_ORIGIN);
 }
 
 /**
@@ -98,20 +110,30 @@ test("sso handoff: launch -> consume -> replay rejected", async ({ page }, testI
   await ensurePortalApp(page.request);
 
   const foreignSlug = `e2e-sso-foreign-${testInfo.project.name}-${Date.now()}`;
+  const foreignAudience = `devresponse-app:${foreignSlug}`;
+  const foreignApp = (id: string) => ({
+    id,
+    label: `E2E SSO foreign ${id}`,
+    origin: `https://${id}.devresponse.com`,
+    subdomain: id,
+    sso_audience: foreignAudience,
+    status: "available",
+  });
   try {
-    // A SECOND app may not be registered with the same audience (review #15):
-    // the catalog refuses it with 409 audience_taken, so no other app can be
-    // set up to have its tokens accepted by this deployment.
+    // A SECOND app may not be registered with an audience a row already holds
+    // (review #15): the catalog refuses it with 409 audience_taken, so no app
+    // can be set up to have another app's tokens accepted. The holder is a
+    // throwaway foreign row, not the portal: this deployment's own audience is
+    // refused before the catalog is read (F-83), which would prove nothing
+    // here. It is never launched, so the cleanup delete below succeeds.
+    const holderRes = await page.request.post("/api/administrator/enterprise-apps", {
+      headers: ADMIN_API_HEADERS,
+      data: foreignApp(foreignSlug),
+    });
+    expect(holderRes.status(), await holderRes.text()).toBe(201);
     const dupRes = await page.request.post("/api/administrator/enterprise-apps", {
       headers: ADMIN_API_HEADERS,
-      data: {
-        id: foreignSlug,
-        label: `E2E SSO foreign ${foreignSlug}`,
-        origin: `https://${foreignSlug}.devresponse.com`,
-        subdomain: foreignSlug,
-        sso_audience: AUDIENCE,
-        status: "available",
-      },
+      data: foreignApp(`${foreignSlug}-dup`),
     });
     expect(dupRes.status(), await dupRes.text()).toBe(409);
     expect((await dupRes.json()).error).toBe("audience_taken");
@@ -157,6 +179,9 @@ test("sso handoff: launch -> consume -> replay rejected", async ({ page }, testI
     });
     expect(replayRes.status()).toBe(401);
   } finally {
+    await page.request.delete(`/api/administrator/enterprise-apps/${foreignSlug}`, {
+      headers: ADMIN_API_HEADERS,
+    });
     await tryDeletePortalApp(page.request);
   }
 });

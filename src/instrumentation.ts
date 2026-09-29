@@ -42,6 +42,12 @@ export async function register() {
       // statically, so node:crypto stays out of the Edge bundle.
       const { assertSigningKeysImport } = await import("@/lib/env-signing-keys.server");
       assertSigningKeysImport();
+      // F-80: a deployment that holds the SSO handoff signing key must be the
+      // issuer SSO_HANDOFF_ISSUER names, or every satellite would accept the
+      // handoffs it signs. Allowed to throw, like the key import above. The
+      // check lives in the file the satellite forks copy verbatim.
+      const { assertSsoHandoffSignerIsIssuer } = await import("@/lib/jwt-handoff.server");
+      assertSsoHandoffSignerIsIssuer();
       const { registerGracefulShutdown } = await import("@/lib/shutdown.server");
       registerGracefulShutdown();
       // D5 / review #23: log + capture stray unhandledRejection /

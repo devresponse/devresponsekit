@@ -19,8 +19,11 @@ import {
  * never-elevate-a-blocked-user rule, the same-org role re-validation, the
  * consume-time AUTHZ-3 re-check of the role against the INVITER's current
  * authority (review #6), the consume-time re-check of the inviter's
- * standing, which voids the invitation of one who lost it (F-149), and the
- * shared grant rule that withholds the role from a non-active member (F-154). The
+ * standing, which voids the invitation of one who lost it (F-149), the
+ * shared grant rule that withholds the role from a non-active member (F-154),
+ * and the one transaction every acceptance write goes through (F-95; the
+ * rollback itself is proven on a real database in
+ * tests/db/signup-acceptance-atomicity.db.test.ts). The
  * Kysely layer is stubbed per-table; hashing is real (Web Crypto).
  */
 
@@ -40,7 +43,8 @@ const bannedMock = vi.fn();
 const grantEligibleMock = vi.fn();
 vi.mock("@/lib/admin/access-scope.server", () => ({
   userIsGlobalSuperuser: (id: string) => globalSuperuserMock(id),
-  userIsGrantEligible: (userId: string, orgId: string) => grantEligibleMock(userId, orgId),
+  // Every argument, the executor included (F-95).
+  userIsGrantEligible: (...args: unknown[]) => grantEligibleMock(...args),
 }));
 vi.mock("@/lib/api-auth/ban-status.server", () => ({
   isBetterAuthUserBanned: (id: string) => bannedMock(id),
@@ -60,6 +64,11 @@ interface Stubs {
   invitationSelect: () => unknown;
   invitationUpdate: () => { numUpdatedRows: bigint };
   membershipSelect: () => unknown;
+  /**
+   * What the membership INSERT returns: its row, or nothing when a concurrent
+   * writer already holds (org, user) and `ON CONFLICT DO NOTHING` skipped it.
+   */
+  membershipInsert: () => unknown;
   roleSelect: () => unknown;
   /** The inviter's `app_users` row (F-149). */
   inviterSelect: () => unknown;
@@ -68,6 +77,12 @@ interface Stubs {
 let stubs: Stubs;
 let insertCalls: Array<{ table: string; values: Record<string, unknown> }>;
 let updateCalls: Array<{ table: string; values: Record<string, unknown> }>;
+/**
+ * F-95: every row lock and write issued through the TRANSACTION handle, in
+ * order, as `lock:<table>` / `insert:<table>` / `update:<table>`. Statements on
+ * the pool are not listed.
+ */
+let transactionLog: string[];
 
 interface Chain {
   values: (v: Record<string, unknown>) => Chain;
@@ -77,6 +92,8 @@ interface Chain {
   where: (...a: unknown[]) => Chain;
   returning: (...a: unknown[]) => Chain;
   onConflict: (...a: unknown[]) => Chain;
+  forKeyShare: () => Chain;
+  forNoKeyUpdate: () => Chain;
   executeTakeFirst: () => Promise<unknown>;
   executeTakeFirstOrThrow: () => Promise<unknown>;
   execute: () => Promise<unknown>;
@@ -88,12 +105,21 @@ function makeChain(opts: {
   firstOrThrow?: () => unknown;
   captureInsert?: boolean;
   captureUpdate?: boolean;
+  inTransaction?: boolean;
 }): Chain {
   let captured: Record<string, unknown> = {};
+  const recordUpdate = () => {
+    if (!opts.captureUpdate) return;
+    updateCalls.push({ table: opts.table, values: captured });
+    if (opts.inTransaction) transactionLog.push(`update:${opts.table}`);
+  };
   const chain: Chain = {
     values: (v) => {
       captured = v;
-      if (opts.captureInsert) insertCalls.push({ table: opts.table, values: v });
+      if (opts.captureInsert) {
+        insertCalls.push({ table: opts.table, values: v });
+        if (opts.inTransaction) transactionLog.push(`insert:${opts.table}`);
+      }
       return chain;
     },
     set: (v) => {
@@ -105,27 +131,45 @@ function makeChain(opts: {
     where: () => chain,
     returning: () => chain,
     onConflict: () => chain,
+    forKeyShare: () => {
+      if (opts.inTransaction) transactionLog.push(`lock:${opts.table}`);
+      return chain;
+    },
+    forNoKeyUpdate: () => {
+      if (opts.inTransaction) transactionLog.push(`lock:${opts.table}`);
+      return chain;
+    },
     executeTakeFirst: () => {
-      if (opts.captureUpdate) updateCalls.push({ table: opts.table, values: captured });
+      recordUpdate();
       return Promise.resolve(opts.first?.());
     },
-    executeTakeFirstOrThrow: () => Promise.resolve(opts.firstOrThrow?.()),
+    executeTakeFirstOrThrow: () => Promise.resolve((opts.firstOrThrow ?? opts.first)?.()),
     execute: () => {
-      if (opts.captureUpdate) updateCalls.push({ table: opts.table, values: captured });
+      recordUpdate();
       return Promise.resolve(undefined);
     },
   };
   return chain;
 }
 
-vi.mock("@/db/database", () => ({
-  db: {
+vi.mock("@/db/database", () => {
+  // The pool and a transaction share one stub; the transaction handle only
+  // tags its locks and writes (F-95), and itself, so a test can tell where
+  // each statement went.
+  const handle = (inTransaction: boolean) => ({
+    isTransaction: inTransaction,
     insertInto: (table: string) => {
       if (table === "app_organization_invitations")
         return makeChain({ table, captureInsert: true, firstOrThrow: () => ({ id: "inv-1" }) });
       if (table === "app_organization_memberships")
-        return makeChain({ table, captureInsert: true });
-      if (table === "app_user_roles") return makeChain({ table, captureInsert: true });
+        return makeChain({
+          table,
+          captureInsert: true,
+          inTransaction,
+          first: () => stubs.membershipInsert(),
+        });
+      if (table === "app_user_roles")
+        return makeChain({ table, captureInsert: true, inTransaction });
       throw new Error(`unmocked insertInto: ${table}`);
     },
     selectFrom: (table: string) => {
@@ -133,19 +177,35 @@ vi.mock("@/db/database", () => ({
         return makeChain({ table, first: () => stubs.invitationSelect() });
       if (table === "app_organization_memberships")
         return makeChain({ table, first: () => stubs.membershipSelect() });
-      if (table === "app_roles") return makeChain({ table, first: () => stubs.roleSelect() });
-      if (table === "app_users") return makeChain({ table, first: () => stubs.inviterSelect() });
+      if (table === "app_organizations") return makeChain({ table, inTransaction });
+      if (table === "app_roles")
+        return makeChain({ table, inTransaction, first: () => stubs.roleSelect() });
+      if (table === "app_users")
+        return makeChain({ table, inTransaction, first: () => stubs.inviterSelect() });
       throw new Error(`unmocked selectFrom: ${table}`);
     },
     updateTable: (table: string) => {
       if (table === "app_organization_invitations")
-        return makeChain({ table, captureUpdate: true, first: () => stubs.invitationUpdate() });
+        return makeChain({
+          table,
+          captureUpdate: true,
+          inTransaction,
+          first: () => stubs.invitationUpdate(),
+        });
       if (table === "app_organization_memberships" || table === "app_users")
-        return makeChain({ table, captureUpdate: true });
+        return makeChain({ table, captureUpdate: true, inTransaction });
       throw new Error(`unmocked updateTable: ${table}`);
     },
-  },
-}));
+  });
+  return {
+    db: {
+      ...handle(false),
+      transaction: () => ({
+        execute: <T>(fn: (trx: ReturnType<typeof handle>) => Promise<T>) => fn(handle(true)),
+      }),
+    },
+  };
+});
 
 const INVITATION: InvitationRow = {
   id: "inv-1",
@@ -160,6 +220,9 @@ const INVITATION: InvitationRow = {
 
 const ELIGIBLE_USER = { id: "user-1", primaryEmail: "ada@example.com", status: "pending_approval" };
 
+/** The acceptance's transaction handle, as opposed to the pool (F-95). */
+const THE_TRANSACTION = expect.objectContaining({ isTransaction: true });
+
 beforeEach(() => {
   auditMock.mockReset();
   globalSuperuserMock.mockReset().mockResolvedValue(false);
@@ -172,10 +235,12 @@ beforeEach(() => {
   heldPermsMock.mockReset().mockResolvedValue(["admin.orgs.update", "admin.users.read"]);
   insertCalls = [];
   updateCalls = [];
+  transactionLog = [];
   stubs = {
     invitationSelect: () => undefined,
     invitationUpdate: () => ({ numUpdatedRows: 1n }),
     membershipSelect: () => undefined,
+    membershipInsert: () => ({ id: "m-new" }),
     roleSelect: () => undefined,
     inviterSelect: () => ({ better_auth_user_id: "ba-admin-1", status: "active" }),
   };
@@ -293,6 +358,65 @@ describe("consumeInvitation", () => {
     ).toEqual([expect.objectContaining({ status: "active" })]);
   });
 
+  it("writes the flip, the membership, the activation and the role in ONE transaction (F-95)", async () => {
+    stubs.roleSelect = () => ({ id: "role-1" });
+    const result = await consumeInvitation({
+      invitation: { ...INVITATION, roleId: "role-1" },
+      appUser: ELIGIBLE_USER,
+      actorBetterAuthUserId: "ba-1",
+    });
+    expect(result).toEqual({ consumed: true, roleGranted: true });
+    // Nothing the acceptance writes goes to the pool on its own, so a failure
+    // part-way cannot leave an accepted invitation without its membership.
+    // The org, the role and the pending account are locked first, in the
+    // administrator transactions' order (the deadlock races are in the DB
+    // suite).
+    expect(transactionLog).toEqual([
+      "lock:app_organizations",
+      "lock:app_roles",
+      "lock:app_users",
+      "update:app_organization_invitations",
+      "insert:app_organization_memberships",
+      "update:app_users",
+      "insert:app_user_roles",
+    ]);
+    expect(insertCalls.map((c) => c.table)).toEqual([
+      "app_organization_memberships",
+      "app_user_roles",
+    ]);
+    expect(updateCalls.map((c) => c.table)).toEqual(["app_organization_invitations", "app_users"]);
+    // The grant rule reads the membership through that transaction, which is
+    // the only place the just-written row is visible.
+    expect(grantEligibleMock).toHaveBeenCalledWith("user-1", "org-1", THE_TRANSACTION);
+  });
+
+  it("re-reads and activates a membership a concurrent writer created after the read (F-95)", async () => {
+    // The read finds no row; by the insert, a racing sign-up has committed a
+    // pending one, so ON CONFLICT DO NOTHING returns nothing.
+    let reads = 0;
+    stubs.membershipSelect = () =>
+      reads++ === 0 ? undefined : { id: "m-raced", status: "pending_approval" };
+    stubs.membershipInsert = () => undefined;
+    const result = await consumeInvitation({
+      invitation: INVITATION,
+      appUser: ELIGIBLE_USER,
+      actorBetterAuthUserId: "ba-1",
+    });
+    expect(result).toEqual({ consumed: true, roleGranted: false });
+    expect(reads).toBe(2);
+    expect(
+      updateCalls.filter((c) => c.table === "app_organization_memberships").map((c) => c.values),
+    ).toEqual([expect.objectContaining({ status: "active" })]);
+    expect(transactionLog).toEqual([
+      "lock:app_organizations",
+      "lock:app_users",
+      "update:app_organization_invitations",
+      "insert:app_organization_memberships",
+      "update:app_organization_memberships",
+      "update:app_users",
+    ]);
+  });
+
   it("grants a same-org role and records a missing role instead of failing", async () => {
     stubs.roleSelect = () => ({ id: "role-1" });
     const granted = await consumeInvitation({
@@ -339,7 +463,7 @@ describe("consumeInvitation", () => {
         actorBetterAuthUserId: "ba-1",
       });
       expect(result).toEqual({ consumed: true, roleGranted: false });
-      expect(grantEligibleMock).toHaveBeenCalledWith("user-1", "org-1");
+      expect(grantEligibleMock).toHaveBeenCalledWith("user-1", "org-1", THE_TRANSACTION);
       expect(insertCalls.find((c) => c.table === "app_user_roles")).toBeUndefined();
       expect(updateCalls.filter((c) => c.table === "app_organization_memberships")).toEqual([]);
       const metadata = (auditMock.mock.calls.at(-1)![0] as { metadata: Record<string, unknown> })
@@ -438,6 +562,9 @@ describe("consumeInvitation", () => {
     function expectRefusedAndVoided(result: unknown): void {
       expect(result).toEqual({ consumed: false, reason: "inviter_lacks_standing" });
       expect(insertCalls).toEqual([]);
+      // The void is on the pool, outside any transaction: a refusal must
+      // outlive a rollback (DB-4), and no acceptance transaction opens (F-95).
+      expect(transactionLog).toEqual([]);
       expect(updateCalls).toEqual([
         {
           table: "app_organization_invitations",

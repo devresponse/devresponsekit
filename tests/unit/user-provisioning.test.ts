@@ -26,7 +26,12 @@ import { provisionUserFromAuth, reevaluatePendingActivation } from "@/lib/user-p
  *     (F-52), are routed to an admin-mapped org for their email domain
  *     (`app_provider_organizations`, provider = 'email');
  *   - `reevaluatePendingActivation` upgrades ONLY `pending_approval` rows,
- *     and only when the CURRENT policy decides active.
+ *     and only when the CURRENT policy decides active;
+ *   - F-95: the account and its membership are written through ONE
+ *     transaction and converge on a concurrent duplicate (ON CONFLICT, then a
+ *     re-read), and the re-evaluation's writes share one transaction too. The
+ *     rollbacks and the real races are proven on a live database in
+ *     tests/db/signup-acceptance-atomicity.db.test.ts.
  *
  * The Kysely query builder is stubbed per-table so each branch can be
  * exercised without a real database; insert/update payloads are captured so
@@ -86,15 +91,29 @@ interface Stubs {
   providerOrgInsert?: unknown;
   policyRows: () => PolicyRow[];
   userSelect: () => unknown;
+  /**
+   * What the `app_users` INSERT returns: the new row, or nothing when a
+   * concurrent provisioning already inserted the identity and
+   * `ON CONFLICT DO NOTHING` skipped this one (F-95).
+   */
   userInsert?: unknown;
   membershipSelect: () => unknown;
   membershipList: () => unknown[];
-  membershipInsert?: unknown;
+  /**
+   * What the membership INSERT returns; by default the row it was given, or
+   * nothing to model a concurrent insert of the same (org, user) (F-95).
+   */
+  membershipInsert?: (values: Record<string, unknown>) => unknown;
 }
 
 let stubs: Stubs;
 let insertCalls: Array<{ table: string; values: Record<string, unknown> }>;
 let updateCalls: Array<{ table: string; values: Record<string, unknown> }>;
+/**
+ * F-95: every write issued through the TRANSACTION handle, in order, as
+ * `insert:<table>` / `update:<table>`. Writes on the pool are not listed.
+ */
+let transactionWrites: string[];
 
 interface Chain {
   select: (...args: unknown[]) => Chain;
@@ -111,11 +130,14 @@ interface Chain {
 function makeChain(opts: {
   table: string;
   first?: () => unknown;
+  /** Like `first`, but handed the inserted values (an INSERT … RETURNING). */
+  inserted?: (values: Record<string, unknown>) => unknown;
   all?: () => unknown;
   firstOrThrow?: () => unknown;
   done?: () => unknown;
   captureInsert?: boolean;
   captureUpdate?: boolean;
+  inTransaction?: boolean;
 }): Chain {
   let captured: Record<string, unknown> = {};
   const chain: Chain = {
@@ -125,25 +147,34 @@ function makeChain(opts: {
     onConflict: () => chain,
     values: (v) => {
       captured = v;
-      if (opts.captureInsert) insertCalls.push({ table: opts.table, values: v });
+      if (opts.captureInsert) {
+        insertCalls.push({ table: opts.table, values: v });
+        if (opts.inTransaction) transactionWrites.push(`insert:${opts.table}`);
+      }
       return chain;
     },
     set: (v) => {
       captured = v;
       return chain;
     },
-    executeTakeFirst: () => Promise.resolve(opts.first?.()),
-    executeTakeFirstOrThrow: () => Promise.resolve(opts.firstOrThrow?.()),
+    executeTakeFirst: () =>
+      Promise.resolve(opts.inserted ? opts.inserted(captured) : opts.first?.()),
+    executeTakeFirstOrThrow: () => Promise.resolve((opts.firstOrThrow ?? opts.first)?.()),
     execute: () => {
-      if (opts.captureUpdate) updateCalls.push({ table: opts.table, values: captured });
+      if (opts.captureUpdate) {
+        updateCalls.push({ table: opts.table, values: captured });
+        if (opts.inTransaction) transactionWrites.push(`update:${opts.table}`);
+      }
       return Promise.resolve(opts.all ? opts.all() : opts.done?.());
     },
   };
   return chain;
 }
 
-vi.mock("@/db/database", () => ({
-  db: {
+vi.mock("@/db/database", () => {
+  // The pool and a transaction share one stub; the transaction handle only
+  // tags its writes (F-95), so a test can tell where each write went.
+  const handle = (inTransaction: boolean) => ({
     selectFrom: (table: string) => {
       if (table === "app_organizations")
         return makeChain({ table, first: () => stubs.orgSelect() });
@@ -166,14 +197,32 @@ vi.mock("@/db/database", () => ({
       if (table === "app_provider_organizations")
         return makeChain({ table, captureInsert: true, done: () => stubs.providerOrgInsert });
       if (table === "app_users")
-        return makeChain({ table, captureInsert: true, firstOrThrow: () => stubs.userInsert });
+        return makeChain({
+          table,
+          captureInsert: true,
+          inTransaction,
+          first: () => stubs.userInsert,
+        });
       if (table === "app_organization_memberships")
-        return makeChain({ table, captureInsert: true, done: () => stubs.membershipInsert });
+        return makeChain({
+          table,
+          captureInsert: true,
+          inTransaction,
+          inserted: (values) => (stubs.membershipInsert ? stubs.membershipInsert(values) : values),
+        });
       throw new Error(`unmocked insertInto: ${table}`);
     },
-    updateTable: (table: string) => makeChain({ table, captureUpdate: true }),
-  },
-}));
+    updateTable: (table: string) => makeChain({ table, captureUpdate: true, inTransaction }),
+  });
+  return {
+    db: {
+      ...handle(false),
+      transaction: () => ({
+        execute: <T>(fn: (trx: ReturnType<typeof handle>) => Promise<T>) => fn(handle(true)),
+      }),
+    },
+  };
+});
 
 const DEFAULT_POLICY_ROW: PolicyRow = {
   organization_id: null,
@@ -196,6 +245,7 @@ beforeEach(() => {
   logErrorMock.mockReset();
   insertCalls = [];
   updateCalls = [];
+  transactionWrites = [];
   stubs = {
     defaultOrg: () =>
       Promise.resolve({
@@ -211,7 +261,6 @@ beforeEach(() => {
     userInsert: Promise.resolve({ id: "user-1", status: "pending_approval" }),
     membershipSelect: () => Promise.resolve(undefined),
     membershipList: () => [],
-    membershipInsert: Promise.resolve(undefined),
   };
 });
 afterEach(() => vi.resetModules());
@@ -279,6 +328,53 @@ describe("provisionUserFromAuth", () => {
     expect(result.membershipStatus).toBe("blocked");
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "auth.account.linked" }),
+    );
+  });
+
+  it("writes the account and its membership in ONE transaction (F-95)", async () => {
+    await provisionUserFromAuth({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "google",
+    });
+    // Neither row reaches the pool on its own, so a failure between them can
+    // no longer leave an account without the membership the next sign-in
+    // (which returns early for an existing account) would never write.
+    expect(transactionWrites).toEqual(["insert:app_users", "insert:app_organization_memberships"]);
+    expect(insertCalls.map((c) => c.table)).toEqual(["app_users", "app_organization_memberships"]);
+  });
+
+  it("converges on a concurrent provisioning of the same identity instead of failing (F-95)", async () => {
+    // Both reads miss; by each insert, the racing provisioning has committed
+    // that row, so ON CONFLICT DO NOTHING returns nothing and the row is re-read.
+    let userReads = 0;
+    stubs.userSelect = () =>
+      Promise.resolve(userReads++ === 0 ? undefined : { id: "user-raced", status: "active" });
+    stubs.userInsert = Promise.resolve(undefined);
+    let membershipReads = 0;
+    stubs.membershipSelect = () =>
+      Promise.resolve(membershipReads++ === 0 ? undefined : { status: "active" });
+    stubs.membershipInsert = () => undefined;
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "google",
+    });
+    expect(result).toMatchObject({
+      appUserId: "user-raced",
+      status: "active",
+      membershipStatus: "active",
+      linkedExisting: true,
+    });
+    expect([userReads, membershipReads]).toEqual([2, 2]);
+    // The winner's row keeps its status; only the profile fields are refreshed.
+    expect(updateCalls.map((c) => c.table)).toEqual(["app_users"]);
+    expect(updateCalls[0]!.values).not.toHaveProperty("status");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "auth.account.linked", appUserId: "user-raced" }),
     );
   });
 
@@ -1031,11 +1127,11 @@ describe("reevaluatePendingActivation", () => {
 
     expect(updateCalls).toEqual([
       expect.objectContaining({
-        table: "app_organization_memberships",
+        table: "app_users",
         values: expect.objectContaining({ status: "active" }),
       }),
       expect.objectContaining({
-        table: "app_users",
+        table: "app_organization_memberships",
         values: expect.objectContaining({ status: "active" }),
       }),
     ]);
@@ -1080,11 +1176,20 @@ describe("reevaluatePendingActivation", () => {
       provider: "email",
     });
 
-    // Both memberships flip, then the user row once.
+    // The user row once, then both memberships, all in one transaction
+    // (F-95): a failure after a membership flipped used to leave the account
+    // pending with no pending membership for the next sign-in to re-decide.
+    // The account goes first, in the admin status change's lock order (the
+    // deadlock race is in the DB suite).
     expect(updateCalls.map((c) => c.table)).toEqual([
-      "app_organization_memberships",
-      "app_organization_memberships",
       "app_users",
+      "app_organization_memberships",
+      "app_organization_memberships",
+    ]);
+    expect(transactionWrites).toEqual([
+      "update:app_users",
+      "update:app_organization_memberships",
+      "update:app_organization_memberships",
     ]);
     // The event's top-level org is the first activated; metadata carries the
     // full set so a multi-org activation isn't silently reduced to one.
@@ -1122,7 +1227,7 @@ describe("reevaluatePendingActivation", () => {
       provider: "email",
     });
 
-    expect(updateCalls.map((c) => c.table)).toEqual(["app_organization_memberships", "app_users"]);
+    expect(updateCalls.map((c) => c.table)).toEqual(["app_users", "app_organization_memberships"]);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({ decisionReason: "domain_auto_approved" }),
@@ -1247,8 +1352,8 @@ describe("reevaluatePendingActivation", () => {
       provider: "email",
     });
 
-    // One membership flips (org-b's), then the user; the audit names org-b.
-    expect(updateCalls.map((c) => c.table)).toEqual(["app_organization_memberships", "app_users"]);
+    // The user, then one membership (org-b's); the audit names org-b.
+    expect(updateCalls.map((c) => c.table)).toEqual(["app_users", "app_organization_memberships"]);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "auth.account.auto_activated",

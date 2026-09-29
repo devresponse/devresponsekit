@@ -337,13 +337,18 @@ export async function userHasMembershipInOrg(
  * arise. It matches `POST /organizations/[id]/members`, which lets a
  * superadmin prepare a tenant's members before activating it. An accepted
  * invitation needs an active org anyway (`consumeInvitation`'s F-09 flip).
+ *
+ * Pass the enclosing transaction as `executor` when that transaction has just
+ * written the membership (`consumeInvitation`, F-95): the pool cannot see an
+ * uncommitted row.
  */
 export async function grantEligibleUserIds(
   organizationId: string,
   appUserIds: ReadonlyArray<string>,
+  executor: Kysely<AppDatabase> = db,
 ): Promise<string[]> {
   if (appUserIds.length === 0) return [];
-  const rows = await db
+  const rows = await executor
     .selectFrom("app_organization_memberships")
     .select("app_user_id")
     .where("organization_id", "=", organizationId)
@@ -357,8 +362,9 @@ export async function grantEligibleUserIds(
 export async function userIsGrantEligible(
   appUserId: string,
   organizationId: string,
+  executor: Kysely<AppDatabase> = db,
 ): Promise<boolean> {
-  return (await grantEligibleUserIds(organizationId, [appUserId])).length > 0;
+  return (await grantEligibleUserIds(organizationId, [appUserId], executor)).length > 0;
 }
 
 /**

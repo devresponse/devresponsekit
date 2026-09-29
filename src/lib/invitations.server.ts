@@ -34,7 +34,8 @@ import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
  *     (case-insensitive). `consumeInvitation` re-asserts it.
  *   - Consumption is race-safe: the status flip is a guarded
  *     `UPDATE … WHERE status = 'pending'`; the loser of a double-accept
- *     observes `consumed: false`.
+ *     observes `consumed: false`. It is also all-or-nothing: the flip and
+ *     everything it admits commit in one transaction (F-95).
  *   - Consumption NEVER elevates a blocked/suspended/deactivated user —
  *     explicit administrator denials always win (same invariant as
  *     `reevaluatePendingActivation`).
@@ -400,6 +401,16 @@ export type ConsumeInvitationResult =
  * grant for one specific address and OVERRIDES the org's
  * `allowed_auth_methods` gate on unsolicited sign-ups (decideInitialStatus
  * ranks it the same way, so the sign-up and accept paths agree).
+ *
+ * F-95: the flip, the membership, the account activation and the role grant
+ * commit in ONE transaction, so a failure part-way (a dropped connection, a
+ * statement timeout) leaves the invitation `pending` and nothing else written,
+ * and the invitee can simply accept again. These used to be separate
+ * statements, so a failure after the flip left an accepted invitation with no
+ * membership (or no role), and the used token could not be retried. The
+ * refusals before it (the inviter's standing, which voids) and the audit rows
+ * after it stay on the pool: a denial must outlive any rollback (DB-4), and
+ * the success row is written only once the acceptance has committed.
  */
 export async function consumeInvitation(input: {
   invitation: InvitationRow;
@@ -443,119 +454,185 @@ export async function consumeInvitation(input: {
     return { consumed: false, reason: "inviter_lacks_standing" };
   }
 
-  // F-09: the flip re-asserts that the inviting org is still ACTIVE. The
-  // caller looked the invitation up a moment ago, but an operator suspending
-  // the tenant in between must not lose to it. A refusal here reads as
-  // `already_consumed` — the invitation is no longer consumable — which every
-  // caller already answers with the generic `invitation_invalid`.
-  const flipped = await db
-    .updateTable("app_organization_invitations")
-    .set({
-      status: "accepted",
-      accepted_at: sql`now()`,
-      accepted_app_user_id: appUser.id,
-      updated_at: sql`now()`,
-    })
-    .where("id", "=", invitation.id)
-    .where("status", "=", "pending")
-    .where("organization_id", "in", (eb) =>
-      eb
-        .selectFrom("app_organizations")
-        .select("id")
-        .where("status", "=", ACTIVE_ORGANIZATION_STATUS),
-    )
-    .executeTakeFirst();
-  if (flipped.numUpdatedRows === 0n) {
-    return { consumed: false, reason: "already_consumed" };
-  }
+  // Optional role — re-validated against the INVITER's current authority
+  // (AUTHZ-3, review #6): the grant happens now, on the invitee's request, so
+  // the create route's guard must be re-asserted here or a since-demoted
+  // inviter's stale invitation — or a row that predates the guard — would
+  // still confer. It reads only the inviter's rows, so it is asked before the
+  // transaction below opens rather than on a second pooled connection while
+  // that transaction holds the invitation's row lock (F-95).
+  const inviterMayConfer =
+    invitation.roleId !== null &&
+    (await inviterMayConferRole({
+      invitedByAppUserId: invitation.invitedByAppUserId,
+      roleId: invitation.roleId,
+      organizationId: invitation.organizationId,
+    }));
 
-  // Membership: create active, or activate a pending one. Blocked/suspended
-  // memberships are explicit denials and stay put (the user keeps whatever
-  // access they had; the invitation is still recorded as accepted so the
-  // state is visible to admins).
-  const membership = await db
-    .selectFrom("app_organization_memberships")
-    .select(["id", "status"])
-    .where("app_user_id", "=", appUser.id)
-    .where("organization_id", "=", invitation.organizationId)
-    .executeTakeFirst();
-  if (!membership) {
-    await db
-      .insertInto("app_organization_memberships")
-      .values({
-        organization_id: invitation.organizationId,
-        app_user_id: appUser.id,
-        status: "active",
-        source_provider: input.provider ?? "invitation",
-      })
+  // F-95: everything the acceptance writes commits together (see the doc
+  // above). Null when the flip found nothing to consume.
+  const accepted = await db.transaction().execute(async (trx) => {
+    // Lock order. This transaction shares rows with administrator transactions
+    // that take them in a fixed order, and must take them in the same order,
+    // or each side can hold a row the other waits on and Postgres aborts one
+    // of them (40P01, a 500):
+    //   - the admin status change (`performAdminStatusChange`) locks the rows
+    //     of every superuser grant, their orgs among them, then the account,
+    //     then its memberships; soft-delete and restore write the account,
+    //     then its memberships;
+    //   - the role DELETE (`assertRoleNotInUse`) locks the role, then clears
+    //     it from this invitation (ON DELETE SET NULL).
+    // So the inviting org and the role come first, under the KEY SHARE lock
+    // the membership and grant inserts' foreign-key checks take on them
+    // anyway, then the account while it is pending (the only state this
+    // writes it in), and only then the invitation and the membership. Left to
+    // the flip, the first lock on the account would be the KEY SHARE of its
+    // foreign-key check on `accepted_app_user_id`, which an If-Match claim
+    // does not wait for: the claim's FOR UPDATE would then wait on this while
+    // the activation below waited on the claim.
+    await trx
+      .selectFrom("app_organizations")
+      .select("id")
+      .where("id", "=", invitation.organizationId)
+      .forKeyShare()
       .execute();
-  } else if (membership.status === "pending_approval") {
-    // The inviting org's approval, so it also clears the snapshot a restore
-    // leaves on a membership it held back for re-approval (F-152).
-    await db
-      .updateTable("app_organization_memberships")
-      .set({ status: "active", pre_deactivation_status: null, updated_at: sql`now()` })
-      .where("id", "=", membership.id)
+    // The role is re-validated against the inviting org at consume time: it
+    // may have been deleted or re-scoped since the invite.
+    const role =
+      invitation.roleId === null
+        ? undefined
+        : await trx
+            .selectFrom("app_roles")
+            .select(["id"])
+            .where("id", "=", invitation.roleId)
+            .where("organization_id", "=", invitation.organizationId)
+            .forKeyShare()
+            .executeTakeFirst();
+    await trx
+      .selectFrom("app_users")
+      .select("id")
+      .where("id", "=", appUser.id)
       .where("status", "=", "pending_approval")
-      .execute();
-  }
+      .forNoKeyUpdate()
+      .execute(); // for its lock only
 
-  // User-level activation: only ever pending → active. The lift is
-  // account-wide, but it admits the user only where a membership is active: a
-  // restored user's memberships come back `pending_approval`, so another org's
-  // invitation no longer revives them in orgs that have not approved (F-152).
-  await db
-    .updateTable("app_users")
-    .set({ status: "active", updated_at: sql`now()` })
-    .where("id", "=", appUser.id)
-    .where("status", "=", "pending_approval")
-    .execute();
-
-  // Optional role grant — re-validated against the inviting org at consume
-  // time (the role may have been deleted or re-scoped since the invite), and
-  // against the INVITER's current authority (AUTHZ-3, review #6): the grant
-  // happens now, on the invitee's request, so the create route's guard must
-  // be re-asserted here or a since-demoted inviter's stale invitation — or a
-  // row that predates the guard — would still confer.
-  let roleGranted = false;
-  let roleDenied = false;
-  let roleWithheld = false;
-  if (invitation.roleId && !(await userIsGrantEligible(appUser.id, invitation.organizationId))) {
-    // F-154: the grant rule every grant path shares, an ACTIVE membership in
-    // the inviting org. A blocked or suspended membership stays put above, and
-    // the role used to be written anyway, conferring nothing until the block
-    // was lifted and then conferring it with nobody deciding to. The
-    // acceptance is still recorded; the role waits for a fresh grant.
-    roleWithheld = true;
-  } else if (invitation.roleId) {
-    const role = await db
-      .selectFrom("app_roles")
-      .select(["id"])
-      .where("id", "=", invitation.roleId)
-      .where("organization_id", "=", invitation.organizationId)
+    // F-09: the flip re-asserts that the inviting org is still ACTIVE. The
+    // caller looked the invitation up a moment ago, but an operator suspending
+    // the tenant in between must not lose to it. A refusal here reads as
+    // `already_consumed` — the invitation is no longer consumable — which
+    // every caller already answers with the generic `invitation_invalid`.
+    const flipped = await trx
+      .updateTable("app_organization_invitations")
+      .set({
+        status: "accepted",
+        accepted_at: sql`now()`,
+        accepted_app_user_id: appUser.id,
+        updated_at: sql`now()`,
+      })
+      .where("id", "=", invitation.id)
+      .where("status", "=", "pending")
+      .where("organization_id", "in", (eb) =>
+        eb
+          .selectFrom("app_organizations")
+          .select("id")
+          .where("status", "=", ACTIVE_ORGANIZATION_STATUS),
+      )
       .executeTakeFirst();
-    if (role) {
-      const allowed = await inviterMayConferRole({
-        invitedByAppUserId: invitation.invitedByAppUserId,
-        roleId: role.id,
-        organizationId: invitation.organizationId,
-      });
-      if (allowed) {
-        await db
-          .insertInto("app_user_roles")
-          .values({
-            app_user_id: appUser.id,
-            organization_id: invitation.organizationId,
-            role_id: role.id,
-          })
-          .onConflict((oc) => oc.columns(["app_user_id", "organization_id", "role_id"]).doNothing())
-          .execute();
-        roleGranted = true;
-      } else {
-        roleDenied = true;
+    if (flipped.numUpdatedRows === 0n) {
+      return null;
+    }
+
+    // Membership: create active, or activate a pending one. Blocked/suspended
+    // memberships are explicit denials and stay put (the user keeps whatever
+    // access they had; the invitation is still recorded as accepted so the
+    // state is visible to admins).
+    const findMembership = () =>
+      trx
+        .selectFrom("app_organization_memberships")
+        .select(["id", "status"])
+        .where("app_user_id", "=", appUser.id)
+        .where("organization_id", "=", invitation.organizationId);
+    let membership = await findMembership().executeTakeFirst();
+    if (!membership) {
+      // F-95: a sign-up, another acceptance or an administrator can create
+      // this row between the read and the insert. The insert then waits for
+      // that transaction and does nothing, and the re-read picks the row up
+      // (activating it below when pending) instead of failing with 23505
+      // after the flip.
+      const inserted = await trx
+        .insertInto("app_organization_memberships")
+        .values({
+          organization_id: invitation.organizationId,
+          app_user_id: appUser.id,
+          status: "active",
+          source_provider: input.provider ?? "invitation",
+        })
+        .onConflict((oc) => oc.columns(["organization_id", "app_user_id"]).doNothing())
+        .returning(["id"])
+        .executeTakeFirst();
+      if (!inserted) {
+        membership = await findMembership().executeTakeFirstOrThrow();
       }
     }
+    if (membership?.status === "pending_approval") {
+      // The inviting org's approval, so it also clears the snapshot a restore
+      // leaves on a membership it held back for re-approval (F-152).
+      await trx
+        .updateTable("app_organization_memberships")
+        .set({ status: "active", pre_deactivation_status: null, updated_at: sql`now()` })
+        .where("id", "=", membership.id)
+        .where("status", "=", "pending_approval")
+        .execute();
+    }
+
+    // User-level activation: only ever pending → active. The lift is
+    // account-wide, but it admits the user only where a membership is active:
+    // a restored user's memberships come back `pending_approval`, so another
+    // org's invitation no longer revives them in orgs that have not approved
+    // (F-152).
+    await trx
+      .updateTable("app_users")
+      .set({ status: "active", updated_at: sql`now()` })
+      .where("id", "=", appUser.id)
+      .where("status", "=", "pending_approval")
+      .execute();
+
+    // Optional role grant: the role read above, granted only when the inviter
+    // may confer it (before the transaction).
+    let roleGranted = false;
+    let roleDenied = false;
+    let roleWithheld = false;
+    if (
+      invitation.roleId &&
+      // Through the transaction: the membership it reads was written above.
+      !(await userIsGrantEligible(appUser.id, invitation.organizationId, trx))
+    ) {
+      // F-154: the grant rule every grant path shares, an ACTIVE membership in
+      // the inviting org. A blocked or suspended membership stays put above,
+      // and the role used to be written anyway, conferring nothing until the
+      // block was lifted and then conferring it with nobody deciding to. The
+      // acceptance is still recorded; the role waits for a fresh grant.
+      roleWithheld = true;
+    } else if (role && inviterMayConfer) {
+      await trx
+        .insertInto("app_user_roles")
+        .values({
+          app_user_id: appUser.id,
+          organization_id: invitation.organizationId,
+          role_id: role.id,
+        })
+        .onConflict((oc) => oc.columns(["app_user_id", "organization_id", "role_id"]).doNothing())
+        .execute();
+      roleGranted = true;
+    } else if (role) {
+      roleDenied = true;
+    }
+    return { roleGranted, roleDenied, roleWithheld };
+  });
+  if (!accepted) {
+    return { consumed: false, reason: "already_consumed" };
   }
+  const { roleGranted, roleDenied, roleWithheld } = accepted;
 
   await auditEvent({
     eventType: "auth.account.invitation_accepted",

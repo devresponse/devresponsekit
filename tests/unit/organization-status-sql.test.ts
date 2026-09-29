@@ -332,9 +332,11 @@ describe("invitations — a suspended org's invitation is dead (F-09)", () => {
     });
 
     expect(result).toEqual({ consumed: false, reason: "already_consumed" });
-    // Past the inviter's account read, nothing but the flip ran: no
-    // membership, no activation, no role.
-    const writes = script.captured.filter((q) => !q.sql.includes('from "app_users"'));
+    // Past the inviter's account read and the acceptance's row locks (F-95),
+    // nothing but the flip ran: no membership, no activation, no role.
+    const writes = script.captured.filter(
+      (q) => !q.sql.includes('from "app_users"') && !/ for (key share|no key update)$/.test(q.sql),
+    );
     expect(writes).toHaveLength(1);
     const flip = writes[0]!;
     expect(flip.sql).toMatch(/^update "app_organization_invitations"/);

@@ -12,14 +12,14 @@ describe("resolveProviderOrganization", () => {
     expect(result.confidence).toBe("fallback");
   });
 
-  it("uses GitHub email domain when verified", () => {
+  it("F-52: a verified GitHub address names no organization either", () => {
     const result = resolveProviderOrganization({
       provider: "github",
       email: "user@example.com",
       emailVerified: true,
     });
-    expect(result.providerOrganizationKey).toBe("example.com");
-    expect(result.confidence).toBe("medium");
+    expect(result.providerOrganizationKey).toBe("default");
+    expect(result.confidence).toBe("fallback");
   });
 
   it("falls back to default for email/password sign-ups", () => {
@@ -33,35 +33,37 @@ describe("resolveProviderOrganization", () => {
 });
 
 /**
- * F-40: whether a sign-up belongs in THE default org is an explicit flag, so
- * callers resolve that org by `is_default` instead of reading the `default`
- * key as a slug (which broke the moment the default org was renamed).
+ * F-52: provider metadata never names an organization. A verified GitHub
+ * address used to be keyed by its email domain, which provisioning looked up
+ * as an org slug and created when missing. Now the only thing the provider
+ * decides is whether the superadmin-curated email-domain binding may place
+ * the sign-up; everything else lands in the default org (by `is_default`,
+ * F-40 — the `default` key is a label, not a slug).
  */
-describe("resolveProviderOrganization — the default-org fallback is a flag, not a slug (F-40)", () => {
+describe("resolveProviderOrganization — only the curated email-domain binding may place a sign-up (F-52)", () => {
   it.each([
-    ["email", false],
-    ["email", true],
-    ["google", true],
-    ["microsoft", true],
-    ["github", false],
-  ] as const)("flags a %s sign-up (verified: %s) for the default org", (provider, verified) => {
-    const result = resolveProviderOrganization({
-      provider,
-      email: "user@example.com",
-      emailVerified: verified,
-    });
-    expect(result.routesToDefaultOrganization).toBe(true);
-  });
-
-  it("does not flag a verified GitHub sign-up, which is keyed by its email domain", () => {
-    const result = resolveProviderOrganization({
-      provider: "github",
-      email: "user@example.com",
-      emailVerified: true,
-    });
-    expect(result.routesToDefaultOrganization).toBe(false);
-    expect(result.providerOrganizationKey).toBe("example.com");
-  });
+    ["email", false, true],
+    ["email", true, true],
+    ["github", true, true],
+    ["github", false, false],
+    ["google", true, false],
+    ["microsoft", true, false],
+  ] as const)(
+    "a %s sign-up (verified: %s) meets the email-domain binding: %s",
+    (provider, verified, routesByEmailDomain) => {
+      const result = resolveProviderOrganization({
+        provider,
+        email: "user@example.com",
+        emailVerified: verified,
+      });
+      expect(result).toEqual({
+        provider,
+        providerOrganizationKey: "default",
+        confidence: "fallback",
+        routesByEmailDomain,
+      });
+    },
+  );
 });
 
 /**

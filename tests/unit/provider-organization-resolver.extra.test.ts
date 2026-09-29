@@ -2,34 +2,26 @@ import { describe, expect, it } from "vitest";
 import { resolveProviderOrganization } from "@/lib/provider-organization-resolver";
 
 /**
- * Extra coverage for branches not exercised by
- * `provider-organization-resolver.test.ts` — the email-domain fallbacks the
- * GitHub branch depends on. (The Microsoft/Google tenant-claim branches this
- * file used to cover were removed as dead code — review #38; their
- * replacement assertions live in the sibling file.)
+ * Extra coverage for the shapes of address the GitHub branch used to key an
+ * organization by (F-52: it keys none now). (The Microsoft/Google
+ * tenant-claim branches this file used to cover were removed as dead code —
+ * review #38; their replacement assertions live in the sibling file.)
  */
 describe("resolveProviderOrganization (extended)", () => {
-  it("lowercases the GitHub email domain", () => {
-    const result = resolveProviderOrganization({
-      provider: "github",
-      email: "User@Example.COM",
-      emailVerified: true,
-    });
-    expect(result.providerOrganizationKey).toBe("example.com");
-    expect(result.displayName).toBe("example.com");
-  });
+  it.each(["User@Example.COM", "no-at-sign"])(
+    "keys no organization by a verified GitHub address's domain (%s)",
+    (email) => {
+      const result = resolveProviderOrganization({
+        provider: "github",
+        email,
+        emailVerified: true,
+      });
+      // Not `example.com` (a slug provisioning used to create), not `unknown`.
+      expect(result.providerOrganizationKey).toBe("default");
+    },
+  );
 
-  it("uses 'unknown' for emails without an @ when falling back", () => {
-    const result = resolveProviderOrganization({
-      provider: "github",
-      email: "no-at-sign",
-      emailVerified: true,
-    });
-    // emailDomain falls through to 'unknown' when the @ split fails.
-    expect(result.providerOrganizationKey).toBe("unknown");
-  });
-
-  it("keeps the fallback display name and provider echo on the default path", () => {
+  it("keeps the fallback label and provider echo on the default path", () => {
     const result = resolveProviderOrganization({
       provider: "google",
       email: "user@example.com",
@@ -38,9 +30,8 @@ describe("resolveProviderOrganization (extended)", () => {
     expect(result).toEqual({
       provider: "google",
       providerOrganizationKey: "default",
-      displayName: "Default Organization",
       confidence: "fallback",
-      routesToDefaultOrganization: true,
+      routesByEmailDomain: false,
     });
   });
 });

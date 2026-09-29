@@ -197,31 +197,63 @@ describe("findEmailDomainOrganization", () => {
 });
 
 describe("resolveSignupPolicy", () => {
-  it("resolves a provider-keyed org by slug and returns its policy", async () => {
-    stubs.orgBySlug = () => Promise.resolve({ id: "org-hd" });
+  /**
+   * F-52: a verified GitHub sign-in used to be keyed by an org SLUG equal to
+   * its email domain here (and by the platform policy while that org did not
+   * exist yet), mirroring provisioning, which joined or created that org. It
+   * now follows the same curated binding → default org path as an
+   * email/password sign-up.
+   */
+  it("F-52: a verified GitHub sign-in follows the email-domain binding, never an org slugged by its domain", async () => {
+    stubs.orgBySlug = () => {
+      throw new Error("no org may be looked up by a slug derived from the address");
+    };
+    stubs.emailMapping = () =>
+      Promise.resolve({ organization_id: "org-acme", provider_organization_key: "acme.com" });
     stubs.policyRows = () => [
       DEFAULT_ROW,
-      { ...DEFAULT_ROW, organization_id: "org-hd", signup_approval_mode: "auto_active" },
+      { ...DEFAULT_ROW, organization_id: "org-acme", signup_approval_mode: "invite_only" },
     ];
-    // A verified GitHub sign-in is the remaining provider-keyed path (the
-    // Google `hd` / Microsoft `tid` branches were dead code — review #38).
     const policy = await resolveSignupPolicy({
       provider: "github",
-      email: "u@corp.example",
+      email: "u@acme.com",
       emailVerified: true,
     });
-    expect(policy.source).toBe("organization");
-    expect(policy.signupApprovalMode).toBe("auto_active");
+    expect(policy).toMatchObject({ source: "organization", signupApprovalMode: "invite_only" });
+    expect(logMock).not.toHaveBeenCalled();
   });
 
-  it("uses the platform default when the provider org does not exist yet", async () => {
-    stubs.orgBySlug = () => Promise.resolve(undefined);
+  it("F-52: a verified GitHub sign-in no binding claims gets the default org's policy", async () => {
+    // What provisioning used to create, or join when it already existed.
+    stubs.orgBySlug = () => Promise.resolve({ id: "org-corp-example" });
+    stubs.policyRows = () => [
+      DEFAULT_ROW,
+      { ...DEFAULT_ROW, organization_id: "org-corp-example", signup_approval_mode: "auto_active" },
+      { ...DEFAULT_ROW, organization_id: "org-default", signup_approval_mode: "invite_only" },
+    ];
     const policy = await resolveSignupPolicy({
       provider: "github",
       email: "u@corp.example",
       emailVerified: true,
     });
-    expect(policy.source).toBe("platform_default");
+    expect(policy).toMatchObject({ source: "organization", signupApprovalMode: "invite_only" });
+  });
+
+  it("F-52: an unverified GitHub address is not matched against the binding", async () => {
+    stubs.emailMapping = () => {
+      throw new Error("an unverified GitHub address must not meet the binding");
+    };
+    stubs.policyRows = () => [
+      DEFAULT_ROW,
+      { ...DEFAULT_ROW, organization_id: "org-default", signup_approval_mode: "invite_only" },
+    ];
+    const policy = await resolveSignupPolicy({
+      provider: "github",
+      email: "u@acme.com",
+      emailVerified: false,
+    });
+    expect(policy).toMatchObject({ source: "organization", signupApprovalMode: "invite_only" });
+    expect(logMock).not.toHaveBeenCalled();
   });
 
   it("routes email sign-ups through the email-domain mapping", async () => {

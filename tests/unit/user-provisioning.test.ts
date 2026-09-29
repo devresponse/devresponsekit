@@ -15,15 +15,16 @@ import { provisionUserFromAuth, reevaluatePendingActivation } from "@/lib/user-p
  *   - seed users are activated immediately WITHOUT reading policy;
  *   - existing users keep their current status (no privilege escalation
  *     from arbitrary OAuth profile data) and emit `auth.account.linked`;
- *   - a missing PROVIDER-keyed organization (GitHub: the verified email
- *     domain) triggers an insert into `app_organizations` +
- *     `app_provider_organizations`;
+ *   - F-52: provisioning never creates an organization or a provider-org
+ *     row, and never looks an org up by a slug derived from the address: a
+ *     verified GitHub sign-in no binding claims lands in the default org;
  *   - F-40: the default-org fallback places the sign-up in the org flagged
  *     `is_default` (`@/lib/default-organization.server`, stubbed here),
  *     whatever its slug, and with no default org it refuses before writing
  *     anything — it never creates a "Default Organization";
- *   - email/password sign-ups are routed to an admin-mapped org for their
- *     email domain (`app_provider_organizations`, provider = 'email');
+ *   - email/password sign-ups, and GitHub sign-ins with a verified address
+ *     (F-52), are routed to an admin-mapped org for their email domain
+ *     (`app_provider_organizations`, provider = 'email');
  *   - `reevaluatePendingActivation` upgrades ONLY `pending_approval` rows,
  *     and only when the CURRENT policy decides active.
  *
@@ -281,25 +282,90 @@ describe("provisionUserFromAuth", () => {
     );
   });
 
-  it("creates the organization + provider org row when slug is unknown", async () => {
-    stubs.orgSelect = () => Promise.resolve(undefined);
-    stubs.orgInsert = Promise.resolve({ id: "new-org" });
-    stubs.providerOrgInsert = Promise.resolve(undefined);
+  /**
+   * F-52: a verified GitHub address's domain used to be looked up as an org
+   * SLUG — joining whatever org held it, and creating an active one plus a
+   * `github` provider-org row when none did — so the first GitHub user with a
+   * verified gmail.com address founded a tenant every later one joined.
+   */
+  it.each([
+    ["no org holds the domain as its slug (it used to be created)", undefined],
+    ["an org holds the domain as its slug (it used to be joined)", { id: "org-contoso-com" }],
+  ])(
+    "F-52: a verified GitHub sign-in no binding claims lands in the default org when %s",
+    async (_case, slugOrg) => {
+      stubs.orgSelect = () => Promise.resolve(slugOrg);
+      stubs.orgInsert = Promise.resolve({ id: "new-org" });
+      stubs.providerOrgInsert = Promise.resolve(undefined);
 
-    // A verified GitHub sign-in resolves to an email-domain-keyed
-    // organization, so an unknown domain triggers the "no existing org"
-    // branch. (This used to use a Microsoft `tid`; that routing was dead code
-    // and was removed — review #38.)
+      const result = await provisionUserFromAuth({
+        betterAuthUserId: "ba-2",
+        email: "u@contoso.com",
+        emailVerified: true,
+        provider: "github",
+      });
+      expect(result.organizationId).toBe("org-default");
+      // No organization and no provider-org row: only the user and membership.
+      expect(insertCalls.map((c) => c.table)).toEqual([
+        "app_users",
+        "app_organization_memberships",
+      ]);
+      expect(
+        insertCalls.find((c) => c.table === "app_organization_memberships")?.values,
+      ).toMatchObject({
+        organization_id: "org-default",
+        source_provider: "github",
+        provider_organization_key: "default",
+      });
+    },
+  );
+
+  it("F-52: a verified GitHub sign-in is placed by the superadmin-curated email-domain binding", async () => {
+    stubs.providerOrgSelect = () =>
+      Promise.resolve({ organization_id: "org-acme", provider_organization_key: "acme.com" });
+    stubs.orgSelect = () => {
+      throw new Error("no org may be looked up by a slug derived from the address");
+    };
+
     const result = await provisionUserFromAuth({
-      betterAuthUserId: "ba-2",
-      email: "u@contoso.com",
+      betterAuthUserId: "ba-gh-bound",
+      email: "dev@acme.com",
       emailVerified: true,
       provider: "github",
     });
-    expect(result.organizationId).toBe("new-org");
-    expect(insertCalls.find((c) => c.table === "app_organizations")?.values.slug).toBe(
-      "contoso.com",
+    expect(result.organizationId).toBe("org-acme");
+    expect(insertCalls.map((c) => c.table)).toEqual(["app_users", "app_organization_memberships"]);
+    expect(
+      insertCalls.find((c) => c.table === "app_organization_memberships")?.values,
+    ).toMatchObject({
+      organization_id: "org-acme",
+      source_provider: "github",
+      provider_organization_key: "acme.com",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-acme",
+        provider: "github",
+        metadata: expect.objectContaining({ emailDomainRouted: true }),
+      }),
     );
+  });
+
+  it("F-52: an UNVERIFIED GitHub address is not matched against the binding", async () => {
+    // GitHub has not proven it, and no verification step of ours runs for an
+    // OAuth sign-in, so it cannot claim a curated domain.
+    stubs.providerOrgSelect = () => {
+      throw new Error("an unverified GitHub address must not meet the binding");
+    };
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-gh-unverified",
+      email: "dev@acme.com",
+      emailVerified: false,
+      provider: "github",
+    });
+    expect(result.organizationId).toBe("org-default");
+    expect(insertCalls.some((c) => c.table === "app_organizations")).toBe(false);
   });
 
   it("F-40: places an unmapped sign-up in the org flagged is_default, whatever its slug", async () => {

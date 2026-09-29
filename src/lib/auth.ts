@@ -667,11 +667,11 @@ export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSess
  * Review 2026-09-04 #2 — two invariants this upholds:
  *   1. "The organization that will receive this sign-up" is resolved
  *      with the SAME precedence the `after` hook's provisioning uses
- *      (organization hint → provider metadata → email-domain routing
- *      → default), so the org whose policy waives verification is
- *      always the org the account lands in. Without the hint, a lax
- *      default org could waive verification for an account that
- *      `organizationHint` then placed in a strict org.
+ *      (organization hint → email-domain routing → default), so the
+ *      org whose policy waives verification is always the org the
+ *      account lands in. Without the hint, a lax default org could
+ *      waive verification for an account that `organizationHint` then
+ *      placed in a strict org.
  *   2. The waiver is stamped as `emailVerified: true` PLUS the
  *      distinct `emailVerificationWaived: true` marker, so downstream
  *      activation logic (domain auto-approval, sign-in re-evaluation)

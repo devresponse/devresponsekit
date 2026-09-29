@@ -188,9 +188,11 @@ function normalizeBindingKey(
  * Caller MUST hold `admin.orgs.update` AND have cross-org reach (an unbound
  * superadmin) — F-04. A binding is a PLATFORM-WIDE claim, not a setting of
  * one tenant: `(provider, key)` is unique across every organization, and an
- * `email` binding routes every uninvited email/password sign-up from that
- * domain into this organization, under this organization's admins. An org
- * admin who could bind `gmail.com` — or a competitor's `acme.com` — captured
+ * `email` binding routes every uninvited email/password sign-up, and every
+ * GitHub sign-up with a verified address (F-52), from that domain into this
+ * organization, under this organization's admins; a `github`, `google` or
+ * `microsoft` binding places nobody. An org admin who could bind
+ * `gmail.com` — or a competitor's `acme.com` — captured
  * strangers into their tenant (and, with `auto_active`, as active members
  * they could then administer) and squatted the domain from its real owner;
  * the 409 on a collision also told them which domains other tenants held.

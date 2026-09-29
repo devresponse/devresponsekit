@@ -17,15 +17,22 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ListLimitNotice } from "../../_components/list-limit-notice";
+import { scopedToOrgs, useGrantableOrgs } from "./_grantable-orgs";
 
 /**
  * Role picker for the user-detail "Assign role" dialog.
  *
- * Lists the ORG-SCOPED roles the caller can see (`GET /api/administrator/roles`,
- * org-boundary enforced server-side). Each option carries its own
- * `organization_id`, so the assign call derives the org context from the chosen
- * role — no separate org picker needed. Global roles (no org) are omitted: they
- * need an explicit org context to assign and are out of scope here.
+ * Lists the ORG-SCOPED roles of the TARGET USER's organizations
+ * (`GET /api/administrator/roles`, org-boundary enforced server-side). The
+ * assign endpoint grants a role only to an ACTIVE member of its org (F-154),
+ * so the picker reads the user's active memberships (`useGrantableOrgs`) and
+ * sends each org as a repeated `filter[organization]`, as the group picker
+ * does. It used to list every role in the caller's scope, so a superadmin was
+ * offered, and could assign, a role in an org the user had never joined. Each
+ * option carries its own `organization_id`, so the assign call derives the org
+ * context from the chosen role — no separate org picker needed. Global roles
+ * (no org) are omitted: they need an explicit org context to assign and are
+ * out of scope here.
  *
  * Searches SERVER-SIDE (`useAdminSearch`, F-41) by role key, role name or the
  * owning org's name, asking only for org-scoped roles (`filter[scope]=org`).
@@ -51,21 +58,34 @@ interface RoleListItem {
 }
 
 export function RolePicker({
+  userId,
   value,
   onChange,
   disabled = false,
   id = "role-picker",
 }: {
+  /** The user being assigned: the picker lists the roles of their orgs. */
+  userId: string;
   value: RoleOption | null;
   onChange(next: RoleOption | null): void;
   disabled?: boolean;
   id?: string;
 }) {
   const t = useTranslations("administrator.rolePicker");
-  const search = useAdminSearch<RoleListItem>("/api/administrator/roles?filter[scope]=org");
+  const { orgs, error: orgsError } = useGrantableOrgs(userId);
+  const search = useAdminSearch<RoleListItem>(
+    orgs === null
+      ? null
+      : scopedToOrgs("/api/administrator/roles?filter[scope]=org", [...orgs.keys()]),
+  );
   const [open, setOpen] = useState(false);
+  // No org: nothing the user can be assigned, and nothing to ask the server.
+  // The hint below says why the list is empty.
+  const noOrg = orgs !== null && orgs.size === 0;
+  const items = noOrg ? [] : search.items;
+  const hintId = `${id}-no-active-membership`;
 
-  if (search.error && search.items === null) {
+  if (orgsError || (search.error && items === null)) {
     return (
       <div className="space-y-2">
         <Label htmlFor={id}>{t("label")}</Label>
@@ -78,9 +98,9 @@ export function RolePicker({
 
   // Only org-scoped roles are directly assignable here.
   const roles: RoleOption[] | null =
-    search.items === null
+    items === null
       ? null
-      : search.items
+      : items
           .filter(
             (r): r is RoleListItem & { organization_id: string } => r.organization_id !== null,
           )
@@ -117,6 +137,7 @@ export function RolePicker({
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            aria-describedby={noOrg ? hintId : undefined}
             disabled={disabled || roles === null}
             className="w-full justify-between font-normal"
           >
@@ -160,7 +181,7 @@ export function RolePicker({
               </p>
             ) : null}
             <ListLimitNotice
-              shown={search.items?.length ?? 0}
+              shown={items?.length ?? 0}
               total={search.total}
               kind="search"
               className="border-t px-2 py-1.5"
@@ -168,6 +189,11 @@ export function RolePicker({
           </Command>
         </PopoverContent>
       </Popover>
+      {noOrg ? (
+        <p id={hintId} className="text-muted-foreground text-sm">
+          {t("noActiveMembership")}
+        </p>
+      ) : null}
     </div>
   );
 }

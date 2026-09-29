@@ -32,6 +32,8 @@ import { provisionUserFromAuth } from "@/lib/user-provisioning.server";
  *      admits nobody and confers no `superuser` role, on the explicit accept
  *      AND on a sign-up carrying it, and it stays void once the ban is lifted;
  *      a deactivated or removed inviter's invitation admits nobody either.
+ *   7. The shared grant rule (F-154): accepting over a blocked or suspended
+ *      membership, which the accept leaves as it is, writes no role.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts), excluded from `pnpm test`.
  * All fixtures use a `__dbtest_inv_` prefix and self-clean (audit rows via
@@ -597,6 +599,47 @@ describe("app_organization_invitations (DB-backed, 0008)", () => {
       await undo();
     }
   });
+
+  it.each(["blocked", "suspended"])(
+    "F-154: accepting over a %s membership records the acceptance but writes no role",
+    async (status) => {
+      const orgId = await newOrg(`withheld-${status}`);
+      // The inviter holds the invite permission, which is all the role carries,
+      // so standing (F-149) and AUTHZ-3 both pass: only the grant rule is left.
+      const roleId = await newCatalogRole(orgId, `withheld-role-${status}`, "admin.orgs.update");
+      const inviterId = await newInviter(orgId, `withheld-inviter-${status}`, roleId);
+      const inviteeId = await newUser(`withheld-invitee-${status}`, "active");
+      await db
+        .insertInto("app_organization_memberships")
+        .values({ organization_id: orgId, app_user_id: inviteeId, status })
+        .execute();
+
+      const created = await createInvitation({
+        organizationId: orgId,
+        email: EMAIL,
+        roleId,
+        invitedByAppUserId: inviterId,
+      });
+      const result = await consumeInvitation({
+        invitation: (await findValidInvitationByToken(created.plaintextToken))!,
+        appUser: { id: inviteeId, primaryEmail: EMAIL, status: "active" },
+        actorBetterAuthUserId: `${PREFIX}withheld-invitee-${status}`,
+      });
+
+      // Accepting lifts neither status, and the role used to be written anyway,
+      // to wake whenever the membership was restored.
+      expect(result).toEqual({ consumed: true, roleGranted: false });
+      expect(await membershipOf(inviteeId, orgId)).toEqual({ status });
+      expect(await rolesOf(inviteeId)).toEqual([]);
+      const audit = await db
+        .selectFrom("app_audit_events")
+        .select("metadata")
+        .where("event_type", "=", "auth.account.invitation_accepted")
+        .where("email", "=", EMAIL)
+        .executeTakeFirstOrThrow();
+      expect(audit.metadata).toMatchObject({ roleGranted: false, roleWithheld: roleId });
+    },
+  );
 
   it("treats a pending row past expires_at as expired at read time", async () => {
     const orgId = await newOrg("expiry");

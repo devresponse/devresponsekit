@@ -4,7 +4,10 @@ import { db } from "@/db/database";
 import type { AppDatabase } from "@/db/schema/app-schema";
 import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
 import type { UserAccessContext } from "@/lib/auth-status";
-import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
+import {
+  ACTIVE_ORGANIZATION_STATUS,
+  GRANT_ELIGIBLE_MEMBERSHIP_STATUS,
+} from "@/lib/validation/organizations";
 
 /**
  * Three-tier access control — the core security context
@@ -295,6 +298,67 @@ export async function userHasMembershipInOrg(
     .where("organization_id", "=", organizationId)
     .executeTakeFirst();
   return row !== undefined;
+}
+
+/**
+ * F-154 — which of `appUserIds` may RECEIVE a grant in `organizationId`: the
+ * users holding a {@link GRANT_ELIGIBLE_MEMBERSHIP_STATUS} (active) membership
+ * there. The ONE rule every path that writes a grant asks, before it writes:
+ * `POST /users/[id]/app-roles`, `POST /users/[id]/groups`,
+ * `POST /groups/[id]/members` and the role an accepted invitation carries
+ * (`consumeInvitation`). `tests/unit/grant-eligibility-invariant.test.ts`
+ * fails CI when a function or route handler writes a role assignment or a
+ * group membership without asking it.
+ *
+ * Those paths used to apply three rules. The role assignment checked no
+ * membership, so a superadmin could assign a role in an org the user had never
+ * joined, and the row conferred it as soon as the user became a member there.
+ * The user-centric group add accepted any status and its group-centric twin
+ * only `active`, so the same add succeeded from one page and 404'd from the
+ * other. An invitation accepted over a blocked or suspended membership still
+ * wrote its role, which woke when the block was lifted.
+ *
+ * This is NOT {@link userHasMembershipInOrg}, and the two must not be merged.
+ * That one answers REACH ("may an admin act on this user at all") and must
+ * accept every status, because approving, unblocking and reactivating act on
+ * exactly the non-active members (review #210). A grant is a different
+ * question: a role or group handed to a pending, blocked or suspended member
+ * confers nothing yet, and starts conferring the moment the membership is
+ * restored, by whoever restores it and for whatever reason. So a grant waits
+ * for an active membership, and the pickers offer only those orgs.
+ *
+ * The ORGANIZATION's status is deliberately not part of the rule, although a
+ * membership in an org that is not {@link ACTIVE_ORGANIZATION_STATUS} counts
+ * for nothing (F-09). Only a superadmin reaches such an org: an org admin's
+ * and a bound credential's access resolves no membership there. Only a
+ * superadmin reactivates it (ADR-0001), and reactivation restores exactly what
+ * was there. So the tier that grants in a suspended or pending tenant is the
+ * tier that brings it back, and the "restored by whoever" risk above does not
+ * arise. It matches `POST /organizations/[id]/members`, which lets a
+ * superadmin prepare a tenant's members before activating it. An accepted
+ * invitation needs an active org anyway (`consumeInvitation`'s F-09 flip).
+ */
+export async function grantEligibleUserIds(
+  organizationId: string,
+  appUserIds: ReadonlyArray<string>,
+): Promise<string[]> {
+  if (appUserIds.length === 0) return [];
+  const rows = await db
+    .selectFrom("app_organization_memberships")
+    .select("app_user_id")
+    .where("organization_id", "=", organizationId)
+    .where("status", "=", GRANT_ELIGIBLE_MEMBERSHIP_STATUS)
+    .where("app_user_id", "in", appUserIds)
+    .execute();
+  return rows.map((row) => row.app_user_id);
+}
+
+/** {@link grantEligibleUserIds} for one user (F-154). */
+export async function userIsGrantEligible(
+  appUserId: string,
+  organizationId: string,
+): Promise<boolean> {
+  return (await grantEligibleUserIds(organizationId, [appUserId])).length > 0;
 }
 
 /**

@@ -31,6 +31,7 @@ export const dynamic = "force-dynamic";
  *   - `organization` — UUID of organization (use the literal "global"
  *     to filter to roles where `organization_id IS NULL`). Any other value
  *     is a 400 (F-63); it used to be dropped, which listed every org's roles.
+ *     Repeat it to list several orgs' roles (F-154).
  *   - `scope` — `global` or `org`.
  *   - `permission` — permission key; returns roles holding that key.
  *
@@ -71,13 +72,21 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     .selectFrom("app_roles as r")
     .leftJoin("app_organizations as o", "o.id", "r.organization_id");
 
+  // May be repeated (the documented `explode` form), as on `GET /groups`: the
+  // user-detail role picker names the target user's orgs this way (F-154). A
+  // repeated value used to be dropped, which listed every org's roles.
   const orgFilter = query.filters.organization;
-  if (typeof orgFilter === "string") {
-    if (orgFilter === SCOPE_GLOBAL) {
-      base = base.where("r.organization_id", "is", null);
-    } else {
-      base = base.where("r.organization_id", "=", orgFilter);
-    }
+  const orgValues =
+    typeof orgFilter === "string" ? [orgFilter] : Array.isArray(orgFilter) ? orgFilter : [];
+  if (orgValues.length > 0) {
+    const orgIds = orgValues.filter((value) => value !== SCOPE_GLOBAL);
+    const includeGlobal = orgIds.length < orgValues.length;
+    base = base.where((eb) =>
+      eb.or([
+        ...(includeGlobal ? [eb("r.organization_id", "is", null)] : []),
+        ...(orgIds.length > 0 ? [eb("r.organization_id", "in", orgIds)] : []),
+      ]),
+    );
   }
 
   const scopeFilter = query.filters.scope;

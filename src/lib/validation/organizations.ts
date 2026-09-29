@@ -43,6 +43,16 @@ export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
  */
 export const ACTIVE_ORGANIZATION_STATUS = "active" satisfies OrganizationStatus;
 
+/**
+ * The ONE membership status under which a user may RECEIVE a grant in an
+ * organization (F-154): a role, a group, or an invitation's role. The server
+ * asks `grantEligibleUserIds` (`access-scope.server.ts`), and the user-detail
+ * role and group pickers list only the orgs where the target holds a
+ * membership of this status, so they offer what the server accepts. It lives
+ * here, not in that `server-only` module, so the pickers share the value.
+ */
+export const GRANT_ELIGIBLE_MEMBERSHIP_STATUS = "active";
+
 /** Partial update contract for `PATCH /api/administrator/organizations/[id]`. */
 export const updateOrganizationSchema = z
   .object({

@@ -548,14 +548,22 @@ be assigned (F-41). Every one now goes through
   (`filter[scope]=org`), and `GET /roles?q=` also matches the owning org's
   name, so typing an org's name lists that org's roles. `GET /groups?q=`
   matches the owning org's name too.
-- **The user-detail group picker lists the user's orgs' groups.** A user can
-  join only a group in an org they hold a membership in, so the picker reads
-  the user's memberships and sends each org as a repeated
-  `filter[organization]` (up to 100 orgs; past that it searches the caller's
-  whole scope). With 60 orgs each holding an `engineering` group named
-  "Engineering", a search across every org could not single out the right
+- **The user-detail role and group pickers list the user's active orgs'
+  roles and groups.** A user can be granted a role or a group only in an org
+  they hold an active membership in (F-154, §8.1), so both pickers read the
+  user's active memberships (`useGrantableOrgs` beside them in
+  `administrator/users/[userId]/`) and send each org as a repeated
+  `filter[organization]` (up to 100 orgs; past that they search the caller's
+  whole scope, and the server still refuses an org the user is not an active
+  member of). The role picker used to list every role in the caller's scope,
+  so a superadmin could assign a role in an org the user had never joined. A
+  user with no active membership (an org admin's new user is enrolled pending
+  approval by default, and a superadmin's has none) is offered nothing, and
+  the picker says why: approve, reactivate or add a membership first. Each
+  role option names its org. With 60 orgs each holding an `engineering` group
+  named "Engineering", a search across every org could not single out the right
   one; scoped to the user's orgs, it lists theirs. When the user belongs to
-  more than one org, each option names its org. Groups the user already
+  more than one org, each group option names its org. Groups the user already
   belongs to are listed but cannot be chosen ("Already a member"), so the
   list never reads "No groups found" while more are counted.
 - **Catalog editors read every page.** The role **Permissions** dual-list, the
@@ -665,12 +673,37 @@ Manages the application user lifecycle and per-user administration.
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`). Needs cross-org reach, so only a superadmin's cookie session: every API key and JWT is bound to one org (MACHINE-2, [design §3](./design-api-keys-and-tokens.md#3-caller-resolution)) and gets 403 `forbidden`, audited as `administrator.access.denied` (reason `cross_org_reach_required`, F-58) |
 | `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). A session is not tied to an org, so both revokes (all, or one by id) of a user shared with other orgs are superadmin-only (403 `forbidden` and an `admin.user.action_denied` row, AUTHZ-2; F-60, F-58). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
-| `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `PATCH/DELETE …/memberships` are rank-gated, and `DELETE …/app-roles` and `DELETE …/memberships` are conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2). `DELETE …/memberships` also deletes the user's roles and group memberships in that org (F-12, §8.3) |
+| `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `POST …/app-roles` and `POST …/groups` grant only to an active member of the role's or group's org (404 `user_not_found`, F-154, below). `PATCH/DELETE …/memberships` are rank-gated, and `DELETE …/app-roles` and `DELETE …/memberships` are conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2). `DELETE …/memberships` also deletes the user's roles and group memberships in that org (F-12, §8.3) |
 | `POST /users/bulk` | per-action key | Batch actions; see §13, §19 |
 
 The Better Auth `role` (`user`/`admin`) is distinct from app roles in
 `app_user_roles`. Created passwords are forwarded to Better Auth and never
 logged, returned, or placed in audit metadata.
+
+**A grant needs an active membership (F-154).** Every path that grants a user
+a role or a group asks one rule, `grantEligibleUserIds` in
+`src/lib/admin/access-scope.server.ts`: the user must hold an **active**
+membership in the org the role or group belongs to. The paths are
+`POST /users/[id]/app-roles`, `POST /users/[id]/groups`,
+`POST /groups/[id]/members` (§8.6) and the role an accepted invitation carries
+([sign-up policy](./auth-signup-policy.md)). A refused grant is 404
+`user_not_found`; the batch add drops the ineligible ids and answers 404 when
+none is left, and an invitation is still accepted but its role is withheld.
+They used to apply three rules. A superadmin could assign a role in an org the
+user had never joined, which conferred it as soon as they joined. The user-page
+group add accepted a pending, blocked or suspended member that the group page
+refused. An invitation accepted over a blocked membership still wrote its role,
+which woke when the block was lifted. Reaching a user is a different rule and
+still accepts every membership status, so an admin can approve, unblock or
+reactivate a member first and grant afterwards (review #210). The
+organization's own status is not part of the rule: only a superadmin reaches a
+tenant that is not active, and only a superadmin reactivates it, restoring what
+was prepared there (F-09).
+`tests/unit/grant-eligibility-invariant.test.ts` fails CI when code writes a
+role assignment or a group membership without asking the rule. The schema does
+not enforce it, so a row written outside these paths (a seed, a manual SQL
+write) is not checked. The Roles and Groups tabs' pickers offer only the roles
+and groups of the user's active orgs (§7.3).
 
 **Every caller the guard admits can use the Better Auth-backed actions
 (F-13).** Create (`POST /users`, `POST /api/v1/users` and the MCP `createUser`
@@ -1268,7 +1301,7 @@ nullable; `NULL` = a global/platform role, superadmin-only).
 
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
-| `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization`, `scope`, `permission`; `q` matches key, name and the owning org's name (§7.3) |
+| `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization` (may be repeated, F-154), `scope`, `permission`; `q` matches key, name and the owning org's name (§7.3) |
 | `POST /roles` | `admin.roles.create` | Org admin may create only within their own org; `admin.role.created` |
 | `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete |
 | `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden` and an `admin.permission.conferral_denied` row, F-58; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
@@ -1359,7 +1392,7 @@ permissions directly, so they add zero new authority primitives.
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
 | `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted`. DELETE carries the AUTHZ-3 subset test against everything the group confers (REVOKE-1, F-11): 403 `forbidden` and an `admin.group.delete_denied` row |
 | `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed` (records the applied delta, F-38). A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58). The Roles editor saves POST-then-DELETE, as described in §8.4 |
-| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58) |
+| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org, the rule every grant path shares (F-154, §8.1); `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58) |
 
 **Group revocation is bounded by the same guard as the grant (REVOKE-1).** The
 four routes that take a group-conferred role away —

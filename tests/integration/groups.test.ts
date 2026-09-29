@@ -633,13 +633,29 @@ describe("users/[id]/groups", () => {
   });
 
   it("POST 404 when the user is not a member of the group's org", async () => {
-    state.membership = undefined; // userHasMembershipInOrg → false
+    state.membership = undefined;
+    state.eligibleMembers = []; // grantEligibleUserIds → none
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     const res = await userGroups.POST(
       req(`users/${USER}/groups`, { method: "POST", body: { groupId: GROUP } }),
       userCtx,
     );
     expect(res.status).toBe(404);
+  });
+
+  it("POST 404 when the user's membership in the group's org is not ACTIVE, as on the group page (F-154)", async () => {
+    // A pending, blocked or suspended membership: the row exists, so the old
+    // any-status check admitted the add that `groups/[id]/members` refused.
+    state.membership = { id: "m-1" };
+    state.eligibleMembers = [];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await userGroups.POST(
+      req(`users/${USER}/groups`, { method: "POST", body: { groupId: GROUP } }),
+      userCtx,
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "user_not_found" });
+    expect(state.insertedValues).toEqual([]);
   });
 
   it("POST 403 when the group confers a permission the actor lacks (AUTHZ-3 — self-escalation)", async () => {

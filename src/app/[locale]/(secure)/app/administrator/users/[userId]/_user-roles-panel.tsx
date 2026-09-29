@@ -22,8 +22,9 @@ import { RolePicker, type RoleOption } from "./_role-picker";
  *
  * Lists the application ROLE ASSIGNMENTS a user holds, scoped per ADR-0001 by
  * the `/roles` endpoint. With `admin.roles.assign` the operator can also assign
- * a role (org context derived from the chosen role) and remove an assignment,
- * via `POST`/`DELETE /api/administrator/users/[id]/app-roles`.
+ * a role (org context derived from the chosen role; the picker offers only the
+ * roles of orgs the user is an active member of, F-154) and remove an
+ * assignment, via `POST`/`DELETE /api/administrator/users/[id]/app-roles`.
  *
  * F-67: assigning also needs `admin.roles.read`, because the picker lists
  * roles from `GET /api/administrator/roles`; removing does not. The role and
@@ -242,7 +243,7 @@ export function UserRolesPanel({
               <DialogTitle>{t("dialog.title")}</DialogTitle>
               <DialogDescription>{t("dialog.description")}</DialogDescription>
             </DialogHeader>
-            <RolePicker value={selectedRole} onChange={setSelectedRole} />
+            <RolePicker userId={userId} value={selectedRole} onChange={setSelectedRole} />
             {assignError ? (
               <p className="text-destructive text-sm" role="alert">
                 {assignError}

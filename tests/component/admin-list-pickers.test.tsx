@@ -41,6 +41,7 @@ import {
   type RoleOption,
 } from "@/app/[locale]/(secure)/app/administrator/users/[userId]/_role-picker";
 import { GroupPicker } from "@/app/[locale]/(secure)/app/administrator/users/[userId]/_group-picker";
+import { scopedToOrgs } from "@/app/[locale]/(secure)/app/administrator/users/[userId]/_grantable-orgs";
 import { RolePermissionsEditor } from "@/app/[locale]/(secure)/app/administrator/roles/[roleId]/_role-permissions-editor";
 import { GroupRolesEditor } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-roles-editor";
 import { OrganizationInvitationsPanel } from "@/app/[locale]/(secure)/app/administrator/organizations/[orgId]/_organization-invitations-panel";
@@ -281,27 +282,51 @@ const ROLES: Row[] = [
   },
 ];
 
-function serveRoles() {
+const ROLE_USER = "u-target";
+const ROLE_USER_MEMBERSHIPS_PATH = `/api/administrator/users/${ROLE_USER}/memberships`;
+
+/**
+ * Serves the user's memberships (org id → status) and a roles endpoint that,
+ * as the routes do, honours `filter[status]` on memberships, drops global
+ * roles for `filter[scope]=org`, and confines to repeated
+ * `filter[organization]` values.
+ */
+function serveRoles(memberships: Record<string, string>) {
   fetchMock.mockImplementation(async (input: unknown) => {
     const url = urlOf(input);
+    if (url.pathname === ROLE_USER_MEMBERSHIPS_PATH) {
+      const status = url.searchParams.get("filter[status]");
+      const rows = Object.entries(memberships)
+        .filter(([, s]) => status === null || s === status)
+        .map(([orgId]) => ({ id: `m-${orgId}`, organization_id: orgId, organization_name: orgId }));
+      return json(listAnswer(rows, url, { searchable: [] }));
+    }
     if (url.pathname === "/api/administrator/roles") {
-      // `filter[scope]=org` drops global roles, as the route does.
-      const rows =
-        url.searchParams.get("filter[scope]") === "org"
-          ? ROLES.filter((r) => r.organization_id !== null)
-          : ROLES;
+      const orgs = url.searchParams.getAll("filter[organization]");
+      const rows = ROLES.filter(
+        (r) =>
+          (url.searchParams.get("filter[scope]") !== "org" || r.organization_id !== null) &&
+          (orgs.length === 0 || orgs.includes(String(r.organization_id))),
+      );
       return json(listAnswer(rows, url, { searchable: ["key", "name", "organization_name"] }));
     }
     throw new Error(`unrouted fetch: ${url.pathname}`);
   });
 }
 
+/** An active membership in every org that holds a role. */
+const EVERY_ROLE_ORG = Object.fromEntries(
+  ROLES.filter((r) => r.organization_id !== null).map((r) => [r.organization_id, "active"]),
+);
+
 describe("RolePicker server search (F-41)", () => {
   it("asks for org-scoped roles only and finds one past position 200 by key or org name", async () => {
-    serveRoles();
+    // A user in more orgs than the picker names (100) is searched across the
+    // caller's whole scope, as the group picker does.
+    serveRoles(EVERY_ROLE_ORG);
     const onChange = vi.fn<(next: RoleOption | null) => void>();
     const user = userEvent.setup();
-    renderWithIntl(<RolePicker value={null} onChange={onChange} />);
+    renderWithIntl(<RolePicker userId={ROLE_USER} value={null} onChange={onChange} />);
 
     await openPicker(user, screen.getByRole("combobox", { name: "Role" }));
     expect(
@@ -322,6 +347,85 @@ describe("RolePicker server search (F-41)", () => {
       key: "support",
       name: "Support",
     });
+    // 261 orgs is past the 100 the picker names: no request named an org.
+    expect(
+      requestsTo("/api/administrator/roles").every(
+        (u) => u.searchParams.getAll("filter[organization]").length === 0,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("scopedToOrgs names up to 100 orgs, then falls back to the whole scope (F-154)", () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `org-${pad(i + 1)}`);
+  const named = (endpoint: string | null) =>
+    endpoint === null
+      ? null
+      : new URL(endpoint, "http://x").searchParams.getAll("filter[organization]").length;
+
+  it("asks nothing for no org, names 1 or 100, and names none past 100", () => {
+    expect(scopedToOrgs("/api/administrator/groups", [])).toBeNull();
+    expect(named(scopedToOrgs("/api/administrator/groups", ids(1)))).toBe(1);
+    expect(named(scopedToOrgs("/api/administrator/groups", ids(100)))).toBe(100);
+    expect(scopedToOrgs("/api/administrator/groups", ids(101))).toBe("/api/administrator/groups");
+  });
+
+  it("keeps an endpoint's own filters, joining with & rather than a second ?", () => {
+    expect(scopedToOrgs("/api/administrator/roles?filter[scope]=org", ["o1", "o2"])).toBe(
+      "/api/administrator/roles?filter[scope]=org&filter%5Borganization%5D=o1&filter%5Borganization%5D=o2",
+    );
+    expect(scopedToOrgs("/api/administrator/roles?filter[scope]=org", ids(101))).toBe(
+      "/api/administrator/roles?filter[scope]=org",
+    );
+  });
+});
+
+/**
+ * F-154: the role picker listed every org-scoped role in the caller's scope,
+ * so a superadmin was offered, and could assign, a role in an org the user had
+ * never joined. It now lists only the roles of the orgs the user is an ACTIVE
+ * member of, the rule the assign endpoint enforces.
+ */
+describe("RolePicker lists the roles of the target user's active orgs (F-154)", () => {
+  it("offers only those orgs' roles, each naming its org, and never a pending org's", async () => {
+    serveRoles({ "org-001": "active", "org-zen": "active", "org-002": "pending_approval" });
+    const onChange = vi.fn<(next: RoleOption | null) => void>();
+    const user = userEvent.setup();
+    renderWithIntl(<RolePicker userId={ROLE_USER} value={null} onChange={onChange} />);
+
+    await openPicker(user, screen.getByRole("combobox", { name: "Role" }));
+    expect(
+      (await screen.findAllByRole("option")).map((o) => o.textContent?.replace(/\s+/g, " ")),
+    ).toEqual(["Admin · Org 001", "Support · Zenith"]);
+    expect(requestsTo(ROLE_USER_MEMBERSHIPS_PATH)[0]!.searchParams.get("filter[status]")).toBe(
+      "active",
+    );
+    const scopes = requestsTo("/api/administrator/roles").map((u) =>
+      u.searchParams.getAll("filter[organization]"),
+    );
+    expect(scopes.length).toBeGreaterThan(0);
+    expect(scopes.every((s) => s.join() === "org-001,org-zen")).toBe(true);
+    expect(screen.queryByText(/not an active member/)).toBeNull();
+
+    await user.click(screen.getByRole("option", { name: /Support/ }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: "role-support" }));
+  });
+
+  it("a user with no active membership is offered nothing, told why, and no role list is asked for", async () => {
+    // New users default to pending approval: the empty list says why it is
+    // empty instead of reading as "this org has no roles".
+    serveRoles({ "org-002": "pending_approval" });
+    const user = userEvent.setup();
+    renderWithIntl(<RolePicker userId={ROLE_USER} value={null} onChange={vi.fn()} />);
+
+    const trigger = screen.getByRole("combobox", { name: "Role" });
+    await openPicker(user, trigger);
+    expect(await screen.findByText("No roles found.")).toBeInTheDocument();
+    expect(trigger).toHaveAccessibleDescription(
+      /not an active member of any organization you manage, so no role can be assigned yet/,
+    );
+    expect(requestsTo(ROLE_USER_MEMBERSHIPS_PATH)).toHaveLength(1);
+    expect(requestsTo("/api/administrator/roles")).toHaveLength(0);
   });
 });
 
@@ -351,19 +455,27 @@ describe("GroupPicker searches the target user's orgs (F-41)", () => {
   ];
 
   /**
-   * Serves the user's memberships in `orgs` and a groups endpoint that honours
-   * repeated `filter[organization]` and matches `q` on key, name and org name,
-   * as the route does. The org name is matched but not returned, as the route.
+   * Serves the user's active memberships in `orgs` (and pending ones in
+   * `pending`, honouring `filter[status]` as the route does) and a groups
+   * endpoint that honours repeated `filter[organization]` and matches `q` on
+   * key, name and org name, as the route does. The org name is matched but not
+   * returned, as the route.
    */
-  function serveGroups(orgs: number[]) {
+  function serveGroups(orgs: number[], pending: number[] = []) {
     fetchMock.mockImplementation(async (input: unknown) => {
       const url = urlOf(input);
       if (url.pathname === MEMBERSHIPS_PATH) {
-        const rows = orgs.map((n) => ({
-          id: `m-${pad(n)}`,
-          organization_id: orgId(n),
-          organization_name: orgName(n),
-        }));
+        const status = url.searchParams.get("filter[status]");
+        const rows = [
+          ...orgs.map((n) => ({ n, status: "active" })),
+          ...pending.map((n) => ({ n, status: "pending_approval" })),
+        ]
+          .filter((m) => status === null || m.status === status)
+          .map(({ n }) => ({
+            id: `m-${pad(n)}`,
+            organization_id: orgId(n),
+            organization_name: orgName(n),
+          }));
         return json(listAnswer(rows, url, { searchable: [] }));
       }
       if (url.pathname === "/api/administrator/groups") {
@@ -453,13 +565,38 @@ describe("GroupPicker searches the target user's orgs (F-41)", () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
-  it("a user with no organization in scope is offered nothing, and no group list is asked for", async () => {
-    serveGroups([]);
+  it("never offers a group in an org the user is not an ACTIVE member of (F-154)", async () => {
+    // The add endpoint refuses a pending, blocked or suspended member, so the
+    // picker asks for the active memberships only and names only those orgs.
+    serveGroups([57], [58]);
     const user = userEvent.setup();
     renderWithIntl(<GroupPicker userId={USER} value={null} onChange={vi.fn()} />);
 
     await openPicker(user, screen.getByRole("combobox", { name: "Group" }));
+    expect(
+      (await screen.findAllByRole("option")).map((o) => o.textContent?.replace(/\s+/g, " ")),
+    ).toEqual(["Engineering · engineering"]);
+    expect(requestsTo(MEMBERSHIPS_PATH)[0]!.searchParams.get("filter[status]")).toBe("active");
+    expect(
+      requestsTo("/api/administrator/groups").every(
+        (u) => u.searchParams.getAll("filter[organization]").join() === orgId(57),
+      ),
+    ).toBe(true);
+    expect(screen.queryByText(/not an active member/)).toBeNull();
+  });
+
+  it("a user with no active membership in scope is offered nothing, told why, and no group list is asked for", async () => {
+    // Pending only, as a new user is by default.
+    serveGroups([], [58]);
+    const user = userEvent.setup();
+    renderWithIntl(<GroupPicker userId={USER} value={null} onChange={vi.fn()} />);
+
+    const trigger = screen.getByRole("combobox", { name: "Group" });
+    await openPicker(user, trigger);
     expect(await screen.findByText("No groups found.")).toBeInTheDocument();
+    expect(trigger).toHaveAccessibleDescription(
+      /not an active member of any organization you manage, so they cannot be added to a group yet/,
+    );
     expect(requestsTo(MEMBERSHIPS_PATH)).toHaveLength(1);
     expect(requestsTo("/api/administrator/groups")).toHaveLength(0);
   });

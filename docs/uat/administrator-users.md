@@ -425,7 +425,7 @@ User stories
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `orgadmin@orga.local`; open a user's detail; click the **Roles** tab. | A grid of current role assignments renders. |
-    | 2 | Click the **Assign** button. | A dialog with a role picker opens. |
+    | 2 | Click the **Assign** button. | A dialog with a role picker opens. It lists only the roles of the organizations the user is an **active** member of, each naming its org (F-154). |
     | 3 | Select a role and confirm. | The dialog closes; the grid reloads and now includes the new role. |
     | 4 | Click **Remove** on that row and confirm the destructive dialog. | The row disappears after reload. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -445,8 +445,9 @@ Negative & edge cases
 2. Cross-tenant role/org → assigning with a foreign org/role id → 404 (not 403), so a foreign org's existence is not confirmed (`api/.../app-roles/route.ts:138`, `:141`).
 3. Remove is idempotent → removing an already-removed assignment still returns success (`api/.../app-roles/route.ts:190`).
 4. Inline error → a failed remove surfaces `role="alert"` text above the grid (`_user-roles-panel.tsx:184`).
-5. Superadmin, many orgs → sign in as Superadmin, open a user's Roles tab, click **Assign**, and in the picker type an org's name, then a role key. The picker lists the server's matches (role key, role name or the role's org name), offers only org-scoped roles, and shows "Showing N of M" while more match than are listed (F-41).
+5. Superadmin, a user in several orgs → sign in as Superadmin, open that user's Roles tab, click **Assign**, and in the picker type one of the user's org names, then a role key. The picker lists the server's matches (role key, role name or the role's org name) among the user's active orgs only, offers only org-scoped roles, and shows "Showing N of M" while more match than are listed (F-41, F-154).
 6. A role holding `admin.users.read` + `admin.roles.assign` but not `admin.roles.read` (a custom role) → per-row **Remove** is offered, **Assign** is not, and the audit log records no `administrator.access.denied` for opening the tab (F-67).
+7. User not an active member → for a user whose only membership is pending approval, blocked or suspended, the picker shows "No roles found." and, below it, says the user is not an active member of any organization you manage; a hand-made `POST …/app-roles` in that org, or (as Superadmin) in an org the user never joined, → 404 `user_not_found` and nothing is assigned (F-154).
 
 Accessibility: the assign dialog traps focus and closes on Esc; the picker is labelled; the destructive remove uses a confirm dialog. No axe violations.
 i18n: run `en` + `uk`; column headers, buttons, dialog text, and error messages localize; assigned dates localize.
@@ -472,7 +473,7 @@ User stories
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `orgadmin@orga.local`; open a user's detail; click the **Groups** tab. | The user's current groups render (or an empty-state message). |
-    | 2 | Click the **Add** button. | A dialog with a group picker opens. It lists the groups of the user's organizations; groups the user already belongs to show "Already a member" and cannot be chosen. Typing searches the server by group key, group name or org name (F-41). |
+    | 2 | Click the **Add** button. | A dialog with a group picker opens. It lists the groups of the organizations the user is an **active** member of (F-154); groups the user already belongs to show "Already a member" and cannot be chosen. Typing searches the server by group key, group name or org name (F-41). |
     | 3 | Pick `Engineering` and confirm. | The dialog closes; the list reloads and shows `Engineering`. |
     | 4 | Click **Remove** on `Engineering` and confirm. | The group is removed after reload. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -488,7 +489,7 @@ User stories
 
 Negative & edge cases
 1. Privilege escalation blocked → adding a user to a more-authoritative group → 403 (`api/.../groups/route.ts:119`); panel shows the add error.
-2. User must belong to the group's org → the picker offers only the groups of the user's orgs (a user with no membership in scope is offered none); a hand-made `POST …/groups` naming a group in another org → 404 (`api/.../groups/route.ts:124`).
+2. User must be an active member of the group's org → the picker offers only the groups of the user's active orgs (a user with no active membership in scope is offered none, and the picker says why); a hand-made `POST …/groups` naming a group in another org, or in an org where the user's membership is pending approval, blocked or suspended, → 404 `user_not_found`, the answer the group page's **Add member** gives (F-154).
 3. Cross-tenant group id → 404 (not 403) (`api/.../groups/route.ts:108`).
 4. Empty state / loading skeleton / inline error are all handled by the panel (`_user-groups-panel.tsx:146`, `:152`).
 5. Superadmin, a user in two orgs that each hold a group with the same key and name → sign in as Superadmin, open that user's Groups tab and click **Add**. Each option names its org, and typing one org's name narrows the list to that org's groups (F-41).

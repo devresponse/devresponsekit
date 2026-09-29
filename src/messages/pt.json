@@ -1225,7 +1225,8 @@
       "searchPlaceholder": "Pesquisar funções…",
       "noResults": "Nenhuma função encontrada.",
       "loading": "Carregando…",
-      "loadError": "Não foi possível carregar as funções."
+      "loadError": "Não foi possível carregar as funções.",
+      "noActiveMembership": "Este utilizador não é membro ativo de nenhuma organização que administra, pelo que ainda não lhe pode ser atribuída uma função. Primeiro aprove, reative ou adicione uma adesão."
     },
     "userPicker": {
       "label": "Usuário",
@@ -1242,6 +1243,7 @@
       "noResults": "Nenhum grupo encontrado.",
       "loading": "Carregando…",
       "loadError": "Não foi possível carregar os grupos.",
+      "noActiveMembership": "Este utilizador não é membro ativo de nenhuma organização que administra, pelo que ainda não pode ser adicionado a um grupo. Primeiro aprove, reative ou adicione uma adesão.",
       "alreadyMember": "Já é membro"
     },
     "listLimit": {

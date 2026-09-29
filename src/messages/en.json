@@ -1225,7 +1225,8 @@
       "searchPlaceholder": "Search roles…",
       "noResults": "No roles found.",
       "loading": "Loading…",
-      "loadError": "Couldn't load roles."
+      "loadError": "Couldn't load roles.",
+      "noActiveMembership": "This user is not an active member of any organization you manage, so no role can be assigned yet. Approve, reactivate or add a membership first."
     },
     "userPicker": {
       "label": "User",
@@ -1242,6 +1243,7 @@
       "noResults": "No groups found.",
       "loading": "Loading…",
       "loadError": "Couldn't load groups.",
+      "noActiveMembership": "This user is not an active member of any organization you manage, so they cannot be added to a group yet. Approve, reactivate or add a membership first.",
       "alreadyMember": "Already a member"
     },
     "listLimit": {

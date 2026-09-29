@@ -10,7 +10,7 @@ import {
   canAccessOrg,
   isSuperadmin,
   resolveOrgScope,
-  userHasMembershipInOrg,
+  userIsGrantEligible,
 } from "@/lib/admin/access-scope.server";
 import {
   permissionKeysForGroup,
@@ -79,7 +79,8 @@ async function loadGroup(groupId: string) {
  *
  * Add the target user to a group. Body: `{ groupId }`. The group must be in
  * the actor's scope and the user must hold an active membership in the
- * group's org. Caller MUST hold `admin.groups.assign`.
+ * group's org (F-154, `userIsGrantEligible`; 404 `user_not_found` otherwise).
+ * Caller MUST hold `admin.groups.assign`.
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
@@ -137,7 +138,11 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     }
   }
 
-  if (!(await userHasMembershipInOrg(target.appUserId, group.organization_id))) {
+  // F-154: the shared grant rule, an ACTIVE membership in the group's org, as
+  // the docstring always said. It used to ask `userHasMembershipInOrg`, the
+  // any-status REACH predicate, so a pending, blocked or suspended member
+  // could be added here while the group page refused the same add.
+  if (!(await userIsGrantEligible(target.appUserId, group.organization_id))) {
     return adminErrorResponse("user_not_found", 404, request);
   }
 

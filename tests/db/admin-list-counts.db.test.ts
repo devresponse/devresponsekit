@@ -19,7 +19,9 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  * The users list's `organization_names` column is pinned here too (F-126): it
  * is a correlated subquery with an org predicate of its own, apart from the row
  * filter, and a stubbed builder can only echo back the names it was primed
- * with, so only real rows show which organizations it names.
+ * with, so only real rows show which organizations it names. So is the
+ * permission catalog's `used_by_role_count` (F-127), for the same reason: the
+ * catalog rows are platform-global, but the count is over tenant roles.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts). Fixtures use `__dbtest_` and
  * self-clean. Only auth is mocked; `@/db/database` is the real pool.
@@ -41,6 +43,7 @@ const { db, pgPool } = await import("@/db/database");
 const { GET: rolesGET } = await import("@/app/api/administrator/roles/route");
 const { GET: orgsGET } = await import("@/app/api/administrator/organizations/route");
 const { GET: usersGET } = await import("@/app/api/administrator/users/route");
+const { GET: permissionsGET } = await import("@/app/api/administrator/permissions/route");
 
 const PREFIX = "__dbtest_listcnt_";
 
@@ -290,5 +293,61 @@ describe("users list `organization_names` (DB-backed, F-126)", () => {
     expect(names.size).toBe(2);
     expect(names.get(shared)).toBe("DBTest n_a, DBTest n_b");
     expect(names.get(onlyB)).toBe("DBTest n_b");
+  });
+});
+
+describe("permission catalog `used_by_role_count` (DB-backed, F-127)", () => {
+  // One permission held by a role in A, two roles in B and one global role
+  // (organization_id NULL). The catalog row is visible to every
+  // `admin.roles.read` holder; the count must cover only the roles that
+  // caller can list at GET /roles, as the "Roles using this" panel does.
+  let orgA: string;
+
+  beforeEach(async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "dbtest-ba" } });
+    orgA = await insertOrg("c_a");
+    const orgB = await insertOrg("c_b");
+    const perm = await insertPermission("counted");
+    const global = await db
+      .insertInto("app_roles")
+      .values({ organization_id: null, key: `${PREFIX}global`, name: "DBTest global" })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    const roles = [
+      await insertRole(orgA, "a1"),
+      await insertRole(orgB, "b1"),
+      await insertRole(orgB, "b2"),
+      global.id,
+    ];
+    await db
+      .insertInto("app_role_permissions")
+      .values(roles.map((role_id) => ({ role_id, permission_id: perm })))
+      .execute();
+  });
+
+  /** The count on this suite's catalog row, read as `access`. */
+  async function countAs(access: Partial<AuthStatusModule.UserAccessContext>) {
+    accessGetter.mockResolvedValue({ ...SUPERADMIN, ...access });
+    const res = await permissionsGET(listReq("permissions", "q=__dbtest_listcnt_counted"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { key: string; used_by_role_count: number }[] };
+    expect(body.items.map((r) => r.key)).toEqual([`${PREFIX}counted`]);
+    return body.items[0]!.used_by_role_count;
+  }
+
+  it("an org admin of A counts A's roles only, never B's or the global one", async () => {
+    // 4 before F-127: two of B's roles and a global role told A's admin
+    // how many roles other tenants had built with this permission.
+    expect(await countAs({ organizationId: orgA, permissions: ["admin.roles.read"] })).toBe(1);
+  });
+
+  it("an org admin with no resolvable org counts none (the roles list shows them none)", async () => {
+    expect(await countAs({ organizationId: null, permissions: ["admin.roles.read"] })).toBe(0);
+  });
+
+  it("CONTROL: a superadmin whose active org is also A counts every role", async () => {
+    expect(
+      await countAs({ organizationId: orgA, permissions: ["admin.roles.read", "superuser"] }),
+    ).toBe(4);
   });
 });

@@ -8,6 +8,7 @@ import {
   type ResolvedCaller,
 } from "@/lib/api-auth/resolve-caller.server";
 import { mcpAudience } from "@/lib/api-auth/resources";
+import { decideSecureAccess } from "@/lib/auth-status";
 import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
@@ -17,6 +18,7 @@ import { effectiveScopeHolder } from "@/lib/mcp/openapi-tools";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import {
   type JsonRpcResponse,
+  RPC_FORBIDDEN,
   RPC_INVALID_REQUEST,
   RPC_PARSE_ERROR,
   RPC_RATE_LIMITED,
@@ -74,7 +76,9 @@ const MAX_BODY_BYTES = 1024 * 1024;
  * resource (`resource=<origin>/api/mcp` at the token endpoint, RFC 8707).
  * No valid credential → 401 with `WWW-Authenticate` naming the protected-
  * resource metadata (RFC 9728 §5.1) and, for a presented token that was
- * refused, the RFC 6750 `invalid_token` error ({@link bearerChallenge}).
+ * refused, the RFC 6750 `invalid_token` error ({@link bearerChallenge}). A
+ * valid credential whose principal may not act (`decideSecureAccess`, I-15)
+ * → 403 with JSON-RPC error `-32003`.
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const env = getServerEnv();
@@ -160,6 +164,17 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
   }
   const caller = resolution.caller;
+
+  // I-15: the status gate the v1 guards apply, before any method is served.
+  // The access context keeps a blocked principal's role permissions (a
+  // superuser grant included), because rank checks read a blocked TARGET's,
+  // so a key or token whose user is suspended, pending or blocked in the
+  // bound org still resolves with them. Without this, `tools/list` offered
+  // that credential every tool its roles grant and `tools/call` minted it a
+  // v1 exchange token, which v1 then refused.
+  if (decideSecureAccess(caller.access.status, caller.access.membershipStatus) !== "allow") {
+    return jsonRpc(rpcError(messageId, RPC_FORBIDDEN, "Forbidden"), 403);
+  }
 
   // Notifications carry no data access and receive no response — but they are
   // still requests to a PROTECTED resource, so the bearer check comes first

@@ -22,7 +22,7 @@ function literalGlob(path: string): string {
  * (`perFile` is a global-only switch), so one `src/app/api/v1/**` key would let
  * an untested handler hide behind fifteen tested ones. The review found
  * `GET` and `DELETE /api/v1/admin/oauth-clients/[id]` in exactly that state,
- * guarded only by a scan that sees the file import a scope helper. Each file
+ * guarded only by a scan that then saw the file import a scope helper. Each file
  * therefore gets a key of its own. The v1 files are read from the tree, so a
  * v1 route added later is floored as soon as it lands.
  *

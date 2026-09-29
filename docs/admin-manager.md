@@ -1400,7 +1400,7 @@ identical for every tenant.
 
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
-| `GET /permissions` | `admin.roles.read` | List with usage counts (any admin may read it to compose roles) |
+| `GET /permissions` | `admin.roles.read` | List with usage counts (any admin may read it to compose roles). A count covers only the roles the caller can list at `GET /roles`: their org's for an org admin, every role for a superadmin (F-127) |
 | `POST /permissions` | `admin.permissions.manage` | **Superadmin-only**; `admin.permission.created` |
 | `PATCH/DELETE /permissions/[id]` | `admin.permissions.manage` | **Superadmin-only**; `admin.permission.updated` / `.deleted`; delete is blocked while in use (`.delete_blocked`) |
 

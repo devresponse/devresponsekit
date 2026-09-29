@@ -25,6 +25,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
 import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { ADMIN_MAIL_EVENTS, enforceOrgAdminMailBudget } from "@/lib/admin/admin-mail-budget.server";
 import { refuseUnconferrable } from "@/lib/admin/refusals.server";
+import type { SendAppEmailResult } from "@/lib/email/send.server";
 import { createInvitation, sendInvitationEmail } from "@/lib/invitations.server";
 import { createInvitationSchema } from "@/lib/validation/invitations";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
@@ -132,6 +133,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * F-64: the invitation is a mail to an address the caller chooses, so its
  * per-actor budget comes from the shared bucket, and an org-confined caller
  * spends the org's daily admin-mail budget (429 `rate_limited` once spent).
+ *
+ * F-104: `ok` is false when the provider rejected the email: the invitation is
+ * created, but nobody received its link. The audit row carries the outbox id
+ * and the email's status, and is `error` for a rejection or a send that threw.
  *
  * Caller MUST hold `admin.orgs.update`.
  */
@@ -250,9 +255,38 @@ export const POST = withAdminRoute(async function POST(
     throw err;
   }
 
+  // F-104: the audit names what became of the email. A rejected one is an
+  // `error`: the invitation stands, but its only copy of the link was refused.
+  const audit = (delivery: SendAppEmailResult | null) =>
+    auditOrgAction(
+      ADMIN_MAIL_EVENTS.invitationCreated,
+      delivery && delivery.status !== "failed" ? "success" : "error",
+      {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        organizationId: org.id,
+        requestId: guard.requestId,
+        reason:
+          delivery === null
+            ? "email_send_failed"
+            : delivery.status === "failed"
+              ? "email_rejected"
+              : null,
+        metadata: {
+          organizationId: org.id,
+          slug: org.slug,
+          invitationId: created.id,
+          email,
+          roleId: parsed.data.roleId ?? null,
+          outboxId: delivery?.outboxId ?? null,
+          emailStatus: delivery?.status ?? null,
+        },
+      },
+    );
+
   // Outbox-first delivery (specs.md §35): the accept link exists only in
   // this email; the DB holds the token's hash.
-  await sendInvitationEmail({
+  const delivery = await sendInvitationEmail({
     to: email,
     // ADR-0001 / review #220: the outbox row belongs to the inviting org, so
     // its admins can see the invitation in their own Email workspace.
@@ -260,24 +294,24 @@ export const POST = withAdminRoute(async function POST(
     organizationName: org.name,
     inviterAppUserId: guard.access.appUserId,
     plaintextToken: created.plaintextToken,
+  }).catch(async (err: unknown) => {
+    // F-104: the invitation exists already, so a send that throws still
+    // leaves its audit row before the 500. It threw before its outbox row
+    // was written (sendAppEmail returns every outcome after that, a failed
+    // row UPDATE included), so nothing was queued. An admin who tries again
+    // meets 409 `invitation_exists`, and resends instead.
+    await audit(null);
+    throw err;
   });
-
-  await auditOrgAction(ADMIN_MAIL_EVENTS.invitationCreated, "success", {
-    request,
-    actorBetterAuthUserId: guard.betterAuthUserId,
-    organizationId: org.id,
-    requestId: guard.requestId,
-    metadata: {
-      organizationId: org.id,
-      slug: org.slug,
-      invitationId: created.id,
-      email,
-      roleId: parsed.data.roleId ?? null,
-    },
-  });
+  await audit(delivery);
 
   return NextResponse.json(
-    { ok: true, id: created.id, expiresAt: created.expiresAt.toISOString() },
+    {
+      // F-104: false when the provider rejected the email (see above).
+      ok: delivery.status !== "failed",
+      id: created.id,
+      expiresAt: created.expiresAt.toISOString(),
+    },
     { status: 201 },
   );
 });

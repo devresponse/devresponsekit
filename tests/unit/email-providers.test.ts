@@ -186,3 +186,50 @@ describe("delivery failure classification (review #219)", () => {
     expect(err.message).toBe("resend 403: domain not verified");
   });
 });
+
+/**
+ * F-99: the inline send retries a 429 or 5xx, and a retry before the window a
+ * rate-limited provider named is only another 429. Both providers carry the
+ * response's `Retry-After` on the error.
+ */
+describe("Retry-After (F-99)", () => {
+  it("parses delta-seconds and an HTTP-date, and ignores anything else", () => {
+    const now = Date.parse("2026-09-29T12:00:00Z");
+    expect(mod.parseRetryAfterMs("2", now)).toBe(2000);
+    expect(mod.parseRetryAfterMs(" 0 ", now)).toBe(0);
+    expect(mod.parseRetryAfterMs("Tue, 29 Sep 2026 12:00:05 GMT", now)).toBe(5000);
+    // A date already past means "now", never a negative wait.
+    expect(mod.parseRetryAfterMs("Tue, 29 Sep 2026 11:59:00 GMT", now)).toBe(0);
+    for (const junk of [null, undefined, "", "soon", "-3", "1.5"]) {
+      expect(mod.parseRetryAfterMs(junk, now)).toBeUndefined();
+    }
+  });
+
+  it("Resend and Mailgun carry the response's Retry-After on the error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => new Response("slow down", { status: 429, headers: { "retry-after": "2" } }),
+      ),
+    );
+    state.env = { EMAIL_PROVIDER: "resend", RESEND_API_KEY: "re_test" };
+    await expect(mod.getConfiguredEmailProvider()!.deliver(email)).rejects.toMatchObject({
+      status: 429,
+      retryAfterMs: 2000,
+    });
+    state.env = {
+      EMAIL_PROVIDER: "mailgun",
+      MAILGUN_API_KEY: "key",
+      MAILGUN_DOMAIN: "mail.example.com",
+      MAILGUN_BASE_URL: "https://api.mailgun.net",
+    };
+    await expect(mod.getConfiguredEmailProvider()!.deliver(email)).rejects.toMatchObject({
+      status: 429,
+      retryAfterMs: 2000,
+    });
+  });
+
+  it("leaves retryAfterMs unset when the provider named no wait", () => {
+    expect(new mod.EmailDeliveryError("resend", 503, "unavailable").retryAfterMs).toBeUndefined();
+  });
+});

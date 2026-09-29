@@ -949,6 +949,7 @@
         "sendError": "No se pudo enviar la invitación.",
         "resendButton": "Reenviar",
         "resent": "Invitación reenviada con un enlace nuevo.",
+        "undelivered": "La invitación se guardó, pero el proveedor de correo rechazó el mensaje, así que el enlace no se entregó. Revisa la dirección y vuelve a enviarla.",
         "resendError": "No se pudo reenviar la invitación.",
         "revokeButton": "Revocar",
         "revokeConfirm": "¿Revocar esta invitación?",

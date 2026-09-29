@@ -376,3 +376,44 @@ describe("OrganizationInvitationsPanel role select (F-67)", () => {
     });
   });
 });
+
+/**
+ * F-104: create and resend answer 201 / 200 even when the mail provider
+ * rejected the email, now with `ok: false`. The panel said "Invitation sent."
+ * either way, so an admin never learned that nobody received the link.
+ */
+describe("A rejected invitation email is not reported as sent (F-104)", () => {
+  const UNDELIVERED =
+    "Invitation saved, but the mail provider rejected its email, so the link was not delivered. Check the address, then resend it.";
+
+  it("invite answered ok:false says the link was not delivered", async () => {
+    answers.invite = {
+      status: 201,
+      body: { ok: false, id: "i9", expiresAt: "2026-10-06T00:00:00Z" },
+    };
+    const user = await renderPanel();
+    await invite(user);
+    expect(await screen.findByRole("alert")).toHaveTextContent(UNDELIVERED);
+    expect(screen.queryByText("Invitation sent.")).toBeNull();
+  });
+
+  it("invite answered ok:true still says sent", async () => {
+    answers.invite = {
+      status: 201,
+      body: { ok: true, id: "i9", expiresAt: "2026-10-06T00:00:00Z" },
+    };
+    const user = await renderPanel();
+    await invite(user);
+    expect(await screen.findByRole("status")).toHaveTextContent("Invitation sent.");
+  });
+
+  it("resend answered ok:false says the link was not delivered, and reloads", async () => {
+    answers.resend = { status: 200, body: { ok: false, expiresAt: "2026-10-06T00:00:00Z" } };
+    const user = await renderPanel();
+    const before = listReads();
+    await user.click(screen.getByRole("button", { name: "Resend" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(UNDELIVERED);
+    expect(screen.queryByText("Invitation re-sent with a fresh link.")).toBeNull();
+    await waitFor(() => expect(listReads()).toBe(before + 1));
+  });
+});

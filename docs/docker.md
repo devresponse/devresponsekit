@@ -394,13 +394,16 @@ volumes:
   excluded from the build context by `.dockerignore`, so the image holds only
   servable content.
 - **Email retries need a scheduled drainer.** `sendAppEmail` attempts delivery
-  once inline; a transient provider failure leaves the row retryable in
-  `app_outbox`. Run **`pnpm outbox:drain`** periodically (cron / K8s CronJob /
+  inline, retrying a transient provider failure up to three attempts within
+  about 20 seconds (F-99); a failure that outlasts those leaves the row
+  retryable in `app_outbox`. Run **`pnpm outbox:drain`** periodically (cron / K8s CronJob /
   scheduled task) to re-attempt those rows with backoff until they succeed or
   hit the cap. Like migrations, it needs the dev toolchain (`tsx`, `src/db`),
   so run it from a source checkout or a "tools" image — not the runtime
   container. `OUTBOX_DRAIN_LIMIT` (default 100) bounds rows per run; concurrent
-  runs are safe (`FOR UPDATE SKIP LOCKED`). Because the drainer is its own
+  runs are safe (`FOR UPDATE SKIP LOCKED`), and a row an inline send is still
+  delivering is leased to it for two minutes, so even a drain every minute
+  does not send it twice (F-101). Because the drainer is its own
   process, its outcomes never reach the server's `/api/metrics`: they are in
   its `email_delivery` log lines and its `[outbox] … expired=…` summary line.
   To have them counted in `devresponsekit_outbox_delivery_total`, have the

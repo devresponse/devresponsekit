@@ -12,6 +12,7 @@ import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
 import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
 import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 import { auditEvent } from "@/lib/audit.server";
+import type { SendAppEmailResult } from "@/lib/email/send.server";
 import { getServerEnv } from "@/lib/env";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
@@ -121,6 +122,10 @@ export function buildInvitationAcceptUrl(plaintextToken: string): string {
  * `sendAppEmail` replaces the `?token=` value before the row is written
  * (review #21, `outbox-secrets.ts`) — so attribution buys delivery visibility
  * without handing anyone a usable accept link.
+ *
+ * F-104: returns `sendAppEmail`'s outcome. The accept link exists only in this
+ * email, so the routes report a provider rejection (`failed`) to the admin and
+ * on the audit row instead of answering "sent" regardless.
  */
 export async function sendInvitationEmail(input: {
   to: string;
@@ -128,7 +133,7 @@ export async function sendInvitationEmail(input: {
   organizationName: string;
   inviterAppUserId: string | null;
   plaintextToken: string;
-}): Promise<void> {
+}): Promise<SendAppEmailResult> {
   const inviter = input.inviterAppUserId
     ? await db
         .selectFrom("app_users")
@@ -137,7 +142,7 @@ export async function sendInvitationEmail(input: {
         .executeTakeFirst()
     : undefined;
   const { sendAppEmail } = await import("@/lib/email/send.server");
-  await sendAppEmail({
+  return sendAppEmail({
     to: input.to,
     templateKey: "organization_invitation",
     organizationId: input.organizationId,

@@ -949,6 +949,7 @@
         "sendError": "无法发送邀请。",
         "resendButton": "重新发送",
         "resent": "已使用新链接重新发送邀请。",
+        "undelivered": "邀请已保存，但邮件服务商拒收了这封邮件，链接未送达。请检查地址后重新发送。",
         "resendError": "无法重新发送邀请。",
         "revokeButton": "撤销",
         "revokeConfirm": "撤销此邀请？",

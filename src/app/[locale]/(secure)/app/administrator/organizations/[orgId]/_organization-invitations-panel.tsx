@@ -60,6 +60,9 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  * for a role the admin may not confer (403 `forbidden`, AUTHZ-3), a deleted
  * role, the rate limit and an invitation that is already gone. See
  * `refusalMessage`.
+ *
+ * F-104: a create or resend whose email the provider rejected answers
+ * `ok: false`; the notice says the link was not delivered instead of "sent".
  */
 interface InvitationRow {
   id: string;
@@ -150,6 +153,19 @@ export function OrganizationInvitationsPanel({
     }
   }, [form, orgId, canReadRoles]);
 
+  // F-104: create and resend succeed even when the mail provider rejects the
+  // email (`ok: false`). The invitation stands, but nobody received its link,
+  // so the notice says that instead of "sent".
+  const deliveryNotice = useCallback(
+    async (res: Response, sent: string): Promise<{ kind: "error" | "success"; text: string }> => {
+      const body = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+      return body?.ok === false
+        ? { kind: "error", text: t("undelivered") }
+        : { kind: "success", text: sent };
+    },
+    [t],
+  );
+
   const onInvite = async (values: CreateInvitationInput) => {
     form.clearErrors("root");
     try {
@@ -161,7 +177,7 @@ export function OrganizationInvitationsPanel({
       });
       if (res.status === 201) {
         setDialogOpen(false);
-        setRowNotice({ kind: "success", text: t("sent") });
+        setRowNotice(await deliveryNotice(res, t("sent")));
         setReloadKey((k) => k + 1);
         return;
       }
@@ -249,10 +265,10 @@ export function OrganizationInvitationsPanel({
         reloadIfGone(body);
         return;
       }
-      setRowNotice({ kind: "success", text: t("resent") });
+      setRowNotice(await deliveryNotice(res, t("resent")));
       setReloadKey((k) => k + 1);
     },
-    [dialogs, orgId, t, tErr, tApiErr, reloadIfGone],
+    [dialogs, orgId, t, tErr, tApiErr, reloadIfGone, deliveryNotice],
   );
 
   const onRevoke = useCallback(

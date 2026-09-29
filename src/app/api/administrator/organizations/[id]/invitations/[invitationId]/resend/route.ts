@@ -13,6 +13,7 @@ import {
   enforceRecipientCooldown,
 } from "@/lib/admin/admin-mail-budget.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import type { SendAppEmailResult } from "@/lib/email/send.server";
 import {
   enforceInviterStanding,
   regenerateInvitationToken,
@@ -42,6 +43,10 @@ interface RouteContext {
  * 10 minutes (by anyone), or when an org-confined caller's organization has
  * spent its daily admin-mail budget. The per-actor budget is the create
  * route's, from the shared bucket.
+ *
+ * F-104: `ok` is false when the provider rejected the email: the token is
+ * rotated, so the previous link is dead, and nobody received the new one. The
+ * audit row carries the outbox id and the email's status, as on create.
  *
  * Caller MUST hold `admin.orgs.update`.
  */
@@ -132,22 +137,50 @@ export const POST = withAdminRoute(async function POST(
     return adminErrorResponse("invitation_not_found", 404, request);
   }
 
-  await sendInvitationEmail({
+  // F-104: as on create, the audit names what became of the email, and a
+  // send that throws after the rotation (before its outbox row was written,
+  // so nothing was queued) is audited before the 500.
+  const audit = (delivery: SendAppEmailResult | null) =>
+    auditOrgAction(
+      ADMIN_MAIL_EVENTS.invitationResent,
+      delivery && delivery.status !== "failed" ? "success" : "error",
+      {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        organizationId: org.id,
+        requestId: guard.requestId,
+        reason:
+          delivery === null
+            ? "email_send_failed"
+            : delivery.status === "failed"
+              ? "email_rejected"
+              : null,
+        metadata: {
+          organizationId: org.id,
+          slug: org.slug,
+          invitationId,
+          outboxId: delivery?.outboxId ?? null,
+          emailStatus: delivery?.status ?? null,
+        },
+      },
+    );
+
+  const delivery = await sendInvitationEmail({
     to: invitation.email,
     // ADR-0001 / review #220: attribute the resend to the inviting org too.
     organizationId: org.id,
     organizationName: org.name,
     inviterAppUserId: guard.access.appUserId,
     plaintextToken: rotated.plaintextToken,
+  }).catch(async (err: unknown) => {
+    await audit(null);
+    throw err;
   });
+  await audit(delivery);
 
-  await auditOrgAction(ADMIN_MAIL_EVENTS.invitationResent, "success", {
-    request,
-    actorBetterAuthUserId: guard.betterAuthUserId,
-    organizationId: org.id,
-    requestId: guard.requestId,
-    metadata: { organizationId: org.id, slug: org.slug, invitationId },
+  return NextResponse.json({
+    // F-104: false when the provider rejected the email (see above).
+    ok: delivery.status !== "failed",
+    expiresAt: rotated.expiresAt.toISOString(),
   });
-
-  return NextResponse.json({ ok: true, expiresAt: rotated.expiresAt.toISOString() });
 });

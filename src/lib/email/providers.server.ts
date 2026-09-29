@@ -52,9 +52,28 @@ export interface EmailProvider {
  * (outbox-worker.server.ts) re-attempts it — a TIMED-OUT row becomes
  * terminally `failed` only after OUTBOX_MAX_ATTEMPTS (review #82); a row the
  * provider rejected permanently fails on attempt 1 ({@link EmailDeliveryError},
- * review #219).
+ * review #219). `sendAppEmail`'s inline retries (F-99) start another attempt
+ * only when a whole timeout still fits their budget.
  */
-const PROVIDER_TIMEOUT_MS = 10_000;
+export const PROVIDER_TIMEOUT_MS = 10_000;
+
+/**
+ * A `Retry-After` header as milliseconds from `now` (F-99): delta-seconds or
+ * an HTTP-date (RFC 9110 §10.2.3). Absent or unparseable → `undefined`, and
+ * the caller's own backoff applies.
+ */
+export function parseRetryAfterMs(
+  value: string | null | undefined,
+  now: number = Date.now(),
+): number | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  // Every HTTP-date form opens with a day name. `Date.parse` alone would read
+  // "-3" or "1.5" as a year.
+  const at = /^[A-Za-z]/.test(trimmed) ? Date.parse(trimmed) : Number.NaN;
+  return Number.isNaN(at) ? undefined : Math.max(0, at - now);
+}
 
 /**
  * A provider rejection carrying its HTTP status and a retry verdict
@@ -72,13 +91,20 @@ export class EmailDeliveryError extends Error {
   readonly provider: string;
   readonly status: number;
   readonly retryable: boolean;
+  /**
+   * How long the provider asked us to wait (its `Retry-After`), when it said.
+   * The inline retry (F-99) never comes back sooner: a 429 retried before its
+   * window reopens is only another 429.
+   */
+  readonly retryAfterMs: number | undefined;
 
-  constructor(provider: string, status: number, body: string) {
+  constructor(provider: string, status: number, body: string, retryAfter?: string | null) {
     super(`${provider} ${status}: ${body}`);
     this.name = "EmailDeliveryError";
     this.provider = provider;
     this.status = status;
     this.retryable = isRetryableDeliveryStatus(status);
+    this.retryAfterMs = parseRetryAfterMs(retryAfter);
   }
 }
 
@@ -140,7 +166,12 @@ function createResendProvider(apiKey: string): EmailProvider {
         }),
       });
       if (!res.ok) {
-        throw new EmailDeliveryError("resend", res.status, truncateBody(await res.text()));
+        throw new EmailDeliveryError(
+          "resend",
+          res.status,
+          truncateBody(await res.text()),
+          res.headers.get("retry-after"),
+        );
       }
       const body = (await res.json()) as { id?: string };
       return { providerMessageId: body.id };
@@ -177,7 +208,12 @@ function createMailgunProvider(apiKey: string, domain: string, baseUrl: string):
         body: form.toString(),
       });
       if (!res.ok) {
-        throw new EmailDeliveryError("mailgun", res.status, truncateBody(await res.text()));
+        throw new EmailDeliveryError(
+          "mailgun",
+          res.status,
+          truncateBody(await res.text()),
+          res.headers.get("retry-after"),
+        );
       }
       const body = (await res.json()) as { id?: string };
       return { providerMessageId: body.id };

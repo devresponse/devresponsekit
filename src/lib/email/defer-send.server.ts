@@ -17,7 +17,9 @@ import { sendAppEmail, type SendAppEmailInput } from "./send.server";
  *
  * This helper schedules the whole `sendAppEmail` call with Next's `after()`,
  * which runs it once the response has been sent. On Vercel `after()` is backed
- * by `waitUntil`, so the function stays alive until the send settles. The
+ * by `waitUntil`, so the function stays alive until the send settles, bounded
+ * retries of a transient provider failure included (F-99,
+ * `INLINE_DELIVERY_BUDGET_MS`). The
  * outbox row is written after the response too. Keeping only the INSERT
  * inline would still leave four database round trips that happen only for a
  * real account. What changes is that the row appears a few milliseconds after

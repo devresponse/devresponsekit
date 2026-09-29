@@ -949,6 +949,7 @@
         "sendError": "Impossible d'envoyer l'invitation.",
         "resendButton": "Renvoyer",
         "resent": "Invitation renvoyée avec un nouveau lien.",
+        "undelivered": "L'invitation est enregistrée, mais le fournisseur de messagerie a refusé l'e-mail : le lien n'a pas été remis. Vérifiez l'adresse, puis renvoyez-la.",
         "resendError": "Impossible de renvoyer l'invitation.",
         "revokeButton": "Révoquer",
         "revokeConfirm": "Révoquer cette invitation ?",

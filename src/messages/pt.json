@@ -949,6 +949,7 @@
         "sendError": "Não foi possível enviar o convite.",
         "resendButton": "Reenviar",
         "resent": "Convite reenviado com um novo link.",
+        "undelivered": "O convite foi guardado, mas o fornecedor de e-mail rejeitou a mensagem, por isso o link não foi entregue. Verifique o endereço e reenvie-o.",
         "resendError": "Não foi possível reenviar o convite.",
         "revokeButton": "Revogar",
         "revokeConfirm": "Revogar este convite?",

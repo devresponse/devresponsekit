@@ -92,8 +92,14 @@ function orgAdmin(perms: string[]): AuthStatusModule.UserAccessContext {
     permissions: perms,
   };
 }
+/**
+ * The superadmin's own active org is ORG_A too (F-126). With no org it could
+ * never put ORG_A into a clause, so "never narrowed to ORG_A" held whether or
+ * not the superadmin bypass worked: a broken bypass left it with a null scope,
+ * an empty page and no query at all.
+ */
 function superadmin(perms: string[]): AuthStatusModule.UserAccessContext {
-  return { ...orgAdmin(perms), organizationId: null, permissions: [...perms, "superuser"] };
+  return { ...orgAdmin(perms), permissions: [...perms, "superuser"] };
 }
 
 function listReq(path: string): NextRequest {
@@ -137,6 +143,10 @@ describe("administrator list routes — ADR-0001 org filter reaches SQL", () => 
         const { GET } = await import(r.mod);
         const res = await GET(listReq(`/api/administrator/${r.name}`));
         expect(res.status).toBe(200);
+        // The query ran and returned rows: a null scope answers an empty page
+        // without one, which would pass the check below vacuously.
+        const body = (await res.json()) as { items: unknown[] };
+        expect(body.items.length).toBeGreaterThan(0);
         expect(state.whereValues).not.toContain(ORG_A);
       });
     });

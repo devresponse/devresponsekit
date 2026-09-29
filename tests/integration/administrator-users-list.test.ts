@@ -10,6 +10,12 @@ import type * as UsersRouteModule from "@/app/api/administrator/users/route";
  * The DB layer is stubbed — these tests pin the *handler contract*:
  * permission gate, response envelope, pageSize clamp, and the audit
  * write on a denied attempt.
+ *
+ * They do not pin what the rows contain. The stub returns whatever it was
+ * primed with, so an `organization_names` asserted here would only echo the
+ * stub, whatever the org predicate in the handler's SQL says (F-126). Which
+ * org names a caller sees is pinned against Postgres in
+ * tests/db/admin-list-counts.db.test.ts.
  */
 const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
@@ -160,8 +166,6 @@ describe("GET /api/administrator/users", () => {
         preferred_locale: "en",
         created_at: "2025-01-01T00:00:00.000Z",
         updated_at: "2025-01-01T00:00:00.000Z",
-        // SUPERADMIN: the org-name column aggregates every org the user is in.
-        organization_names: "Acme, Globex",
         __total: "42",
       },
     ]);
@@ -170,15 +174,13 @@ describe("GET /api/administrator/users", () => {
     const res = await GET(makeRequest(""));
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      items: { organization_names?: string }[];
+      items: unknown[];
       page: number;
       pageSize: number;
       total: number;
       sort: { field: string; direction: string }[];
     };
     expect(body.items).toHaveLength(1);
-    // The new Organization column rides on each row.
-    expect(body.items[0]?.organization_names).toBe("Acme, Globex");
     expect(body.total).toBe(42);
     expect(body.page).toBe(1);
     expect(body.pageSize).toBe(25);
@@ -186,11 +188,12 @@ describe("GET /api/administrator/users", () => {
     expect(body.sort).toEqual([{ field: "created_at", direction: "desc" }]);
   });
 
-  it("an org admin still gets a scoped page with the organization column", async () => {
+  it("an org admin still gets a page through the org-scoped branch", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     // Org admin: holds admin.users.read but NOT the superuser marker, with a
-    // resolvable org — exercises the org-scoped branch (row filter + the
-    // org-confined org-name subquery).
+    // resolvable org — the handler builds the org-scoped branch (row filter +
+    // the org-confined org-name subquery) without failing. What that branch
+    // returns is pinned in tests/db/admin-list-counts.db.test.ts (F-126).
     accessGetter.mockResolvedValue({
       appUserId: "u-1",
       primaryEmail: "orgadmin@orgb.local",
@@ -210,8 +213,6 @@ describe("GET /api/administrator/users", () => {
         preferred_locale: "en",
         created_at: "2026-06-16T00:00:00.000Z",
         updated_at: "2026-06-16T00:00:00.000Z",
-        // Scoped subquery → only the caller's own org name is ever returned.
-        organization_names: "ORG B",
         __total: "1",
       },
     ]);
@@ -219,9 +220,9 @@ describe("GET /api/administrator/users", () => {
 
     const res = await GET(makeRequest(""));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { items: { organization_names?: string }[]; total: number };
+    const body = (await res.json()) as { items: unknown[]; total: number };
+    expect(body.items).toHaveLength(1);
     expect(body.total).toBe(1);
-    expect(body.items[0]?.organization_names).toBe("ORG B");
   });
 
   it("clamps oversize pageSize at 200 (no DOS via huge pages)", async () => {

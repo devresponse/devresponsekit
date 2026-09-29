@@ -16,6 +16,11 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  *      so the count order is the REVERSE of the default key/slug order, so a
  *      pass can only come from the count sort, not insertion/default order.
  *
+ * The users list's `organization_names` column is pinned here too (F-126): it
+ * is a correlated subquery with an org predicate of its own, apart from the row
+ * filter, and a stubbed builder can only echo back the names it was primed
+ * with, so only real rows show which organizations it names.
+ *
  * Driven by `pnpm test:db` (vitest.db.config.ts). Fixtures use `__dbtest_` and
  * self-clean. Only auth is mocked; `@/db/database` is the real pool.
  */
@@ -28,10 +33,14 @@ vi.mock("@/lib/auth-status", async () => {
   return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
 });
 vi.mock("@/lib/audit.server", () => ({ auditEvent: vi.fn() }));
+// The users route imports the Better Auth admin helper for its POST handler,
+// which constructs Better Auth at import time. The GET list never touches it.
+vi.mock("@/lib/admin/auth-admin.server", () => ({ createBetterAuthUser: vi.fn() }));
 
 const { db, pgPool } = await import("@/db/database");
 const { GET: rolesGET } = await import("@/app/api/administrator/roles/route");
 const { GET: orgsGET } = await import("@/app/api/administrator/organizations/route");
+const { GET: usersGET } = await import("@/app/api/administrator/users/route");
 
 const PREFIX = "__dbtest_listcnt_";
 
@@ -229,5 +238,57 @@ describe("admin list count columns (DB-backed, P2-17)", () => {
     // member_count desc → zzz(2) before aaa(1): the REVERSE of slug asc.
     expect(body.items[0]).toMatchObject({ slug: `${PREFIX}o_zzz`, member_count: 2 });
     expect(body.items[1]).toMatchObject({ slug: `${PREFIX}o_aaa`, member_count: 1 });
+  });
+});
+
+describe("users list `organization_names` (DB-backed, F-126)", () => {
+  // `shared` belongs to A and B, `onlyB` to B alone. Both names come from
+  // `insertOrg` ("DBTest <slug>"), and the column lists them in name order.
+  let orgA: string;
+  let shared: string;
+  let onlyB: string;
+
+  beforeEach(async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "dbtest-ba" } });
+    orgA = await insertOrg("n_a");
+    const orgB = await insertOrg("n_b");
+    shared = await insertUser("shared");
+    onlyB = await insertUser("only_b");
+    await db
+      .insertInto("app_organization_memberships")
+      .values([
+        { organization_id: orgA, app_user_id: shared, status: "active" },
+        { organization_id: orgB, app_user_id: shared, status: "active" },
+        { organization_id: orgB, app_user_id: onlyB, status: "active" },
+      ])
+      .execute();
+  });
+
+  /** Lists this suite's users as a caller whose active org is A, holding `permissions`. */
+  async function listNames(permissions: string[]) {
+    accessGetter.mockResolvedValue({ ...SUPERADMIN, organizationId: orgA, permissions });
+    const res = await usersGET(listReq("users", "q=__dbtest_listcnt"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: { id: string; organization_names: string | null }[];
+    };
+    return new Map(body.items.map((r) => [r.id, r.organization_names]));
+  }
+
+  it("an org admin of A sees the shared user under A's name only, never B's", async () => {
+    const names = await listNames(["admin.users.read"]);
+    // Naming the user's OTHER org would tell A's admin which tenants the user
+    // also belongs to: a cross-tenant leak through a single column.
+    expect([...names.keys()]).toEqual([shared]);
+    expect(names.get(shared)).toBe("DBTest n_a");
+  });
+
+  it("CONTROL: a superadmin whose active org is also A sees every org of every user", async () => {
+    // The same active org as the org admin above, so this passes only because
+    // a superadmin is unscoped, not because it has no org to be scoped to.
+    const names = await listNames(["admin.users.read", "superuser"]);
+    expect(names.size).toBe(2);
+    expect(names.get(shared)).toBe("DBTest n_a, DBTest n_b");
+    expect(names.get(onlyB)).toBe("DBTest n_b");
   });
 });

@@ -369,6 +369,8 @@ describe("F-33 determinism", () => {
     cookie.activeOrg = org.twinP; // ignored on the bearer path (MACHINE-1)
     for (let i = 0; i < 5; i += 1) {
       const ctx = await getUserAccessContext(u.twins.ba, { organizationId: null });
+      // Still org-bound, although the credential names no org (F-124).
+      expect(ctx.orgBound).toBe(true);
       expect(ctx.organizationId).toBe(org.twinQ);
     }
   });
@@ -394,6 +396,7 @@ describe("F-33 does not touch the bearer paths or the impersonation confinement"
     // does still move it on: F-09, pinned in organization-status.db.test.ts.)
     cookie.activeOrg = null;
     const ctx = await getUserAccessContext(u.pendingThenInvited.ba, { organizationId: null });
+    expect(ctx.orgBound).toBe(true);
     expect(ctx.organizationId).toBe(org.dflt);
     expect(decideSecureAccess(ctx.status, ctx.membershipStatus)).not.toBe("allow");
   });

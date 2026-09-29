@@ -1139,10 +1139,13 @@ adds no second default. Its platform roles (Superuser, Platform
 Administrator, …) and first admin do not follow the flag: they stay in the
 platform org, the oldest org whose `superuser` role carries the `superuser`
 marker (the original default), so re-running the seed after the default was
-moved to a tenant writes nothing into that tenant. No partial unique index
-enforces "one default" in the schema (that would need a core migration); the
-write paths do, and a legacy database that already holds two defaults (a
-pre-F-40 seed re-run after a rename) resolves to the oldest. To repair it,
+moved to a tenant writes nothing into that tenant. Since migration 0007 the
+schema enforces "one default" too, with a partial unique index
+(`idx_app_organizations_single_default`, M-02), so not even a direct database
+edit can add a second one; the lock stays, because an index refuses a racing
+writer where the lock makes it wait its turn. A legacy database that already
+held two defaults (a pre-F-40 seed re-run after a rename) resolves to the
+oldest, and 0007 refuses to apply there until it is repaired. To repair it,
 open the newer flagged org → **Settings**: its checkbox is ticked but enabled,
 with a hint that sign-ups go elsewhere; untick it and save (`isDefault: false`
 clears an extra flag on any org except the one sign-ups resolve to, audited
@@ -1327,11 +1330,11 @@ nullable; `NULL` = a global/platform role, superadmin-only).
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
 | `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization` (may be repeated, F-154), `scope`, `permission`; `q` matches key, name and the owning org's name (§7.3) |
-| `POST /roles` | `admin.roles.create` | Org admin may create only within their own org; `admin.role.created` |
-| `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete |
+| `POST /roles` | `admin.roles.create` | Org admin may create only within their own org; `admin.role.created`. A key already taken in that scope is 409 `key_taken`: `(organization_id, key)` is unique, and a global key is unique across global roles (partial unique index, migration 0007, F-97), so two concurrent creates of one key leave one row |
+| `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete. DELETE is 409 `role_in_use` (`admin.role.delete_blocked`) while any user or group holds the role, counted after locking the role row in the deleting transaction, so a grant committed while the delete runs is refused rather than cascade-deleted (F-97) |
 | `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden` and an `admin.permission.conferral_denied` row, F-58; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
 | `GET /roles/[id]/members` | `admin.roles.read` | Users carrying the role |
-| `POST /roles/[id]/duplicate` | `admin.roles.create` | Clone a role |
+| `POST /roles/[id]/duplicate` | `admin.roles.create` | Clone a role; 409 `key_taken` when the computed `-copy` key is taken, including by a concurrent create or duplicate (F-97) |
 
 **Dual-list saves are two writes, not one (F-38).** The role's **Permissions**
 editor and the group's **Roles** editor (§8.6) both save through a POST of
@@ -1402,7 +1405,7 @@ identical for every tenant.
 | --- | --- | --- |
 | `GET /permissions` | `admin.roles.read` | List with usage counts (any admin may read it to compose roles). A count covers only the roles the caller can list at `GET /roles`: their org's for an org admin, every role for a superadmin (F-127) |
 | `POST /permissions` | `admin.permissions.manage` | **Superadmin-only**; `admin.permission.created` |
-| `PATCH/DELETE /permissions/[id]` | `admin.permissions.manage` | **Superadmin-only**; `admin.permission.updated` / `.deleted`; delete is blocked while in use (`.delete_blocked`) |
+| `PATCH/DELETE /permissions/[id]` | `admin.permissions.manage` | **Superadmin-only**; `admin.permission.updated` / `.deleted`; delete is blocked while in use (409 `permission_in_use`, `.delete_blocked`), counted after locking the permission row in the deleting transaction (F-97) |
 
 ### 8.6 Groups
 

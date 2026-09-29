@@ -77,9 +77,13 @@ vi.mock("@/db/database", () => ({
     insertInto: (t: unknown) => makeChain(tableKey(t)),
     updateTable: (t: unknown) => makeChain(tableKey(t)),
     deleteFrom: (t: unknown) => makeChain(tableKey(t)),
+    // F-97: the in-use guard (lock + counts) and the deletes share one transaction.
     transaction: () => ({
       execute: async (cb: (trx: unknown) => Promise<unknown>) =>
-        cb({ deleteFrom: () => makeChain("trx") }),
+        cb({
+          selectFrom: (t: unknown) => makeChain(tableKey(t)),
+          deleteFrom: () => makeChain("trx"),
+        }),
     }),
   },
 }));

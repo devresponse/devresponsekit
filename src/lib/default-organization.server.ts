@@ -40,9 +40,10 @@ export class NoDefaultOrganizationError extends Error {
 
 /**
  * The org flagged `is_default`, or null when there is none. The admin write
- * paths keep exactly one (`moveDefaultOrganizationFlag`); a legacy database
- * that already holds two resolves to the OLDEST, which is the original
- * default (the pre-F-40 seed re-run only ever added a newer one).
+ * paths keep exactly one (`moveDefaultOrganizationFlag`), and since 0007 a
+ * partial unique index does too (M-02); a legacy database that already holds
+ * two (one 0007's preflight has refused) resolves to the OLDEST, which is the
+ * original default (the pre-F-40 seed re-run only ever added a newer one).
  */
 export async function getDefaultOrganization(
   executor: Kysely<AppDatabase> = db,
@@ -114,8 +115,8 @@ export async function moveDefaultOrganizationFlag(
   // the route's existence check changes nothing (null) rather than leaving the
   // old default cleared and nothing set. The org DELETE takes the default-flag
   // lock too, so it cannot remove the target while a move is under way.
-  // Clear-then-set (not the reverse) keeps a future partial unique index on
-  // `is_default` satisfied at every statement.
+  // Clear-then-set (not the reverse) keeps 0007's partial unique index on
+  // `is_default` satisfied at every statement (M-02).
   const target = await trx
     .selectFrom("app_organizations")
     .select(["id"])

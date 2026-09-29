@@ -243,7 +243,9 @@ describe("PATCH /api/administrator/organizations/:id/auth-settings", () => {
     const res = await orgPATCH(jsonReq(ORG_ENDPOINT, VALID_BODY), ctx());
     expect(res.status).toBe(200);
     expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
-    expect(updateExecute).toHaveBeenCalled();
+    // One INSERT … ON CONFLICT DO UPDATE, not a SELECT then UPDATE/INSERT (F-97).
+    expect(insertExecute).toHaveBeenCalledTimes(1);
+    expect(updateExecute).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.organization.auth_policy_updated",

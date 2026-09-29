@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { pgForeignKeyViolation } from "../helpers/pg-errors";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as RolesRouteModule from "@/app/api/administrator/roles/route";
 import type * as RoleByIdRouteModule from "@/app/api/administrator/roles/[id]/route";
@@ -278,12 +279,21 @@ describe("DELETE /api/administrator/roles/[id]", () => {
     expect(res.status).toBe(404);
   });
 
+  /** Runs the route's transaction callback on the stubbed builder itself. */
+  async function runTransactionsOnStub(): Promise<void> {
+    const { db } = await import("@/db/database");
+    transactionExecute.mockImplementation(async (cb: (trx: unknown) => Promise<unknown>) => cb(db));
+  }
+
   it("returns 409 role_in_use when the role still has assignments", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.delete"]));
-    // First select: existing role row. Second select (count): 3.
+    await runTransactionsOnStub();
+    // The route's read of the role, then inside the deleting transaction
+    // (F-97) the locked role row and the user-assignment count: 3.
     selectFirst
       .mockResolvedValueOnce({ id: "r-1", organization_id: null, key: "x.y" })
+      .mockResolvedValueOnce({ id: "r-1" })
       .mockResolvedValueOnce({ count: "3" });
     const res = await DELETE_BY_ID(delReq(), ctx);
     expect(res.status).toBe(409);
@@ -299,13 +309,21 @@ describe("DELETE /api/administrator/roles/[id]", () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.delete"]));
     selectFirst
       .mockResolvedValueOnce({ id: "r-1", organization_id: null, key: "x.y" })
+      .mockResolvedValueOnce({ id: "r-1" })
       .mockResolvedValueOnce({ count: "0" });
+    const { db } = await import("@/db/database");
+    const deletes: string[] = [];
     transactionExecute.mockImplementation(async (cb: (trx: unknown) => Promise<unknown>) => {
-      // Stub trx mirrors the production-builder shape just enough for
-      // the two `deleteFrom(...).where(...).execute()` chains.
+      // Stub trx mirrors the production-builder shape just enough for the
+      // guard's reads and the two `deleteFrom(...).where(...).execute()` chains.
       const trx = {
-        deleteFrom: () => ({
-          where: () => ({ execute: vi.fn().mockResolvedValue(undefined) }),
+        selectFrom: db.selectFrom,
+        deleteFrom: (table: string) => ({
+          where: () => ({
+            execute: vi.fn().mockImplementation(async () => {
+              deletes.push(table);
+            }),
+          }),
         }),
       };
       await cb(trx);
@@ -313,8 +331,50 @@ describe("DELETE /api/administrator/roles/[id]", () => {
     const res = await DELETE_BY_ID(delReq(), ctx);
     expect(res.status).toBe(200);
     expect(transactionExecute).toHaveBeenCalledTimes(1);
+    expect(deletes).toEqual(["app_role_permissions", "app_roles"]);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.role.deleted", outcome: "success" }),
+    );
+  });
+
+  it("F-97: a foreign-key violation on the delete is the same 409 role_in_use, not a 500", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.delete"]));
+    selectFirst
+      .mockResolvedValueOnce({ id: "r-1", organization_id: null, key: "x.y" })
+      .mockResolvedValueOnce({ id: "r-1" });
+    const { db } = await import("@/db/database");
+    transactionExecute.mockImplementation(async (cb: (trx: unknown) => Promise<unknown>) =>
+      cb({
+        selectFrom: db.selectFrom,
+        deleteFrom: () => ({
+          where: () => ({
+            execute: async () => {
+              throw pgForeignKeyViolation("app_user_roles_role_id_fkey");
+            },
+          }),
+        }),
+      }),
+    );
+    const res = await DELETE_BY_ID(delReq(), ctx);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("role_in_use");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "role_in_use" }),
+    );
+  });
+
+  it("F-97: 404 when the role is deleted by another request before the lock", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.delete"]));
+    await runTransactionsOnStub();
+    selectFirst
+      .mockResolvedValueOnce({ id: "r-1", organization_id: null, key: "x.y" })
+      .mockResolvedValueOnce(undefined);
+    const res = await DELETE_BY_ID(delReq(), ctx);
+    expect(res.status).toBe(404);
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.role.deleted" }),
     );
   });
 });

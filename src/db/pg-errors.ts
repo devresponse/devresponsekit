@@ -24,7 +24,7 @@ export const FOREIGN_KEY_VIOLATION = "23503";
 /**
  * The unique constraints and indexes a caller maps to an answer of its own:
  * Postgres' default names for a primary key and the inline `unique` clauses
- * of migration 0001, plus the unique indexes 0001 and 0005 name. Listed here
+ * of migration 0001, plus the unique indexes 0001, 0005 and 0007 name. Listed here
  * rather than inline so a typo is a type error, and so
  * `tests/db/pg-constraint-names.db.test.ts` can check each one against the
  * migrated schema: a migration that renames one fails that test instead of
@@ -41,6 +41,8 @@ export const UNIQUE_CONSTRAINTS = [
   // Postgres truncates generated names to 63 bytes, hence `…_organization_k_key`.
   "app_provider_organizations_provider_provider_organization_k_key",
   "app_roles_organization_id_key_key",
+  // 0007 (F-97): global role keys, which the constraint above leaves distinct (NULL org).
+  "idx_app_roles_global_key",
 ] as const;
 export type UniqueConstraint = (typeof UNIQUE_CONSTRAINTS)[number];
 

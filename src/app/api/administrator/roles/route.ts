@@ -201,8 +201,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *
  *   - `(organization_id, key)` is unique by DB constraint.
  *   - Global keys (`organization_id IS NULL`) must additionally be
- *     globally unique — we enforce this in code because the SQL unique
- *     index treats NULLs as distinct.
+ *     globally unique. That constraint treats NULLs as distinct, so they
+ *     have their own partial unique index (`idx_app_roles_global_key`,
+ *     migration 0007, F-97); the SELECT below only answers the common
+ *     sequential duplicate without an exception.
  *   - An `organizationId` that names no org is a 404 `organization_not_found`.
  */
 
@@ -243,8 +245,9 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     });
   }
 
-  // Manual uniqueness check for global keys (NULLs are distinct in
-  // postgres unique indexes).
+  // Fast path for a global key that is already taken. Two concurrent creates
+  // both pass it; the partial unique index then refuses the loser's insert
+  // with a 23505, answered below with the same 409 (F-97).
   if (orgId === null) {
     const dup = await db
       .selectFrom("app_roles")
@@ -270,10 +273,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       .returning(["id", "key"])
       .executeTakeFirstOrThrow();
   } catch (err) {
-    // Catches the org-scoped (organization_id, key) uniqueness violation.
+    // Catches the org-scoped (organization_id, key) uniqueness violation and
+    // the global-key index's (a race the SELECT above cannot see, F-97).
     // F-132: both checks read the SQLSTATE and constraint, never the
     // (translatable) message.
-    if (isUniqueViolation(err, "app_roles_organization_id_key_key")) {
+    if (
+      isUniqueViolation(err, "app_roles_organization_id_key_key") ||
+      isUniqueViolation(err, "idx_app_roles_global_key")
+    ) {
       return adminErrorResponse("key_taken", 409, request);
     }
     // F-63 (#95): an organizationId naming no org (a deleted one, say). It was

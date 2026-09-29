@@ -12,9 +12,15 @@ import { assertRoleNotInUse } from "@/lib/admin/roles.server";
  * group_role row.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts). Fixtures use `__dbtest_` and
- * self-clean.
+ * self-clean. The race the guard's row lock closes (F-97) is proven in
+ * role-permission-delete-race.db.test.ts.
  */
 const PREFIX = "__dbtest_roledel_";
+
+/** The guard runs inside the deleting transaction (F-97), as the route runs it. */
+function guard(roleId: string): Promise<void> {
+  return db.transaction().execute((trx) => assertRoleNotInUse(trx, roleId));
+}
 
 async function cleanup(): Promise<void> {
   // app_group_roles / app_group_memberships cascade off groups; user_roles must
@@ -60,7 +66,7 @@ describe("assertRoleNotInUse (DB-backed, DB-2)", () => {
   it("resolves for a role referenced by neither a user nor a group", async () => {
     const orgId = await newOrg();
     const roleId = await newRole(orgId, "unused");
-    await expect(assertRoleNotInUse(roleId)).resolves.toBeUndefined();
+    await expect(guard(roleId)).resolves.toBeUndefined();
   });
 
   it("throws role_in_use when only a GROUP confers the role (no direct user)", async () => {
@@ -76,7 +82,7 @@ describe("assertRoleNotInUse (DB-backed, DB-2)", () => {
       .values({ group_id: group.id, role_id: roleId, organization_id: orgId })
       .execute();
 
-    await expect(assertRoleNotInUse(roleId)).rejects.toMatchObject({ code: "role_in_use" });
+    await expect(guard(roleId)).rejects.toMatchObject({ code: "role_in_use" });
   });
 
   it("throws role_in_use when a user holds the role directly", async () => {
@@ -96,6 +102,6 @@ describe("assertRoleNotInUse (DB-backed, DB-2)", () => {
       .values({ app_user_id: user.id, organization_id: orgId, role_id: roleId })
       .execute();
 
-    await expect(assertRoleNotInUse(roleId)).rejects.toMatchObject({ code: "role_in_use" });
+    await expect(guard(roleId)).rejects.toMatchObject({ code: "role_in_use" });
   });
 });

@@ -66,14 +66,19 @@ function makeChain(table: string): unknown {
     },
   );
 }
-vi.mock("@/db/database", () => ({
-  db: {
+vi.mock("@/db/database", () => {
+  const db = {
     selectFrom: (t: unknown) => makeChain(tableKey(t)),
     insertInto: (t: unknown) => makeChain(tableKey(t)),
     updateTable: (t: unknown) => makeChain(tableKey(t)),
     deleteFrom: (t: unknown) => makeChain(tableKey(t)),
-  },
-}));
+    // F-97: the DELETE's in-use guard and the delete share one transaction.
+    transaction: () => ({
+      execute: async (cb: (trx: unknown) => Promise<unknown>) => cb(db),
+    }),
+  };
+  return { db };
+});
 
 const ORG_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const PERM = "77777777-7777-4777-8777-777777777777";

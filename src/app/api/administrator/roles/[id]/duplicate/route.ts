@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
+import { isUniqueViolation } from "@/db/pg-errors";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -26,8 +27,12 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Server-side clone of a role. In a single Kysely transaction:
  *   1. Insert a new `app_roles` row with the source's organization,
  *      name, and description. The `key` is suffixed with `-copy` and
- *      de-duplicated (e.g. `admin-copy`, `admin-copy-2`, ...) so the
- *      `(organization_id, key)` unique constraint never trips.
+ *      de-duplicated (e.g. `admin-copy`, `admin-copy-2`, ...) against the
+ *      keys that exist when the request reads them. A concurrent create or
+ *      duplicate (a double-submit) can take the same key before the insert:
+ *      the `(organization_id, key)` constraint, or for a global role the
+ *      global-key index (F-97), then refuses it, answered with 409
+ *      `key_taken` rather than a 500.
  *   2. Copy every `app_role_permissions` entry from the source.
  *
  * Caller MUST hold `admin.roles.create`. Audited as
@@ -109,32 +114,47 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     return adminErrorResponse("key_taken", 409, request);
   }
 
-  const created = await db.transaction().execute(async (trx) => {
-    const newRole = await trx
-      .insertInto("app_roles")
-      .values({
-        organization_id: source.organization_id,
-        key: candidate,
-        name: source.name,
-        description: source.description,
-      })
-      .returning(["id", "key"])
-      .executeTakeFirstOrThrow();
+  let created: { id: string; key: string };
+  try {
+    created = await db.transaction().execute(async (trx) => {
+      const newRole = await trx
+        .insertInto("app_roles")
+        .values({
+          organization_id: source.organization_id,
+          key: candidate,
+          name: source.name,
+          description: source.description,
+        })
+        .returning(["id", "key"])
+        .executeTakeFirstOrThrow();
 
-    // Copy permissions in one INSERT … SELECT.
-    await trx
-      .insertInto("app_role_permissions")
-      .columns(["role_id", "permission_id"])
-      .expression((eb) =>
-        eb
-          .selectFrom("app_role_permissions")
-          .select([sql.lit(newRole.id).as("role_id"), "permission_id"])
-          .where("role_id", "=", source.id),
-      )
-      .execute();
+      // Copy permissions in one INSERT … SELECT.
+      await trx
+        .insertInto("app_role_permissions")
+        .columns(["role_id", "permission_id"])
+        .expression((eb) =>
+          eb
+            .selectFrom("app_role_permissions")
+            .select([sql.lit(newRole.id).as("role_id"), "permission_id"])
+            .where("role_id", "=", source.id),
+        )
+        .execute();
 
-    return newRole;
-  });
+      return newRole;
+    });
+  } catch (err) {
+    // F-97: the candidate key was taken after it was computed (the only
+    // unique index the transaction's inserts can trip). Same mapping as
+    // POST /roles; by SQLSTATE and constraint, never the (translatable)
+    // message (F-132).
+    if (
+      isUniqueViolation(err, "app_roles_organization_id_key_key") ||
+      isUniqueViolation(err, "idx_app_roles_global_key")
+    ) {
+      return adminErrorResponse("key_taken", 409, request);
+    }
+    throw err;
+  }
 
   await auditRoleAction("admin.role.duplicated", "success", {
     request,

@@ -1,6 +1,6 @@
 import "server-only";
 import { timingSafeEqual } from "node:crypto";
-import { sql, type Kysely, type Selectable } from "kysely";
+import { sql, type Kysely, type Selectable, type Updateable } from "kysely";
 import { db } from "@/db/database";
 import type { AppDatabase, AppOauthClientsTable } from "@/db/schema/app-schema";
 import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
@@ -174,7 +174,7 @@ export interface OauthClientUpdate {
 }
 
 export async function updateOauthClient(id: string, patch: OauthClientUpdate): Promise<boolean> {
-  const set: Record<string, unknown> = {};
+  const set: Updateable<AppOauthClientsTable> = {};
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.scopes !== undefined) set.scopes = patch.scopes;
   if (Object.keys(set).length === 0) return false;

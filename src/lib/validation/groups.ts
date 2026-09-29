@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UUID_RE } from "@/lib/uuid";
 
 /**
  * Shared validation schema for creating a group. Imported by BOTH the API
@@ -10,7 +11,6 @@ import { z } from "zod";
  * one — enforced in the form, since "global" is not a valid group scope.
  */
 export const GROUP_KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const createGroupSchema = z
   .object({

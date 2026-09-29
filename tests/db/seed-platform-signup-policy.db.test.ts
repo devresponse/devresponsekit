@@ -37,21 +37,18 @@ type Snapshot = {
 };
 
 async function readPlatformRow(): Promise<Snapshot> {
-  return (
-    db
-      .selectFrom("app_organization_auth_settings")
-      .select([
-        "require_email_verification",
-        "signup_approval_mode",
-        "allowed_auth_methods",
-        "auto_approve_email_domains",
-        "updated_by",
-        "updated_at",
-      ])
-      .where("organization_id", "is", null)
-      // `Generated<Timestamp>` doesn't unwrap to Date on select; pg returns a Date at runtime.
-      .executeTakeFirstOrThrow() as unknown as Promise<Snapshot>
-  );
+  return db
+    .selectFrom("app_organization_auth_settings")
+    .select([
+      "require_email_verification",
+      "signup_approval_mode",
+      "allowed_auth_methods",
+      "auto_approve_email_domains",
+      "updated_by",
+      "updated_at",
+    ])
+    .where("organization_id", "is", null)
+    .executeTakeFirstOrThrow();
 }
 
 async function writePlatformRow(row: Snapshot): Promise<void> {

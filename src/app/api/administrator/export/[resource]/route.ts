@@ -23,6 +23,7 @@ import {
 import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { intFromEnv } from "@/lib/env";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { APP_USER_STATUS_VALUES } from "@/lib/status-values";
 
 export const dynamic = "force-dynamic";
 
@@ -422,13 +423,7 @@ function buildExporter(resource: Resource, query: ListQuery, scope: OrgScope | n
   }
 }
 
-const ALLOWED_USER_STATUSES = new Set([
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-  "deactivated",
-]);
+const ALLOWED_USER_STATUSES: ReadonlySet<string> = new Set(APP_USER_STATUS_VALUES);
 
 function buildUsersExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
@@ -540,8 +535,8 @@ function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       if (isRangeFilter(createdAt)) {
         const from = parseIsoDate(createdAt.from);
         const to = parseIsoDate(createdAt.to);
-        if (from) q = q.where(sql<boolean>`e.created_at >= ${from}`);
-        if (to) q = q.where(sql<boolean>`e.created_at <= ${to}`);
+        if (from) q = q.where("e.created_at", ">=", from);
+        if (to) q = q.where("e.created_at", "<=", to);
       }
       if (query.q) {
         const like = likeContains(query.q);

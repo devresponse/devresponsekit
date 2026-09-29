@@ -10,9 +10,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
-
-/** Organization statuses — the allow-listed `status` filter values. */
-const ORG_STATUSES = ["active", "pending", "suspended", "archived"] as const;
+import { ORGANIZATION_STATUSES } from "@/lib/status-values";
 
 /**
  * Client-side organizations grid (docs/admin-manager.md §8.2).
@@ -164,7 +162,11 @@ export function AdministratorOrganizationsGrid({
 
   const filters = useMemo<GridFilterDescriptor[]>(
     () => [
-      { name: "status", label: t("columns.status"), options: toFilterOptions(tGrid, ORG_STATUSES) },
+      {
+        name: "status",
+        label: t("columns.status"),
+        options: toFilterOptions(tGrid, ORGANIZATION_STATUSES),
+      },
       {
         name: "is_default",
         label: t("columns.isDefault"),

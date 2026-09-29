@@ -5,6 +5,7 @@ import {
   SSO_AUDIENCE_RE,
   SUBDOMAIN_RE,
 } from "@/lib/admin/enterprise-apps";
+import { UUID_RE } from "@/lib/uuid";
 
 /**
  * Shared validation schema for creating an enterprise application. Imported by
@@ -20,8 +21,6 @@ import {
  * catalog-wide uniqueness needs the database and is enforced by the routes
  * (`409 audience_taken`, review #15).
  */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export const createEnterpriseAppSchema = z
   .object({
     id: z.string().min(1, "required").max(128, "max").regex(APP_ID_RE, "appId"),

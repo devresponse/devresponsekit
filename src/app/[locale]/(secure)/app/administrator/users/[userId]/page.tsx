@@ -5,6 +5,7 @@ import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { canAccessUser } from "@/lib/admin/access-scope.server";
 import { isAgentServiceAccount } from "@/lib/admin/service-account";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { APP_USER_STATUS_VALUES } from "@/lib/status-values";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ImpersonateUserButton } from "./_impersonate-button";
 import { UserDetailTabs } from "./_user-detail-tabs";
@@ -214,17 +215,13 @@ function toIso(value: unknown): string | null {
   return String(value);
 }
 
-const KNOWN_STATUSES: ReadonlySet<string> = new Set([
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-  "deactivated",
-]);
+const KNOWN_STATUSES: ReadonlySet<string> = new Set(APP_USER_STATUS_VALUES);
 
 function translateStatus(t: Awaited<ReturnType<typeof getTranslations>>, status: string): string {
   // Only call into the i18n catalog with known keys to avoid the
-  // "missing message" warning + render the raw status verbatim if a
-  // future status enum value lands before the translation does.
+  // "missing message" warning; anything else renders verbatim. The known
+  // keys are the status vocabulary itself (F-133), and
+  // tests/unit/shared-vocabulary-invariant.test.ts holds the catalog to a
+  // label for each one.
   return KNOWN_STATUSES.has(status) ? t(`status.${status}` as never) : status;
 }

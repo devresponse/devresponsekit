@@ -22,6 +22,13 @@
  */
 import { locales } from "@/config/i18n-config";
 import { MCP_AGENT_STATUSES } from "@/lib/mcp/agents";
+import {
+  APP_STATUS_VALUES,
+  APP_USER_STATUS_VALUES,
+  CREDENTIAL_STATUS_VALUES,
+  MEMBERSHIP_STATUS_VALUES,
+  ORGANIZATION_STATUSES,
+} from "@/lib/status-values";
 import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 import {
   AUTH_POLICY_APPROVAL_MODES as AUTH_POLICY_APPROVAL_MODE_VALUES,
@@ -58,9 +65,13 @@ const listOf = (itemName: string): Obj => ({
   required: ["items", "page", "pageSize", "total"],
 });
 
-const USER_STATUS = ["active", "pending_approval", "blocked", "suspended", "deactivated"];
-const MEMBERSHIP_STATUS = ["active", "pending_approval", "blocked", "suspended"];
-const CREDENTIAL_STATUS = ["active", "revoked"];
+// The status vocabularies the DB CHECKs are synced to (F-133), so a status a
+// migration adds reaches the spec (and the SDK) with the routes that accept it.
+const USER_STATUS = [...APP_USER_STATUS_VALUES];
+const MEMBERSHIP_STATUS = [...MEMBERSHIP_STATUS_VALUES];
+const CREDENTIAL_STATUS = [...CREDENTIAL_STATUS_VALUES];
+const ORGANIZATION_STATUS = [...ORGANIZATION_STATUSES];
+const APP_STATUS = [...APP_STATUS_VALUES];
 // Sourced from the shared, client-safe validation module so the spec's
 // enums cannot drift from the schema + DB CHECK (they did: `invite_only`
 // was added in 0008 but missed here). Spread into a mutable array because
@@ -981,7 +992,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           properties: {
             slug: { type: "string", minLength: 1, maxLength: 64 },
             name: { type: "string", minLength: 1, maxLength: 200 },
-            status: { type: "string", enum: ["active", "pending", "suspended", "archived"] },
+            status: { type: "string", enum: ORGANIZATION_STATUS },
             isDefault: boolean(),
           },
         },
@@ -1201,7 +1212,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             origin: { type: "string", minLength: 1, maxLength: 500, format: "uri" },
             subdomain: { type: "string", minLength: 1, maxLength: 63 },
             sso_audience: { type: "string", minLength: 1, maxLength: 200 },
-            status: { type: "string", enum: ["available", "disabled"] },
+            status: { type: "string", enum: APP_STATUS },
             sort_order: { type: "integer", minimum: 0, maximum: 10_000 },
             organization_id: { type: ["string", "null"], format: "uuid" },
           },
@@ -1215,7 +1226,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             origin: { type: "string", minLength: 1, maxLength: 500, format: "uri" },
             subdomain: { type: "string", minLength: 1, maxLength: 63 },
             sso_audience: { type: "string", minLength: 1, maxLength: 200 },
-            status: { type: "string", enum: ["available", "disabled"] },
+            status: { type: "string", enum: APP_STATUS },
             sort_order: { type: "integer", minimum: 0, maximum: 10_000 },
             organization_id: { type: ["string", "null"], format: "uuid" },
           },

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
+import type { AppOrganizationUpdate } from "@/db/schema/app-schema";
 import {
   FOREIGN_KEY_VIOLATION,
   isForeignKeyViolation,
@@ -159,7 +160,7 @@ export const PATCH = withAdminRoute(async function PATCH(
     return adminErrorResponse("organization_not_found", 404, request);
   }
 
-  const updates: Record<string, unknown> = {};
+  const updates: AppOrganizationUpdate = {};
   if (input.slug !== undefined) updates.slug = input.slug;
   if (input.name !== undefined) updates.name = input.name;
   if (input.status !== undefined) updates.status = input.status;

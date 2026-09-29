@@ -161,8 +161,8 @@ describe("getAdministratorOverviewActivity", () => {
           userEmail: "a@x.com",
           userName: "Ada",
           ipAddress: "10.0.0.1",
-          // pg may surface timestamps as strings in some paths.
-          createdAt: "2026-06-02T11:30:00Z",
+          // pg returns every timestamptz as a Date, as the schema now types it (F-131).
+          createdAt: new Date("2026-06-02T11:30:00Z"),
         },
       ]),
     );

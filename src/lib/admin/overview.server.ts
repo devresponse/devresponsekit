@@ -1,7 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
 import type { OrgScope } from "@/lib/admin/access-scope.server";
-import { toDate } from "@/lib/db-types";
 
 /**
  * Query layer for the Administrator overview dashboard
@@ -241,7 +240,7 @@ async function listRecentRegistrations(scope: OrgScope): Promise<RecentRegistrat
     email: r.primary_email,
     displayName: r.display_name,
     status: r.status,
-    createdAt: toDate(r.created_at).toISOString(),
+    createdAt: r.created_at.toISOString(),
   }));
 }
 
@@ -283,7 +282,7 @@ async function listRecentSessions(scope: OrgScope): Promise<RecentLoginSession[]
     userEmail: r.userEmail,
     userName: r.userName,
     ipAddress: r.ipAddress,
-    createdAt: toDate(r.createdAt).toISOString(),
+    createdAt: r.createdAt.toISOString(),
   }));
 }
 
@@ -307,7 +306,7 @@ async function listRecentAuditEvents(scope: OrgScope): Promise<RecentAuditEvent[
     eventType: r.event_type,
     outcome: r.outcome,
     email: r.email,
-    createdAt: toDate(r.created_at).toISOString(),
+    createdAt: r.created_at.toISOString(),
   }));
 }
 
@@ -329,7 +328,7 @@ async function listRecentOrganizations(scope: OrgScope): Promise<RecentOrganizat
     name: r.name,
     slug: r.slug,
     status: r.status,
-    createdAt: toDate(r.created_at).toISOString(),
+    createdAt: r.created_at.toISOString(),
   }));
 }
 

@@ -68,7 +68,7 @@ export async function getAccountProfile(
     displayName: user.display_name,
     name: authUser?.name ?? null,
     primaryEmail: user.primary_email,
-    createdAt: new Date(user.created_at as unknown as string | Date),
+    createdAt: user.created_at,
   };
 }
 
@@ -155,7 +155,7 @@ export async function getAccountOverview(
     status: user.status,
     statusReason: user.status_reason,
     preferredLocale: user.preferred_locale,
-    createdAt: new Date(user.created_at as unknown as string | Date),
+    createdAt: user.created_at,
     memberships: memberships.map((m) => ({
       organizationId: m.organization_id,
       organizationName: m.organization_name,

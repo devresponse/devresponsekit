@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import type { Updateable } from "kysely";
 import { db } from "@/db/database";
+import type { AppEnterpriseApplicationsTable } from "@/db/schema/app-schema";
 import { isForeignKeyViolation } from "@/db/pg-errors";
 import { updateEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
 import { auditEvent } from "@/lib/audit.server";
@@ -151,7 +153,7 @@ export const PATCH = withAdminRoute(async function PATCH(
     return adminErrorResponse("audience_taken", 409, request);
   }
 
-  const updates: Record<string, unknown> = {};
+  const updates: Updateable<AppEnterpriseApplicationsTable> = {};
   if (input.label !== undefined) updates.label = input.label;
   if (input.description !== undefined) updates.description = input.description;
   if (input.origin !== undefined) updates.origin = input.origin;

@@ -15,10 +15,10 @@ import {
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
+import { loadScopedOrg } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import {
-  canAccessOrg,
   isSuperadmin,
   wouldStripLastGlobalSuperuser,
   LAST_SUPERADMIN_ERROR,
@@ -41,8 +41,9 @@ import {
   MEMBERSHIP_REVOCATION_DENIED_REASON,
   unheldOnMembershipRemoval,
 } from "@/lib/admin/membership-grants.server";
-import { isUuid, refuseOutrankingTarget } from "@/lib/admin/user-target.server";
+import { refuseOutrankingTarget } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { MEMBERSHIP_STATUS_VALUES } from "@/lib/status-values";
 
 export const dynamic = "force-dynamic";
 
@@ -148,23 +149,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const { id } = await context.params;
-  if (!isUuid(id)) {
-    return adminErrorResponse("invalid_id", 400, request);
-  }
-
-  const orgExists = await db
-    .selectFrom("app_organizations")
-    .select(["id"])
-    .where("id", "=", id)
-    .executeTakeFirst();
-  if (!orgExists) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
-  // ADR-0001: org admins are confined to their own org; 404 (not 403) so a
-  // foreign org's existence is not confirmed. SUPERADMIN bypasses.
-  if (!canAccessOrg(guard.access, id)) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
+  // ADR-0001 via `loadScopedOrg` (F-133): 400 on a malformed id, 404 on a
+  // missing or foreign org.
+  const org = await loadScopedOrg(request, id, guard.access);
+  if (org instanceof NextResponse) return org;
 
   const query = parseListQuery(request.nextUrl.searchParams, {
     allowedSortFields: ["status", "created_at", "user_display_name", "source_provider"],
@@ -226,7 +214,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
 const createMemberSchema = z
   .object({
     appUserId: z.string().uuid(),
-    status: z.enum(["active", "pending_approval", "blocked", "suspended"]).optional(),
+    status: z.enum(MEMBERSHIP_STATUS_VALUES).optional(),
   })
   .strict();
 
@@ -247,21 +235,8 @@ export const POST = withAdminRoute(async function POST(
   if (limited) return limited;
 
   const { id } = await context.params;
-  if (!isUuid(id)) {
-    return adminErrorResponse("invalid_id", 400, request);
-  }
-
-  const org = await db
-    .selectFrom("app_organizations")
-    .select(["id", "slug"])
-    .where("id", "=", id)
-    .executeTakeFirst();
-  if (!org) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
-  if (!canAccessOrg(guard.access, id)) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
+  const org = await loadScopedOrg(request, id, guard.access);
+  if (org instanceof NextResponse) return org;
 
   let json: unknown;
   try {
@@ -365,7 +340,7 @@ export const POST = withAdminRoute(async function POST(
 const patchMembersSchema = z
   .object({
     membershipIds: z.array(z.string().uuid()).min(1).max(MAX_BULK_IDS),
-    status: z.enum(["active", "pending_approval", "blocked", "suspended"]),
+    status: z.enum(MEMBERSHIP_STATUS_VALUES),
   })
   .strict();
 
@@ -386,21 +361,8 @@ export const PATCH = withAdminRoute(async function PATCH(
   if (limited) return limited;
 
   const { id } = await context.params;
-  if (!isUuid(id)) {
-    return adminErrorResponse("invalid_id", 400, request);
-  }
-
-  const org = await db
-    .selectFrom("app_organizations")
-    .select(["id", "slug"])
-    .where("id", "=", id)
-    .executeTakeFirst();
-  if (!org) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
-  if (!canAccessOrg(guard.access, id)) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
+  const org = await loadScopedOrg(request, id, guard.access);
+  if (org instanceof NextResponse) return org;
 
   let json: unknown;
   try {
@@ -536,21 +498,8 @@ export const DELETE = withAdminRoute(async function DELETE(
   if (limited) return limited;
 
   const { id } = await context.params;
-  if (!isUuid(id)) {
-    return adminErrorResponse("invalid_id", 400, request);
-  }
-
-  const org = await db
-    .selectFrom("app_organizations")
-    .select(["id", "slug"])
-    .where("id", "=", id)
-    .executeTakeFirst();
-  if (!org) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
-  if (!canAccessOrg(guard.access, id)) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
+  const org = await loadScopedOrg(request, id, guard.access);
+  if (org instanceof NextResponse) return org;
 
   let json: unknown;
   try {

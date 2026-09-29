@@ -287,13 +287,7 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
       // operator can read in the Email workspace, and drop the unredacted
       // payload — nothing will ever deliver it (see TOKEN_TTL_MS_BY_TEMPLATE
       // for why we fail rather than mint a fresh token here).
-      // `created_at` is declared `Generated<Timestamp>` — a ColumnType nested
-      // inside a ColumnType, which Kysely does not unwrap, so the SELECT type
-      // is the wrapper rather than the `Date` the driver actually returns.
-      // The cast is to the real runtime shape; `outboxTokenExpired` still
-      // handles a string defensively.
-      const createdAt = row.created_at as unknown as Date;
-      if (outboxTokenExpired(row.template_key, createdAt, now)) {
+      if (outboxTokenExpired(row.template_key, row.created_at, now)) {
         await trx
           .updateTable("app_outbox")
           .set({

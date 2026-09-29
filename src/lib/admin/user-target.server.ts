@@ -12,6 +12,7 @@ import {
   type AccessLike,
 } from "@/lib/admin/access-scope.server";
 import { getUserAccessContext } from "@/lib/auth-status";
+import { isUuid } from "@/lib/uuid";
 
 /**
  * Shared helpers for the `/api/administrator/users/[id]/*` routes.
@@ -29,16 +30,10 @@ export interface ResolvedTargetUser {
 }
 
 /**
- * RFC 4122-shaped UUID regex. Exported so RSC pages and other helpers
- * (`page.tsx` for the user detail route, etc.) share a single source
- * of truth — duplicating this in multiple places would risk subtle
- * drift if we ever needed to widen / tighten the pattern.
+ * Re-exported from the pure `@/lib/uuid` (F-133), which holds the one UUID
+ * pattern, so the many routes that import `isUuid` from here keep working.
  */
-export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function isUuid(value: string): boolean {
-  return UUID_RE.test(value);
-}
+export { isUuid };
 
 /**
  * Resolve the target `app_users` row by primary key. Returns either the

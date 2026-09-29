@@ -1,5 +1,6 @@
 import "server-only";
 import { sql, type SelectQueryBuilder, type SqlBool } from "kysely";
+import { isUuid } from "@/lib/uuid";
 
 /**
  * Generic list-query parsing and application for Administrator API
@@ -83,8 +84,6 @@ const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_MAX_PAGE_SIZE = 200;
 /** Hard cap on the free-text `q` length — bounds pattern size / scan cost. */
 const MAX_Q_LENGTH = 200;
-/** The `uuid` text form {@link ParseListQueryOptions.uuidFilters} accepts (any version). */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The deepest `page` a list serves (F-63). There was no upper bound, so
@@ -205,7 +204,7 @@ export function parseListQuery(params: URLSearchParams, options: ParseListQueryO
     const uuidKeywords = Object.hasOwn(uuidFilters, name) ? uuidFilters[name] : undefined;
     if (uuidKeywords && sub !== "from" && sub !== "to") {
       if (value.length === 0) continue;
-      if (!UUID_RE.test(value) && !uuidKeywords.includes(value)) {
+      if (!isUuid(value) && !uuidKeywords.includes(value)) {
         const keywords = uuidKeywords.map((k) => ` or \`${k}\``).join("");
         throw new InvalidListQueryError(`\`filter[${name}]\` must be a UUID${keywords}.`);
       }

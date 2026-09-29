@@ -28,6 +28,7 @@ import { IssuingCredentialRevokedError } from "@/lib/api-auth/issuance-fence.ser
 import { normalizeScopes, ungrantableScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getServerEnv } from "@/lib/env";
+import { CREDENTIAL_STATUS_VALUES } from "@/lib/status-values";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -60,9 +61,9 @@ const SORT_COLUMNS: Record<string, string> = {
  * Paginated, sortable listing of every API key across users and
  * organizations. Caller MUST hold `admin.apikeys.read`.
  *
- * Filters: `filter[status]` (`active` | `revoked`),
- * `filter[app_user_id]`, `filter[organization_id]` (UUIDs; anything else is a
- * 400, F-63). `q` matches
+ * Filters: `filter[status]` (one of `CREDENTIAL_STATUS_VALUES`, F-133; any
+ * other value is ignored), `filter[app_user_id]`, `filter[organization_id]`
+ * (UUIDs; anything else is a 400, F-63). `q` matches
  * case-insensitively against the key name, display prefix, and owner
  * email.
  */
@@ -91,8 +92,8 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("k.organization_id", "=", scope.organizationId);
   }
 
-  const statusFilter = query.filters.status;
-  if (statusFilter === "active" || statusFilter === "revoked") {
+  const statusFilter = CREDENTIAL_STATUS_VALUES.find((s) => s === query.filters.status);
+  if (statusFilter) {
     base = base.where("k.status", "=", statusFilter);
   }
 

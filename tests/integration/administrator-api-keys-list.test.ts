@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as ApiKeysRouteModule from "@/app/api/administrator/api-keys/route";
+import type * as StatusValuesModule from "@/lib/status-values";
 
 /**
  * Integration tests for `GET /api/administrator/api-keys`
@@ -15,6 +16,8 @@ const accessGetter = vi.fn();
 const auditMock = vi.fn();
 const itemsExecute = vi.fn();
 const totalExecute = vi.fn();
+/** Every builder call the handler makes, as `[method, ...args]`. */
+const builderCalls: unknown[][] = [];
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -44,6 +47,7 @@ vi.mock("@/db/database", () => ({
             if (prop === "execute") return itemsExecute;
             if (prop === "executeTakeFirst") return totalExecute;
             return (...args: unknown[]) => {
+              builderCalls.push([prop, ...args]);
               const cb = args[0];
               if (typeof cb === "function") {
                 (cb as (eb: unknown) => unknown)(
@@ -89,6 +93,7 @@ beforeEach(async () => {
   auditMock.mockReset();
   itemsExecute.mockReset();
   totalExecute.mockReset();
+  builderCalls.length = 0;
   ({ GET } = await import("@/app/api/administrator/api-keys/route"));
 });
 afterEach(() => vi.resetModules());
@@ -177,5 +182,49 @@ describe("GET /api/administrator/api-keys", () => {
     const res = await GET(makeRequest("?sort=key_hash.asc"));
     const body = (await res.json()) as { sort: unknown[] };
     expect(body.sort).toEqual([{ field: "created_at", direction: "desc" }]);
+  });
+
+  describe("filter[status]", () => {
+    const statusWheres = () =>
+      builderCalls.filter(([method, column]) => method === "where" && column === "k.status");
+
+    async function list(get: typeof GET, query: string) {
+      sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+      accessGetter.mockResolvedValue(activeAdmin);
+      itemsExecute.mockResolvedValue([]);
+      totalExecute.mockResolvedValue({ total: "0" });
+      const res = await get(makeRequest(query));
+      expect(res.status).toBe(200);
+    }
+
+    it("filters by a credential status", async () => {
+      await list(GET, "?filter[status]=revoked");
+      expect(statusWheres()).toEqual([["where", "k.status", "=", "revoked"]]);
+    });
+
+    it("ignores a value outside the credential vocabulary", async () => {
+      await list(GET, "?filter[status]=bogus");
+      expect(statusWheres()).toEqual([]);
+    });
+
+    it("accepts every status the vocabulary holds, so one a migration adds filters too (F-133)", async () => {
+      // The grid offers CREDENTIAL_STATUS_VALUES as its filter options; a
+      // hand-kept allow-list here ignored a new value and listed every key.
+      vi.doMock("@/lib/status-values", async () => {
+        const actual = await vi.importActual<typeof StatusValuesModule>("@/lib/status-values");
+        return {
+          ...actual,
+          CREDENTIAL_STATUS_VALUES: [...actual.CREDENTIAL_STATUS_VALUES, "expired"],
+        };
+      });
+      try {
+        vi.resetModules();
+        const widened = await import("@/app/api/administrator/api-keys/route");
+        await list(widened.GET, "?filter[status]=expired");
+        expect(statusWheres()).toEqual([["where", "k.status", "=", "expired"]]);
+      } finally {
+        vi.doUnmock("@/lib/status-values");
+      }
+    });
   });
 });

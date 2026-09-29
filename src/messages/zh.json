@@ -1312,6 +1312,7 @@
     "no_changes": "未提供任何更改。",
     "not_deactivated": "该用户未被停用。",
     "use_restore": "该用户已被软删除。请先恢复该用户。",
+    "not_applicable_to_service_account": "这是 AI 代理的服务账户，它没有登录。请在此处封禁它，或在 Agents 中撤销它。",
     "not_found": "未找到。",
     "organization_not_found": "未找到组织。",
     "permission_in_use": "此权限正在使用中。",

@@ -382,6 +382,27 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     );
   });
 
+  // F-77: an MCP agent's service account has no Better Auth user, so Better
+  // Auth answered NOT_FOUND and this was the 502 above.
+  it("refuses an agent service account with 409 before Better Auth is asked", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+    dbMock.mockResolvedValue({
+      ...targetRow,
+      better_auth_user_id: "mcp-agent:5b0c7f6e-0c1e-4a57-9d3a-1f2e3d4c5b6a",
+    });
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "not_applicable_to_service_account" });
+    expect(authImpersonate).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.impersonation_failed" }),
+    );
+  });
+
   // test-2: the privilege-escalation guard. Impersonation grants the actor
   // the target's session, so a NON-superadmin must not assume a session that
   // carries a permission they themselves lack (e.g. an org admin assuming a
@@ -1008,6 +1029,47 @@ describe("POST /api/administrator/users/bulk", () => {
     const body = await res.json();
     expect(body.attempted).toBe(1);
     expect(body.results).toHaveLength(1);
+  });
+
+  // F-77: bulk-approving the pending sign-ups used to activate every agent
+  // self-registration among them for an admin who may not approve agents. The
+  // route tells the dispatcher whether the caller holds admin.clients.manage.
+  describe("an agent service account in the batch (F-77)", () => {
+    const agentRow = {
+      id: TARGET_ID,
+      better_auth_user_id: "mcp-agent:5b0c7f6e-0c1e-4a57-9d3a-1f2e3d4c5b6a",
+      primary_email: "mcp-agent-1@agents.mcp.invalid",
+      status: "pending_approval",
+    };
+    async function approve(permissions: string[]) {
+      sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+      accessGetter.mockImplementation(async (id: string) =>
+        id === ACTOR_ID
+          ? { ...grantedAccess("admin.users.manage"), permissions }
+          : { ...grantedAccess("shell.view"), permissions: ["shell.view"] },
+      );
+      dbExecuteResult = [agentRow];
+      const { POST } = await importRoute();
+      const res = await POST(
+        makeRequest(url, {
+          method: "POST",
+          body: JSON.stringify({ action: "approve", ids: [TARGET_ID] }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      return (await res.json()) as { succeeded: number; results: { error?: string }[] };
+    }
+
+    it("refuses its approve row to an admin without admin.clients.manage", async () => {
+      const body = await approve(["admin.users.manage", "shell.view"]);
+      expect(body.succeeded).toBe(0);
+      expect(body.results[0]!.error).toBe("forbidden_agent_activation");
+    });
+
+    it("approves it for an admin who also holds admin.clients.manage", async () => {
+      const body = await approve(["admin.users.manage", "admin.clients.manage", "shell.view"]);
+      expect(body.succeeded).toBe(1);
+    });
   });
 });
 

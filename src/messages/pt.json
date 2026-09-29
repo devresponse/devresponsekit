@@ -1312,6 +1312,7 @@
     "no_changes": "Não foram fornecidas alterações.",
     "not_deactivated": "O utilizador não está desativado.",
     "use_restore": "Este utilizador foi eliminado de forma suave. Restaure-o primeiro.",
+    "not_applicable_to_service_account": "Esta é a conta de serviço de um agente de IA, que não inicia sessão. Bloqueie-a aqui ou revogue-a em Agents.",
     "not_found": "Não encontrado.",
     "organization_not_found": "Organização não encontrada.",
     "permission_in_use": "Esta permissão está em utilização.",

@@ -27,7 +27,10 @@ import { auditEvent } from "@/lib/audit.server";
  *     behind `requireAdminPermission("admin.users.manage")` (the
  *     /status route and the bulk endpoint both do). Centralizing the
  *     mutation without re-resolving the session keeps bulk batches at
- *     one session/permission check per request instead of per row.
+ *     one session/permission check per request instead of per row. A
+ *     transition to `active` of an agent service account needs
+ *     `admin.clients.manage` as well, which the three callers check first
+ *     (F-77, `service-account.ts`).
  *   - It DOES enforce tenant scope (AUTHZ-1): for an org admin acting on a
  *     user shared with other orgs, the mutation is confined to the actor's
  *     org membership and never changes the account-global status (except a

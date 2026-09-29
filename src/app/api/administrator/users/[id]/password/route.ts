@@ -16,6 +16,11 @@ import {
 } from "@/lib/admin/admin-mail-budget.server";
 import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import {
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+  SERVICE_ACCOUNT_STATUS,
+} from "@/lib/admin/service-account";
+import {
   actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
@@ -48,7 +53,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  *
  * The new password is forwarded to Better Auth and never logged or
  * echoed in the response or audit metadata. The audit row records only
- * the action and target.
+ * the action and target. An agent service account has no password: 409
+ * `not_applicable_to_service_account` in both modes (F-77).
  */
 const passwordSchema = z.discriminatedUnion("mode", [
   z
@@ -93,6 +99,16 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // reset from the sign-in page, so nothing is lost by gating it. 403 + audit.
   const outranked = await refuseOutrankingTarget(guard, target, request, "password");
   if (outranked) return outranked;
+
+  // F-77: an agent service account signs in with client credentials only. It
+  // has no Better Auth user to set a password on (a 502), and its `.invalid`
+  // address receives no reset email, which was still reported sent and
+  // charged to the mail budget. Both modes refuse it.
+  if (isAgentServiceAccount(target)) {
+    return adminErrorResponse(SERVICE_ACCOUNT_ERROR, SERVICE_ACCOUNT_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   let json: unknown;
   try {

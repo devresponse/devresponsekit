@@ -2,6 +2,7 @@ import "server-only";
 import type { NextResponse } from "next/server";
 import { actingOrganizationId, type AccessLike } from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { AGENT_ACTIVATION_PERMISSION } from "@/lib/admin/service-account";
 import { auditEvent } from "@/lib/audit.server";
 
 /**
@@ -55,6 +56,11 @@ export const UNHELD_PERMISSIONS_REASON = "unheld_permissions";
  */
 export const USER_ACTION_DENIED_EVENT = "admin.user.action_denied";
 export const SHARED_TARGET_REASON = "shared_target_requires_superadmin";
+/**
+ * F-77: approving or reactivating an agent service account without
+ * `admin.clients.manage`, which the Agents console's approve requires.
+ */
+export const AGENT_ACTIVATION_REASON = "agent_requires_clients_manage";
 
 /**
  * A superadmin-only action refused to a caller without cross-org reach: the
@@ -161,6 +167,37 @@ export async function refuseSharedTarget(
     request,
     requestId: guard.requestId ?? null,
     metadata: { action, targetBetterAuthUserId: target.betterAuthUserId },
+  });
+  return forbidden(guard, request);
+}
+
+/**
+ * F-77: the caller may change user statuses but not approve agents, and the
+ * target is an agent service account (`service-account.ts`). Audit it under
+ * the same event as the rules above and return the 403. `action` is the status
+ * action refused (`approve`, `reactivate`).
+ */
+export async function refuseAgentActivation(
+  guard: RefusingGuard,
+  target: { appUserId: string; betterAuthUserId: string; primaryEmail: string },
+  request: { headers: Headers },
+  action: string,
+): Promise<NextResponse> {
+  await auditEvent({
+    eventType: USER_ACTION_DENIED_EVENT,
+    outcome: "denied",
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
+    email: target.primaryEmail,
+    reason: AGENT_ACTIVATION_REASON,
+    request,
+    requestId: guard.requestId ?? null,
+    metadata: {
+      action,
+      targetBetterAuthUserId: target.betterAuthUserId,
+      required: [AGENT_ACTIVATION_PERMISSION],
+    },
   });
   return forbidden(guard, request);
 }

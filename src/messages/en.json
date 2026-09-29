@@ -1312,6 +1312,7 @@
     "no_changes": "No changes were provided.",
     "not_deactivated": "The user is not deactivated.",
     "use_restore": "This user is soft-deleted. Restore the user first.",
+    "not_applicable_to_service_account": "This is an AI agent's service account, which has no sign-in. Block it here, or revoke it under Agents.",
     "not_found": "Not found.",
     "organization_not_found": "Organization not found.",
     "permission_in_use": "This permission is in use.",

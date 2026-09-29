@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
 import { API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
+import { AGENT_ACTIVATION_PERMISSION } from "@/lib/admin/service-account";
 import { ACTIVATION_PERMISSION, ENROLMENT_PERMISSIONS } from "@/lib/admin/user-create.server";
 import { MAX_PAGE } from "@/lib/admin/list-query.server";
 
@@ -105,5 +106,16 @@ describe("openapi document", () => {
     // The status-dependent half cannot be a security requirement.
     expect(createUser.description).toContain(`\`${ACTIVATION_PERMISSION}\``);
     expect(createUser.description).toContain('`initialAppStatus: "active"`');
+  });
+
+  // F-77: approving or reactivating an agent's service account also needs the
+  // Agents console's permission, which the route checks against the target, so
+  // no security requirement can carry it. The description (and the MCP tool
+  // built from it) must.
+  it("setUserStatus says an agent's activation also needs admin.clients.manage", () => {
+    const paths = doc.paths as Record<string, Record<string, { description?: string }>>;
+    const description = paths["/users/{id}/status"]!.post!.description;
+    expect(description).toContain(`\`${AGENT_ACTIVATION_PERMISSION}\``);
+    expect(description).toMatch(/`approve` or `reactivate` of an MCP agent's service account/);
   });
 });

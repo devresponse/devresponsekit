@@ -8,6 +8,11 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
+import {
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+  SERVICE_ACCOUNT_STATUS,
+} from "@/lib/admin/service-account";
 import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -23,7 +28,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `admin.users.setRole` row in docs/admin-manager.md §8.1 and §6.1 for the
  * separation of concerns.
  *
- * Caller MUST hold `admin.users.setRole`.
+ * Caller MUST hold `admin.users.setRole`. An agent service account is 409
+ * `not_applicable_to_service_account` (F-77).
  */
 const roleSchema = z
   .object({
@@ -74,6 +80,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // F-77: the platform role lives on the Better Auth user, which an agent
+  // service account does not have (this was a 502).
+  if (isAgentServiceAccount(target)) {
+    return adminErrorResponse(SERVICE_ACCOUNT_ERROR, SERVICE_ACCOUNT_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   let json: unknown;
   try {

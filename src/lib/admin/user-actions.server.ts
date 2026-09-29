@@ -21,7 +21,16 @@ import {
   type BanSnapshot,
 } from "@/lib/admin/auth-admin.server";
 import { mustUseRestore, USE_RESTORE_ERROR } from "@/lib/admin/deactivated-user";
-import { SHARED_TARGET_REASON, USER_ACTION_DENIED_EVENT } from "@/lib/admin/refusals.server";
+import {
+  AGENT_ACTIVATION_REASON,
+  SHARED_TARGET_REASON,
+  USER_ACTION_DENIED_EVENT,
+} from "@/lib/admin/refusals.server";
+import {
+  AGENT_ACTIVATION_PERMISSION,
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+} from "@/lib/admin/service-account";
 import { targetOutranksActor } from "@/lib/admin/user-target.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 import { revokeBearerCredentialsOf } from "@/lib/api-auth/credential-eviction.server";
@@ -75,6 +84,13 @@ export interface BulkUserActor {
    * the marker this guard now reads.
    */
   access: AccessLike;
+  /**
+   * Whether the actor also holds `admin.clients.manage`
+   * (`mayActivateAgents(guard)`, `service-account.ts`), which an
+   * `approve` or `reactivate` row naming an agent service account needs
+   * (F-77). Omitted means it does not, so such a row is refused.
+   */
+  mayActivateAgents?: boolean;
   /**
    * Correlation id of the batch request (`guard.requestId`), stamped on the
    * per-row refusal audit rows so a denied row can be joined to the
@@ -133,6 +149,24 @@ export type BulkUserOutcome =
 
 /** A `block` / `suspend` row naming the batch's own actor (F-62). */
 export const CANNOT_ACT_ON_SELF_ERROR = "cannot_act_on_self";
+
+/**
+ * An `approve` / `reactivate` row naming an agent service account, from an
+ * actor without `admin.clients.manage` (F-77).
+ */
+export const AGENT_ACTIVATION_DENIED_ERROR = "forbidden_agent_activation";
+
+/**
+ * The bulk actions that work on the Better Auth user, which an agent service
+ * account does not have (F-77): each refuses one with
+ * `not_applicable_to_service_account`.
+ */
+const LOGIN_ACCOUNT_ACTIONS: ReadonlySet<BulkUserAction> = new Set([
+  "ban",
+  "unban",
+  "soft_delete",
+  "restore",
+]);
 
 const STATUS_ACTION_MAP: Partial<
   Record<
@@ -832,6 +866,35 @@ export async function executeBulkUserAction(
       metadata: { action, targetBetterAuthUserId: target.betterAuthUserId, bulk: true },
     });
     return { ok: false, appUserId: target.appUserId, error: "forbidden_target_outranks_actor" };
+  }
+  // F-77: an agent service account has no Better Auth user, so the actions that
+  // work on one found none and failed (`auth_ban_failed`, `auth_unban_failed`)
+  // with a failure row each; and approving one is the Agents console's
+  // approve, which needs `admin.clients.manage`. Bulk-approving the pending
+  // sign-ups used to activate every junk self-registration among them. Block
+  // and suspend still apply: they only stop an agent.
+  if (isAgentServiceAccount(target)) {
+    if (LOGIN_ACCOUNT_ACTIONS.has(action)) {
+      return { ok: false, appUserId: target.appUserId, error: SERVICE_ACCOUNT_ERROR };
+    }
+    if ((action === "approve" || action === "reactivate") && actor.mayActivateAgents !== true) {
+      await auditUserAction(USER_ACTION_DENIED_EVENT, "denied", {
+        request: actor.request,
+        actorBetterAuthUserId: actor.betterAuthUserId,
+        appUserId: target.appUserId,
+        organizationId: scopeOrganizationId(actor.scope),
+        email: target.primaryEmail,
+        requestId: actor.requestId ?? null,
+        reason: AGENT_ACTIVATION_REASON,
+        metadata: {
+          action,
+          targetBetterAuthUserId: target.betterAuthUserId,
+          required: [AGENT_ACTIVATION_PERMISSION],
+          bulk: true,
+        },
+      });
+      return { ok: false, appUserId: target.appUserId, error: AGENT_ACTIVATION_DENIED_ERROR };
+    }
   }
   // F-57: a soft-deleted account leaves `deactivated` only through `restore`
   // (`deactivated-user.ts`). The status actions are refused again inside

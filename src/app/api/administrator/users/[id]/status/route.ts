@@ -11,6 +11,8 @@ import { USE_RESTORE_ERROR, USE_RESTORE_STATUS } from "@/lib/admin/deactivated-u
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseAgentActivation } from "@/lib/admin/refusals.server";
+import { isAgentServiceAccount, mayActivateAgents } from "@/lib/admin/service-account";
 import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
@@ -32,7 +34,9 @@ type RouteContext = { params: Promise<{ id: string }> };
  * events. A soft-deleted target is 409 `use_restore` (F-57). A block or
  * suspend that changes the account-wide status also ends the user's
  * sessions; if that fails the status stays applied and the answer is 502
- * `auth_revoke_all_failed`, safe to retry (F-147).
+ * `auth_revoke_all_failed`, safe to retry (F-147). Approving or
+ * reactivating an agent service account also needs `admin.clients.manage`
+ * (F-77, 403).
  */
 const statusSchema = z
   .object({
@@ -113,6 +117,17 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   }
 
   const mapping = ACTION_TO_STATUS[parsed.data.action];
+  // F-77: activating an agent service account is the Agents console's approve,
+  // which needs `admin.clients.manage`; `admin.users.manage` alone let an admin
+  // who may not approve agents activate one here. Block and suspend stay open
+  // to them: they only stop an agent.
+  if (
+    mapping.newStatus === "active" &&
+    isAgentServiceAccount(target) &&
+    !mayActivateAgents(guard)
+  ) {
+    return refuseAgentActivation(guard, target, request, parsed.data.action);
+  }
   const result = await performAdminStatusChange({
     actorBetterAuthUserId: guard.betterAuthUserId,
     scope,

@@ -788,3 +788,115 @@ describe("the soft-delete revokes the user's bearer credentials (I-19)", () => {
     expect(revokeCredentialsMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * F-77 — an MCP agent's service account has no Better Auth user, so a row that
+ * works on one (ban, unban, soft-delete, restore) is refused before Better Auth
+ * is asked; it used to fail each time with `auth_ban_failed` /
+ * `auth_unban_failed` and a failure row. And approving or reactivating one is
+ * an agent approval, which needs `admin.clients.manage`
+ * (`actor.mayActivateAgents`, the bulk route's `mayActivateAgents(guard)`).
+ */
+describe("an agent service account in a batch (F-77)", () => {
+  const agent = {
+    appUserId: "u-agent",
+    betterAuthUserId: "mcp-agent:5b0c7f6e-0c1e-4a57-9d3a-1f2e3d4c5b6a",
+    primaryEmail: "mcp-agent-1@agents.mcp.invalid",
+    status: "active",
+  };
+  // The reaper expires a stale registration to `deactivated`, the one state
+  // restore applies to.
+  const expiredAgent = { ...agent, status: "deactivated" };
+
+  it.each([
+    ["ban", agent],
+    ["unban", agent],
+    ["soft_delete", agent],
+    ["restore", expiredAgent],
+  ] as const)(
+    "%s is refused with not_applicable_to_service_account, and Better Auth is never asked",
+    async (action, row) => {
+      const out = await executeBulkUserAction(action, row, actor, { reason: "junk" });
+      expect(out).toEqual({
+        ok: false,
+        appUserId: "u-agent",
+        error: "not_applicable_to_service_account",
+      });
+      expect(banMock).not.toHaveBeenCalled();
+      expect(unbanMock).not.toHaveBeenCalled();
+      expect(restoreBanMock).not.toHaveBeenCalled();
+      expect(txRun).not.toHaveBeenCalled();
+      expect(revokeCredentialsMock).not.toHaveBeenCalled();
+      // Nothing failed, so nothing is audited as a failure.
+      expect(auditMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["approve", "reactivate"] as const)(
+    "%s without admin.clients.manage is refused per row and audited as denied",
+    async (action) => {
+      const out = await executeBulkUserAction(
+        action,
+        { ...agent, status: "pending_approval" },
+        {
+          ...actor,
+          mayActivateAgents: false,
+        },
+      );
+      expect(out).toEqual({ ok: false, appUserId: "u-agent", error: "forbidden_agent_activation" });
+      expect(performStatusChange).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith("admin.user.action_denied", "denied", {
+        request: actor.request,
+        actorBetterAuthUserId: "admin",
+        appUserId: "u-agent",
+        organizationId: null,
+        email: "mcp-agent-1@agents.mcp.invalid",
+        requestId: "req-bulk-1",
+        reason: "agent_requires_clients_manage",
+        metadata: {
+          action,
+          targetBetterAuthUserId: agent.betterAuthUserId,
+          required: ["admin.clients.manage"],
+          bulk: true,
+        },
+      });
+    },
+  );
+
+  it("fails closed: a caller that does not say the actor may approve agents is refused", async () => {
+    const out = await executeBulkUserAction("approve", agent, actor);
+    expect(out).toEqual({ ok: false, appUserId: "u-agent", error: "forbidden_agent_activation" });
+    expect(performStatusChange).not.toHaveBeenCalled();
+  });
+
+  it.each(["approve", "reactivate"] as const)(
+    "%s with admin.clients.manage goes to the status core",
+    async (action) => {
+      const out = await executeBulkUserAction(action, agent, { ...actor, mayActivateAgents: true });
+      expect(out).toEqual({ ok: true, appUserId: "u-agent" });
+      expect(performStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({ targetAppUserId: "u-agent", newStatus: "active" }),
+      );
+    },
+  );
+
+  it.each(["block", "suspend"] as const)(
+    "%s still applies without admin.clients.manage: it only stops the agent",
+    async (action) => {
+      const out = await executeBulkUserAction(action, agent, {
+        ...actor,
+        mayActivateAgents: false,
+      });
+      expect(out).toEqual({ ok: true, appUserId: "u-agent" });
+      expect(performStatusChange).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("approving a person needs no admin.clients.manage", async () => {
+    const out = await executeBulkUserAction("approve", target, {
+      ...actor,
+      mayActivateAgents: false,
+    });
+    expect(out).toEqual({ ok: true, appUserId: "u1" });
+  });
+});

@@ -367,4 +367,15 @@ describe("administrator/users/[userId] page — Impersonate button (F-148)", () 
     checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-admin", access: ACCESS });
     expect(findImpersonateProps(await Page(params(USER_ID)))).toBeUndefined();
   });
+
+  // F-77: an MCP agent's service account has no Better Auth user to open a
+  // session on, so the route answers 409 `not_applicable_to_service_account`.
+  it("does not offer it for an active agent service account", async () => {
+    executeTakeFirst.mockResolvedValue({
+      ...USER_ROW,
+      better_auth_user_id: "mcp-agent:5b0c7f6e-0c1e-4a57-9d3a-1f2e3d4c5b6a",
+      primary_email: "mcp-agent-1@agents.mcp.invalid",
+    });
+    expect(findImpersonateProps(await Page(params(USER_ID)))).toBeUndefined();
+  });
 });

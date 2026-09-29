@@ -13,6 +13,11 @@ import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { refuseSharedTarget } from "@/lib/admin/refusals.server";
+import {
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+  SERVICE_ACCOUNT_STATUS,
+} from "@/lib/admin/service-account";
 import { recordedPriorBan, restoreSnapshottedMemberships } from "@/lib/admin/user-actions.server";
 import {
   isResolvedUserResponse,
@@ -45,7 +50,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  *      not access anything.
  *
  * Caller MUST hold `admin.users.delete` (same permission gates both
- * directions of the soft-delete lifecycle, docs/admin-manager.md §8.1).
+ * directions of the soft-delete lifecycle, docs/admin-manager.md §8.1). An
+ * agent service account is 409 `not_applicable_to_service_account` (F-77).
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.delete");
@@ -78,6 +84,16 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   }
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
     return refuseSharedTarget(guard, target, request, "restore");
+  }
+
+  // F-77: an agent service account cannot have been soft-deleted (that is
+  // refused too), and one the registration reaper expired has a revoked
+  // client, so there is nothing to restore; with no Better Auth user, the
+  // unban below was a 502.
+  if (isAgentServiceAccount(target)) {
+    return adminErrorResponse(SERVICE_ACCOUNT_ERROR, SERVICE_ACCOUNT_STATUS, request, {
+      requestId: guard.requestId,
+    });
   }
 
   if (!mustUseRestore(target)) {

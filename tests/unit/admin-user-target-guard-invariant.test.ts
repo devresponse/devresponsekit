@@ -21,6 +21,10 @@ import { fileURLToPath } from "node:url";
  * rule, which revoke-all had (F-60). That list is a declaration, not a
  * derivation: a NEW account-global handler has to be added to it by hand.
  *
+ * And it pins the F-77 refusal: a handler that calls a Better Auth wrapper
+ * acting on the target's Better Auth user first refuses an agent service
+ * account, which has none.
+ *
  * Granularity is the exported handler (`export const <METHOD> =` or `export
  * [async] function <METHOD>`, up to the next export), so a guard in one method
  * does not cover its sibling. It reads source text: the route tests
@@ -180,6 +184,36 @@ describe("per-user target guards (review #7, AUTHZ-2; F-60, F-61)", () => {
       return !h || !MUTATING.has(h.method) || RANK_GUARD.test(h.body);
     });
     expect(stale, "drop the exemption: the handler is gone or now runs the guard").toEqual([]);
+  });
+
+  // F-77: an MCP agent's service account has no Better Auth user, so every
+  // wrapper below finds none and the handler answered 502 (or, for the reset
+  // email, reported a message sent that nobody can receive). A handler that
+  // calls one must ask `isAgentServiceAccount` first. Derived, not declared: a
+  // new handler that calls a wrapper is held to it without being listed.
+  it("every handler that works on the Better Auth user first asks isAgentServiceAccount (F-77)", () => {
+    const LOGIN_ACCOUNT_CALL =
+      /\b(?:banBetterAuthUser|unbanBetterAuthUser|restoreBetterAuthBan|banForSoftDelete|setBetterAuthUserPassword|sendBetterAuthPasswordResetEmail|setBetterAuthUserRole|impersonateBetterAuthUser|updateBetterAuthUser)\s*\(/;
+    const callers = mutating.filter((h) => LOGIN_ACCOUNT_CALL.test(h.body));
+    expect(callers.map((h) => h.where)).toEqual(
+      expect.arrayContaining([
+        "ban/route.ts POST",
+        "unban/route.ts POST",
+        "route.ts DELETE",
+        "route.ts PATCH",
+        "restore/route.ts POST",
+        "password/route.ts POST",
+        "role/route.ts POST",
+        "impersonate/route.ts POST",
+      ]),
+    );
+    const offenders = callers
+      .filter((h) => !/\bisAgentServiceAccount\s*\(/.test(h.body))
+      .map((h) => h.where);
+    expect(
+      offenders,
+      "refuse an agent service account with 409 not_applicable_to_service_account (see POST …/ban)",
+    ).toEqual([]);
   });
 
   it("every account-global handler applies the AUTHZ-2 shared-target rule", () => {

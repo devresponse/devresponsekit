@@ -31,6 +31,11 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { refuseSharedTarget } from "@/lib/admin/refusals.server";
+import {
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+  SERVICE_ACCOUNT_STATUS,
+} from "@/lib/admin/service-account";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import {
   isResolvedUserResponse,
@@ -178,8 +183,10 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
 
   // Mirror display name to Better Auth so the auth-side `name` stays
   // in sync. Failures here do not roll back the app update — the auth
-  // record can be reconciled later — but we audit the failure.
-  if (parsed.data.displayName !== undefined) {
+  // record can be reconciled later — but we audit the failure. An agent
+  // service account has no Better Auth user to mirror to, which audited a
+  // failure on every rename (F-77).
+  if (parsed.data.displayName !== undefined && !isAgentServiceAccount(target)) {
     try {
       await updateBetterAuthUser({
         userId: target.betterAuthUserId,
@@ -225,7 +232,8 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
  *
  * Hard delete via `auth.api.removeUser` is intentionally NOT exposed in
  * v1: soft-delete keeps the row restorable and its audit trail intact. A
- * `restore` endpoint inverts this action (docs/admin-manager.md §8.1).
+ * `restore` endpoint inverts this action (docs/admin-manager.md §8.1). An
+ * agent service account is 409 `not_applicable_to_service_account` (F-77).
  */
 const deleteSchema = z.object({ reason: z.string().min(1).max(500).optional() }).strict();
 
@@ -262,6 +270,14 @@ export const DELETE = withAdminRoute(async function DELETE(
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
     return refuseSharedTarget(guard, target, request, "soft_delete");
+  }
+
+  // F-77: step 1 bans the Better Auth user, which an agent service account
+  // does not have, so this was a 502. Its lifecycle is the Agents console's.
+  if (isAgentServiceAccount(target)) {
+    return adminErrorResponse(SERVICE_ACCOUNT_ERROR, SERVICE_ACCOUNT_STATUS, request, {
+      requestId: guard.requestId,
+    });
   }
 
   // Body is optional for DELETE — treat missing/empty as no reason.

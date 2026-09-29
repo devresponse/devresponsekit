@@ -313,4 +313,12 @@ describe("validateToolArguments — arrays and enums (F-34)", () => {
     expect(setUserStatus.inputSchema.properties).not.toHaveProperty("If-Match");
     expect(listUsers.description).not.toContain("header");
   });
+
+  // F-77: the scope clause names `admin.users.manage` only; the agent's
+  // activation needs `admin.clients.manage` too, and the tool must say so.
+  it("carries setUserStatus's note on activating an agent", () => {
+    expect(byName("setUserStatus")!.description).toMatch(
+      /^Apply a status transition \(supports `If-Match`\) \(requires the `admin\.users\.manage` scope\)\. `approve` or `reactivate` of an MCP agent's service account .*`admin\.clients\.manage`/,
+    );
+  });
 });

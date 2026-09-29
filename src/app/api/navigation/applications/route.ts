@@ -8,6 +8,8 @@ import { loadApplicationsMenu } from "@/lib/navigation.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { shouldAuditDenial } from "@/lib/admin/rate-limit.server";
 import { auditEvent } from "@/lib/audit.server";
+// Shared first-party JSON error envelope (P3-12, F-129), as the shell menu uses.
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +28,16 @@ const querySchema = z.object({
  *
  * Threat / contract:
  *   - 401 for unauthenticated callers, 403 for blocked / pending users.
- *   - Never redirects (per §23). UI handles the error envelope.
+ *   - Never redirects (per §23). UI handles the error envelope, the shared
+ *     `{ error, message, requestId }` one (F-129): these three answers were a
+ *     bare `{ error }`, so the 403's `navigation.menu.denied` row carried an
+ *     id the caller never saw in the body.
  *   - Items are filtered server-side; never returns SSO tokens.
  */
 export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return adminErrorResponse("unauthenticated", 401, request);
   }
   // F-07: read directly, not through a guard, so record an impersonation for
   // `auditEvent` here — the denial row below then names the human behind it.
@@ -41,7 +46,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const queryRaw = Object.fromEntries(request.nextUrl.searchParams.entries());
   const queryParsed = querySchema.safeParse(queryRaw);
   if (!queryParsed.success) {
-    return NextResponse.json({ error: "invalid_query" }, { status: 400 });
+    return adminErrorResponse("invalid_query", 400, request);
   }
 
   const access = await getSessionAccessContext(session);
@@ -58,7 +63,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
         request,
       });
     }
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return adminErrorResponse("forbidden", 403, request);
   }
 
   const body = await loadApplicationsMenu(access, queryParsed.data.locale);

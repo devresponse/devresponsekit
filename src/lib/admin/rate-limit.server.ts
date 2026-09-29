@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { problemResponse } from "@/lib/api-auth/problem";
 import { humanActorFor } from "@/lib/impersonation-attribution.server";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 
@@ -424,9 +425,7 @@ export function rateLimitDeniedResponse(
   requestId?: string,
   nowMs?: number,
 ): NextResponse {
-  // Count EVERY denial (cheap in-memory counter, no flood concern — unlike the
-  // sampled audit below) for the Prometheus `/api/metrics` scrape (#52).
-  rateLimitDenialsTotal.inc({ scope });
+  const retryAfter = recordRateLimitDenial(scope, result);
 
   // Flood-safe denial audit (P3-9): record that an actor tripped the limit, but
   // gate the write through its OWN very-low-rate bucket (DENIAL_AUDIT_LIMIT) so
@@ -463,6 +462,50 @@ export function rateLimitDeniedResponse(
   return adminErrorResponse("rate_limited", 429, request, {
     requestId,
     extra: { retryAfter: result.retryAfterSeconds },
-    headers: { "Retry-After": String(result.retryAfterSeconds) },
+    headers: retryAfter,
+  });
+}
+
+/**
+ * F-130: what every 429 does, whatever shape its surface answers in. It counts
+ * the denial for `devresponsekit_rate_limit_denials_total{scope}` (every one:
+ * a cheap in-memory counter, unlike the sampled audit, #52) and returns the
+ * `Retry-After` header carrying the refusing bucket's own wait.
+ *
+ * The 429s used to be built in six places, each counting (or not) on its own:
+ * the v1 mutation limiter, the three `/api/v1/me/api-keys` routes and MCP
+ * registration answered unseen, so the documented abuse signal stayed flat
+ * under a flood of them, and the key routes sent a guessed `Retry-After: 2`. Each surface now renders its one
+ * shape through this: the admin envelope ({@link rateLimitDeniedResponse}),
+ * the v1 problem ({@link rateLimitedProblemResponse}) and the MCP transport's
+ * JSON-RPC error and registration's RFC 7591 error, whose protocol bodies
+ * are built in their routes. tests/unit/rate-limit-denial-invariant.test.ts
+ * fails a route file that answers a 429 any other way.
+ */
+export function recordRateLimitDenial(
+  scope: string,
+  result: Extract<RateLimitResult, { ok: false }>,
+): { "Retry-After": string } {
+  rateLimitDenialsTotal.inc({ scope });
+  return { "Retry-After": String(result.retryAfterSeconds) };
+}
+
+/**
+ * The `/api/v1` 429 (F-130): a problem+json `rate_limited` whose `retryAfter`
+ * member and `Retry-After` header are the bucket's own wait, counted like
+ * every other denial. It writes no audit row: a v1 or MCP 429 is not audited
+ * (F-76, docs/design-api-keys-and-tokens.md §10.3), where the admin surface
+ * samples one per actor and scope ({@link rateLimitDeniedResponse}).
+ */
+export function rateLimitedProblemResponse(
+  scope: string,
+  result: Extract<RateLimitResult, { ok: false }>,
+  request: { headers: Headers },
+  options: { requestId?: string; headers?: Record<string, string> } = {},
+): NextResponse {
+  return problemResponse("rate_limited", 429, request, {
+    requestId: options.requestId,
+    extra: { retryAfter: result.retryAfterSeconds },
+    headers: { ...options.headers, ...recordRateLimitDenial(scope, result) },
   });
 }

@@ -89,6 +89,16 @@ vi.mock("@/lib/admin/rate-limit-shared.server", () => {
   };
 });
 
+/**
+ * F-129: the shared first-party error envelope. These refusals were a bare
+ * `{ error }`, with no `errors.<code>` key to localize and no id in the body.
+ */
+function envelope(code: string, res: Response) {
+  const requestId = res.headers.get("x-request-id");
+  expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
+  return { error: code, message: `errors.${code}`, requestId };
+}
+
 function makeRequest(url: string, headers: Record<string, string> = {}): NextRequest {
   const u = new URL(url);
   // The route only reads `nextUrl.searchParams`, `request.url` and headers.
@@ -124,7 +134,7 @@ describe("GET /api/sso/launch", () => {
   it("rejects requests without applicationId before any session or audit work (#16)", async () => {
     const res = await GET(makeRequest("http://localhost/api/sso/launch?locale=en"));
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "missing_application_id" });
+    expect(await res.json()).toEqual(envelope("missing_application_id", res));
     // No DB work of any kind: no session lookup, no audit row, no mint.
     expect(sessionGetter).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalled();
@@ -140,7 +150,7 @@ describe("GET /api/sso/launch", () => {
         ),
       );
       expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: "invalid_application_id" });
+      expect(await res.json()).toEqual(envelope("invalid_application_id", res));
       expect(sessionGetter).not.toHaveBeenCalled();
       expect(auditMock).not.toHaveBeenCalled();
       expect(createRedirect).not.toHaveBeenCalled();
@@ -242,6 +252,8 @@ describe("GET /api/sso/launch", () => {
       makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=en"),
     );
     expect(res.status).toBe(403);
+    // The builder's message goes to the audit row, never onto the wire.
+    expect(await res.json()).toEqual(envelope("sso_launch_failed", res));
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "sso.launch.failure",
@@ -260,7 +272,7 @@ describe("GET /api/sso/launch — no signing key configured (review #5)", () => 
       makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=en"),
     );
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: "sso_not_configured" });
+    expect(await res.json()).toEqual(envelope("sso_not_configured", res));
     expect(createRedirect).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock).toHaveBeenCalledWith(
@@ -305,7 +317,7 @@ describe("GET /api/sso/launch — a key on a deployment that is not the issuer (
       makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=en"),
     );
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: "sso_not_configured" });
+    expect(await res.json()).toEqual(envelope("sso_not_configured", res));
     expect(createRedirect).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock).toHaveBeenCalledWith(
@@ -337,7 +349,7 @@ describe("GET /api/sso/launch — impersonated sessions are refused (review #4)"
       makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=en"),
     );
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: "forbidden_while_impersonating" });
+    expect(await res.json()).toEqual(envelope("forbidden_while_impersonating", res));
     // The exploit path: no handoff token is ever minted for the target.
     expect(createRedirect).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledTimes(1);

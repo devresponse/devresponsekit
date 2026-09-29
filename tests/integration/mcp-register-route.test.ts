@@ -24,7 +24,9 @@ const registerMcpAgent = vi.fn();
 const auditEvent = vi.fn();
 
 vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
+  // The real `recordRateLimitDenial` counts the 429 and names its wait (F-130).
+  ...(await importOriginal<typeof RateLimitModule>()),
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
 }));
 // The route's floors consume from the SHARED bucket (review #98); the mock
@@ -48,6 +50,7 @@ vi.mock("@/lib/mcp/registration.server", () => ({
   registerMcpAgent: (...a: unknown[]) => registerMcpAgent(...a),
 }));
 
+import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { POST } from "@/app/api/mcp/register/route";
 
 const ORGS: Record<string, { id: string; slug: string; name: string }> = {
@@ -167,6 +170,36 @@ describe("POST /api/mcp/register (Phase 2)", () => {
     const res = await POST(post({ client_name: "A", organization: "acme" }));
     expect(res.status).toBe(429);
     expect(registerMcpAgent).not.toHaveBeenCalled();
+  });
+
+  it("F-130: the 429 names the bucket's wait and is counted like every other denial", async () => {
+    const denials = async () =>
+      (await rateLimitDenialsTotal.get()).values.find((v) => v.labels.scope === "mcp.register")
+        ?.value ?? 0;
+    const before = await denials();
+    consumeToken.mockReturnValue({ ok: false, retryAfterSeconds: 7 });
+    const res = await POST(post({ client_name: "A", organization: "acme" }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("7");
+    expect(await res.json()).toEqual({
+      error: "temporarily_unavailable",
+      error_description: "Registration is rate limited.",
+    });
+    expect(await denials()).toBe(before + 1);
+  });
+
+  it("A-12: every answer carries an x-request-id, and a throw is an RFC 7591 server_error 500", async () => {
+    const ok = await POST(post({ client_name: "A", organization: "acme" }));
+    expect(ok.status).toBe(201);
+    expect(ok.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+    registerMcpAgent.mockRejectedValue(new Error("could not obtain the advisory lock"));
+    const res = await POST(post({ client_name: "A", organization: "acme" }));
+    expect(res.status).toBe(500);
+    expect(res.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await res.json()).toEqual({
+      error: "server_error",
+      error_description: "The registration could not be completed.",
+    });
   });
 
   describe("F-78: the body is read through a 64 KiB cap, after the limiter", () => {

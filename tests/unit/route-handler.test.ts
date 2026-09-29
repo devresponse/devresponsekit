@@ -17,7 +17,12 @@ import { notFound } from "next/navigation";
 vi.mock("@/lib/observability/logger.server", () => ({ logServerError: vi.fn() }));
 vi.mock("@/lib/observability/server", () => ({ captureServerError: vi.fn() }));
 
-import { withAdminRoute, withV1Route } from "@/lib/route-handler.server";
+import {
+  withAdminRoute,
+  withClientRegistrationRoute,
+  withMcpRoute,
+  withV1Route,
+} from "@/lib/route-handler.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { InvalidListQueryError, parseListQuery } from "@/lib/admin/list-query.server";
 import { logServerError } from "@/lib/observability/logger.server";
@@ -251,6 +256,94 @@ describe("withV1Route", () => {
     });
     expect(log).toHaveBeenCalledWith(
       "v1.internal_error",
+      expect.objectContaining({ requestId: seen, status: 500, err: boom }),
+    );
+    expect(capture).toHaveBeenCalledWith(boom, { requestId: seen, status: 500 });
+  });
+});
+
+/**
+ * A-12: the MCP transport and RFC 7591 registration were exempt from F-29
+ * because a throw in the admin or v1 envelope would put a non-protocol body on
+ * the wire; so a throw was Next's bodiless 500 and no response carried an id.
+ * Their wrappers keep the id handling and render the throw in the protocol's
+ * own error shape.
+ */
+describe("withMcpRoute (JSON-RPC 2.0 transport)", () => {
+  it("stamps every response, a plain-text 405 and a notification's 202 included", async () => {
+    const GET = withMcpRoute(async function GET(_req: NextRequest) {
+      return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
+    });
+    const POST = withMcpRoute(async function POST(_req: NextRequest) {
+      return new Response(null, { status: 202 });
+    });
+    const get = request();
+    const post = request();
+    expect((await GET(get)).headers.get("x-request-id")).toBe(getOrCreateRequestId(get));
+    expect((await POST(post)).headers.get("x-request-id")).toBe(getOrCreateRequestId(post));
+  });
+
+  it("answers a throw with a JSON-RPC -32603 error under the same id in header, body and log", async () => {
+    const boom = new Error("could not mint the exchange token");
+    let seen = "";
+    const POST = withMcpRoute(async function POST(req: NextRequest): Promise<Response> {
+      seen = getOrCreateRequestId(req);
+      throw boom;
+    });
+    const res = await POST(request({ "x-request-id": INBOUND, "x-forwarded-for": "203.0.113.9" }));
+    expect(seen).toBe(INBOUND);
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("x-request-id")).toBe(seen);
+    expect(await res.json()).toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32603, message: "Internal error", data: { requestId: seen } },
+    });
+    expect(log).toHaveBeenCalledWith(
+      "mcp.internal_error",
+      expect.objectContaining({ requestId: seen, status: 500, err: boom }),
+    );
+    expect(capture).toHaveBeenCalledWith(boom, { requestId: seen, status: 500 });
+  });
+
+  it("never puts the exception text on the wire", async () => {
+    const POST = withMcpRoute(async function POST(_req: NextRequest): Promise<Response> {
+      throw new Error("password authentication failed for user devresponse");
+    });
+    expect(await (await POST(request())).text()).not.toMatch(/password|devresponse/);
+  });
+});
+
+describe("withClientRegistrationRoute (RFC 7591)", () => {
+  it("stamps a success response", async () => {
+    const POST = withClientRegistrationRoute(async function POST(_req: NextRequest) {
+      return new Response(JSON.stringify({ client_id: "c" }), { status: 201 });
+    });
+    const req = request();
+    expect((await POST(req)).headers.get("x-request-id")).toBe(getOrCreateRequestId(req));
+  });
+
+  it("answers a throw with the RFC 7591 error shape (server_error), the id in the header and log", async () => {
+    const boom = new Error("advisory lock timeout");
+    let seen = "";
+    const POST = withClientRegistrationRoute(async function POST(
+      req: NextRequest,
+    ): Promise<Response> {
+      seen = getOrCreateRequestId(req);
+      throw boom;
+    });
+    const res = await POST(request());
+    expect(res.status).toBe(500);
+    expect(res.headers.get("x-request-id")).toBe(seen);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({
+      error: "server_error",
+      error_description: "The registration could not be completed.",
+    });
+    expect(log).toHaveBeenCalledWith(
+      "mcp.register.internal_error",
       expect.objectContaining({ requestId: seen, status: 500, err: boom }),
     );
     expect(capture).toHaveBeenCalledWith(boom, { requestId: seen, status: 500 });

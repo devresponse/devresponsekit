@@ -39,6 +39,16 @@ vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMoc
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 
+/**
+ * F-129: the shared first-party error envelope. These refusals were a bare
+ * `{ error }`, with no `errors.<code>` key to localize and no id in the body.
+ */
+function envelope(code: string, res: Response) {
+  const requestId = res.headers.get("x-request-id");
+  expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
+  return { error: code, message: `errors.${code}`, requestId };
+}
+
 function req(body: unknown, headers: Record<string, string> = {}): NextRequest {
   return {
     json: async () => body,
@@ -164,7 +174,7 @@ describe("POST /api/preferences/active-org", () => {
     hasMembership.mockResolvedValue(true);
     const res = await POST(req({ organizationId: ORG_ID }));
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: "forbidden_while_impersonating" });
+    expect(await res.json()).toEqual(envelope("forbidden_while_impersonating", res));
     expect(res.cookies.get("active_org")).toBeUndefined();
     expect(hasMembership).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalled();

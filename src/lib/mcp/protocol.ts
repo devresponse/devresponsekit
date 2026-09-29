@@ -80,6 +80,8 @@ export const RPC_PARSE_ERROR = -32700;
 export const RPC_INVALID_REQUEST = -32600;
 export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_INVALID_PARAMS = -32602;
+/** A fault in the server itself, the transport wrapper's answer to a throw (A-12). */
+export const RPC_INTERNAL_ERROR = -32603;
 /** Server-reserved range (-32000..-32099): unauthenticated caller. */
 export const RPC_UNAUTHORIZED = -32001;
 /**

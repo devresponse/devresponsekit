@@ -5,6 +5,9 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { InvalidListQueryError } from "@/lib/admin/list-query.server";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { problemResponse } from "@/lib/api-auth/problem";
+import { RPC_INTERNAL_ERROR, rpcError } from "@/lib/mcp/protocol";
+import { logServerError } from "@/lib/observability/logger.server";
+import { captureServerError } from "@/lib/observability/server";
 
 /**
  * The request-id chokepoint for route handlers (F-29).
@@ -58,6 +61,12 @@ import { problemResponse } from "@/lib/api-auth/problem";
  * wrapped with the wrapper for its surface, unless the file carries a
  * reasoned exemption there (the Better Auth catch-all, public cacheable
  * documents, probes and machine sinks).
+ *
+ * A-12: the MCP transport and its RFC 7591 registration endpoint were exempt,
+ * because a throw rendered in the admin or v1 envelope would put a
+ * non-protocol body on the wire. They have wrappers of their own now
+ * ({@link withMcpRoute}, {@link withClientRegistrationRoute}): the same id
+ * handling, with the throw rendered in the protocol's error shape.
  */
 
 type RequestCarrier = { headers: Headers };
@@ -106,7 +115,7 @@ function wrapRoute<Args extends unknown[], R extends Response>(
     requestId: string,
     cause: unknown,
   ) => NextResponse,
-  renderInvalidQuery: (
+  renderInvalidQuery?: (
     request: RequestCarrier | undefined,
     requestId: string,
     detail: string,
@@ -123,14 +132,34 @@ function wrapRoute<Args extends unknown[], R extends Response>(
       // F-63: `parseListQuery` refuses a page past MAX_PAGE or a malformed id
       // in a uuid filter by throwing, so every list route answers the same 400
       // here instead of each handling a parse result. It is a client error:
-      // no log line, no Sentry event.
-      if (err instanceof InvalidListQueryError) {
+      // no log line, no Sentry event. A surface with no list routes (MCP)
+      // passes no renderer, and such a throw there is a fault like any other.
+      if (renderInvalidQuery && err instanceof InvalidListQueryError) {
         return renderInvalidQuery(request, requestId, err.detail);
       }
       return renderThrow(request, requestId, err);
     }
     return stampRequestId(response, requestId);
   };
+}
+
+/**
+ * The bookkeeping `adminErrorResponse` / `problemResponse` do for a thrown
+ * handler, for the two protocol surfaces that cannot use them (A-12): the
+ * structured log line under the response's id (OPS-OBS-2) and the Sentry event
+ * tagged with it (D4).
+ */
+function reportThrow(event: string, requestId: string, cause: unknown): void {
+  captureServerError(cause, { requestId, status: 500 });
+  logServerError(event, { requestId, status: 500, code: "internal_error", err: cause });
+}
+
+/** A protocol error body as the `application/json` 500 both MCP wrappers answer. */
+function protocolJson500(body: unknown, requestId: string): NextResponse {
+  return NextResponse.json(body, {
+    status: 500,
+    headers: { "cache-control": "no-store", [REQUEST_ID_HEADER]: requestId },
+  });
 }
 
 /**
@@ -168,4 +197,48 @@ export function withV1Route<Args extends unknown[], R extends Response>(
     (request, requestId, detail) =>
       problemResponse("invalid_request", 400, request, { requestId, detail }),
   );
+}
+
+/**
+ * Wraps the MCP Streamable HTTP transport (`/api/mcp`, A-12). Every response,
+ * the dark 404 and a notification's 202 included, carries the id, and a throw
+ * answers HTTP 500 with a JSON-RPC 2.0 error object: `-32603` "Internal
+ * error" (the code JSON-RPC 2.0 reserves for it), `id: null` because the
+ * request's id may not have been read, and the correlation id in
+ * `data.requestId`, as the other surfaces put it in the body. Logged as
+ * `mcp.internal_error`.
+ */
+export function withMcpRoute<Args extends unknown[], R extends Response>(
+  handler: (...args: Args) => R | Promise<R>,
+): (...args: Args) => Promise<R | NextResponse> {
+  return wrapRoute(handler, (_request, requestId, cause) => {
+    reportThrow("mcp.internal_error", requestId, cause);
+    return protocolJson500(
+      rpcError(null, RPC_INTERNAL_ERROR, "Internal error", { requestId }),
+      requestId,
+    );
+  });
+}
+
+/**
+ * Wraps RFC 7591 Dynamic Client Registration (`/api/mcp/register`, A-12). A
+ * throw answers HTTP 500 with the registration error shape of RFC 7591 §3.2.2,
+ * `{ error, error_description }`, where `server_error` is the OAuth 2.0 code
+ * for an unexpected fault (RFC 6749 §4.1.2.1); the id rides the header only,
+ * since the shape has no member for it. Logged as
+ * `mcp.register.internal_error`.
+ */
+export function withClientRegistrationRoute<Args extends unknown[], R extends Response>(
+  handler: (...args: Args) => R | Promise<R>,
+): (...args: Args) => Promise<R | NextResponse> {
+  return wrapRoute(handler, (_request, requestId, cause) => {
+    reportThrow("mcp.register.internal_error", requestId, cause);
+    return protocolJson500(
+      {
+        error: "server_error",
+        error_description: "The registration could not be completed.",
+      },
+      requestId,
+    );
+  });
 }

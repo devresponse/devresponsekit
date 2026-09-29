@@ -8,6 +8,7 @@ import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import {
   consumeToken,
   rateLimitKey,
+  rateLimitedProblemResponse,
   type RateLimitOptions,
   DEFAULT_ADMIN_MUTATION_LIMIT,
 } from "@/lib/admin/rate-limit.server";
@@ -175,6 +176,9 @@ function unauthenticatedResponse(
  * F-07: a cookie caller on an impersonated session is charged to the HUMAN
  * behind it, not the borrowed identity — the same rule `enforceRateLimit`
  * applies to the first-party surfaces.
+ *
+ * F-130: the denial is counted in `devresponsekit_rate_limit_denials_total`
+ * like every other 429; it used to be the one limiter that never was.
  */
 export function enforceApiRateLimit(
   scope: string,
@@ -186,9 +190,5 @@ export function enforceApiRateLimit(
     grant.caller.jwt?.credential?.id ?? grant.caller.credentialId ?? humanActorId(grant.caller);
   const result = consumeToken(rateLimitKey(scope, actorId), options);
   if (result.ok) return null;
-  return problemResponse("rate_limited", 429, request, {
-    requestId: grant.requestId,
-    extra: { retryAfter: result.retryAfterSeconds },
-    headers: { "Retry-After": String(result.retryAfterSeconds) },
-  });
+  return rateLimitedProblemResponse(scope, result, request, { requestId: grant.requestId });
 }

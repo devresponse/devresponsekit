@@ -230,7 +230,13 @@ Every admin route returns errors through `adminErrorResponse`
 - **`error`** — a machine-readable, snake_case code.
 - **`message`** — the i18n key `errors.<code>`; the frontend localizes it via
   `useTranslations("errors")`. This is the **only** user-visible text — backend
-  exception messages are never placed here.
+  exception messages are never placed here. Every code the helper is called with
+  has that key in all eight locales, and no API route builds an error body of its
+  own (MCP registration's RFC 7591 errors and the two cron sinks keep their
+  own shapes); `tests/unit/api-error-envelope-invariant.test.ts` fails on
+  either (F-129).
+  The first-party routes (`/api/account`, `/api/preferences`, `/api/invitations`,
+  `/api/navigation`, SSO launch and consume) answer the same envelope.
 - **`requestId`** — the correlation id, also emitted as the `x-request-id`
   response header and written to audit rows (§12).
 

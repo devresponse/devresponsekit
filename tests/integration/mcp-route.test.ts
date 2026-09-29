@@ -971,3 +971,38 @@ describe("/api/mcp pre-auth body cap and per-IP floor (F-78)", () => {
     });
   });
 });
+
+/**
+ * A-12: the transport was exempt from the F-29 request-id wrapper, so no MCP
+ * response carried an `x-request-id` and a throw was Next's bodiless 500. It is
+ * exported through `withMcpRoute` now.
+ */
+describe("/api/mcp request ids (A-12)", () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  it("stamps a result, a refusal, a notification's 202, the 405 and the dark 404", async () => {
+    const responses = [
+      await POST(post({ jsonrpc: "2.0", id: 1, method: "ping" })),
+      await POST(post({ jsonrpc: "2.0", id: 2, method: "nope" })),
+      await POST(post({ jsonrpc: "2.0", method: "notifications/initialized" })),
+      await GET(),
+    ];
+    env.MCP_ENABLED = false;
+    responses.push(await GET(), await POST(post({ jsonrpc: "2.0", id: 3, method: "ping" })));
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 202, 405, 404, 404]);
+    for (const res of responses) expect(res.headers.get("x-request-id")).toMatch(UUID);
+  });
+
+  it("answers a throw with a JSON-RPC -32603 error carrying the response's id", async () => {
+    resolveCaller.mockRejectedValue(new Error("connection terminated unexpectedly"));
+    const res = await POST(post({ jsonrpc: "2.0", id: 4, method: "ping" }));
+    expect(res.status).toBe(500);
+    const requestId = res.headers.get("x-request-id");
+    expect(requestId).toMatch(UUID);
+    expect(await res.json()).toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32603, message: "Internal error", data: { requestId } },
+    });
+  });
+});

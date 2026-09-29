@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   useForm,
   type FieldValues,
-  type Path,
   type Resolver,
   type UseFormProps,
   type UseFormReturn,
@@ -40,31 +39,4 @@ export function useZodForm<TValues extends FieldValues>(
     // structurally erased here, so a double assertion is the cleanest bridge.
     resolver: zodResolver(schema as never) as unknown as Resolver<TValues>,
   });
-}
-
-/**
- * Maps a server response's field errors back onto the form so a server-only
- * failure (e.g. a uniqueness conflict the client schema can't know about)
- * lands on the offending control instead of in a generic banner. When no
- * field error is supplied, `fallbackMessage` is set on the form `root` (render
- * it as a banner via `formState.errors.root?.message`).
- *
- * Field messages are expected to be already-localized strings; the schema's
- * own `validation.*` keys are localized by `FormMessage` at render time.
- */
-export function applyServerErrors<T extends FieldValues>(
-  form: UseFormReturn<T>,
-  fieldErrors: Partial<Record<string, string | undefined>>,
-  fallbackMessage?: string,
-): void {
-  let mapped = false;
-  for (const [name, message] of Object.entries(fieldErrors)) {
-    if (message) {
-      form.setError(name as Path<T>, { type: "server", message });
-      mapped = true;
-    }
-  }
-  if (!mapped && fallbackMessage) {
-    form.setError("root", { type: "server", message: fallbackMessage });
-  }
 }

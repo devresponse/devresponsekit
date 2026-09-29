@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as NavServerModule from "@/lib/navigation.server";
 
 /**
- * DB-backed unit tests for `navigation.server.ts > loadApplicationsMenu`,
- * `loadShellMenu`, and `loadNestedAppsMenu`. The query builder is
- * stubbed so we can assert the envelope shape, the SSO launch URL
- * encoding, and that menu items are filtered server-side.
+ * DB-backed unit tests for `navigation.server.ts > loadApplicationsMenu`
+ * and `loadShellMenu`. The query builder is stubbed so we can assert the
+ * envelope shape, the SSO launch URL encoding, and that menu items are
+ * filtered server-side.
  */
 
 const enterpriseExecute = vi.fn();
@@ -164,13 +164,5 @@ describe("loadShellMenu", () => {
     const admin = res.items.find((i) => i.id === "administrator");
     expect(admin).toBeDefined();
     expect(admin!.href).toBe("/en/app/administrator");
-  });
-});
-
-describe("loadNestedAppsMenu", () => {
-  it("scopes nested item ids by application", async () => {
-    const res = await mod.loadNestedAppsMenu(ACTIVE, "portal", "en");
-    expect(res.menuId).toBe("nested-apps:portal");
-    expect(res.items[0]!.id.startsWith("portal:")).toBe(true);
   });
 });

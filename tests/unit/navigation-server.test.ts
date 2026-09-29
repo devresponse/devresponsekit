@@ -4,11 +4,10 @@ import { filterMenuByPermissions } from "@/lib/navigation.server";
 /**
  * Pure helper unit tests for `navigation.server.ts` (§29.4.7).
  *
- * The DB-backed `loadApplicationsMenu` / `loadShellMenu` /
- * `loadNestedAppsMenu` functions are exercised by the navigation route
- * integration tests; here we lock down `filterMenuByPermissions`'s
- * behaviour: missing requiredPermissions = always allowed, partial
- * permissions = filtered out, exact match = retained.
+ * The `loadApplicationsMenu` / `loadShellMenu` loaders are exercised by
+ * navigation-server-loaders.test.ts; here we lock down
+ * `filterMenuByPermissions`'s behaviour: missing requiredPermissions =
+ * always allowed, partial permissions = filtered out, exact match = retained.
  */
 describe("filterMenuByPermissions", () => {
   it("keeps items with no requiredPermissions", () => {

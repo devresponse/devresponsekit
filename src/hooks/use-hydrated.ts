@@ -9,10 +9,10 @@ const emptySubscribe = () => () => {};
  * `true` after hydration (P2-2).
  *
  * Use it to defer rendering any value that differs between the server
- * (which sees store defaults) and the client (which rehydrates persisted
- * Zustand / localStorage state synchronously). Reading the persisted value
- * directly on first render makes `aria-pressed`/labels disagree with the
- * SSR markup → a React hydration warning + a visible flicker.
+ * (which sees defaults) and the client (which can read browser-only state,
+ * such as the runtime's time-zone list, synchronously). Reading that value
+ * directly on first render makes the markup disagree with the SSR output →
+ * a React hydration warning + a visible flicker.
  *
  * Implemented with `useSyncExternalStore` (server snapshot `false`, client
  * snapshot `true`) so there is no in-effect `setState`.

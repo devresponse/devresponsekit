@@ -157,52 +157,11 @@ export async function loadShellMenu(
   };
 }
 
-/**
- * Loads nested-application menu items (MENU #2).
- *
- * Currently returns the static set of secondary apps for the active
- * organization. Real implementations would join `app_enterprise_applications`
- * with role-based access; the contract here mirrors that envelope so the
- * UI can be implemented before the join is wired.
- */
-export async function loadNestedAppsMenu(
-  access: UserAccessContext,
-  applicationId: string,
-  locale: string,
-): Promise<NavigationMenuResponse<NavigationMenuItem>> {
-  const t = await shellTranslator(locale);
-  const items: NavigationMenuItem[] = filterMenuByPermissions(
-    DEFAULT_NESTED_MENU,
-    access.permissions,
-  ).map((item) => ({
-    id: `${applicationId}:${item.id}`,
-    label: t(item.labelKey),
-    href: `/${locale}${item.href}`,
-    icon: item.icon,
-  }));
-
-  return {
-    menuId: `nested-apps:${applicationId}`,
-    kind: "nested-apps",
-    locale,
-    generatedAt: new Date().toISOString(),
-    items,
-  };
-}
-
 interface InternalMenuItem {
   id: string;
   /** `shell`-namespace message key resolved per request locale. */
   labelKey:
-    | "dashboard"
-    | "workspace"
-    | "account"
-    | "documentation"
-    | "help"
-    | "admin"
-    | "users"
-    | "audit"
-    | "settings";
+    "dashboard" | "workspace" | "account" | "documentation" | "help" | "admin" | "users" | "audit";
   href: string;
   /**
    * Icon NAME (not a component) — resolved client-side through the
@@ -288,15 +247,5 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
     // legacy/base key the page never checks, so gating on it produced a
     // dead link for everyone except holders of that phantom grant.
     requiredPermissions: ["admin.audit.read"],
-  },
-];
-
-const DEFAULT_NESTED_MENU: InternalMenuItem[] = [
-  {
-    id: "settings",
-    labelKey: "settings",
-    href: "/app/workspace/settings",
-    icon: "settings",
-    requiredPermissions: ["shell.view"],
   },
 ];

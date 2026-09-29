@@ -49,7 +49,3 @@ export function AppSwitcherSkeleton() {
 export function SidebarMenuSkeleton() {
   return <NavigationMenuSkeleton rows={8} compact />;
 }
-
-export function NavbarMenuSkeleton() {
-  return <NavigationMenuSkeleton rows={3} compact />;
-}

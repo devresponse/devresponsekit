@@ -5,7 +5,6 @@ import {
   UNTRUSTED_DATA_NOTICE,
   buildInitializeResult,
   checkProtocolVersionHeader,
-  isJsonRpcMessage,
   isNotification,
   isValidJsonRpcId,
   negotiateProtocolVersion,
@@ -52,9 +51,7 @@ describe("MCP protocol", () => {
     expect(textResult("ok")).toEqual({ content: [{ type: "text", text: "ok" }] });
   });
 
-  it("recognizes JSON-RPC messages and notifications", () => {
-    expect(isJsonRpcMessage({ method: "ping" })).toBe(true);
-    expect(isJsonRpcMessage({ id: 1 })).toBe(false);
+  it("recognizes notifications", () => {
     expect(isNotification({ method: "notifications/initialized" })).toBe(true);
     expect(isNotification({ method: "initialize", id: 1 })).toBe(false);
   });

@@ -52,8 +52,9 @@ const directReaders = routes.filter((r) => DIRECT_SESSION_READ.test(r.source));
 
 describe("impersonation attribution invariant (F-07)", () => {
   it("finds the direct session readers (the scan is not vacuous)", () => {
-    // Navigation menus x3, invitation acceptance, SSO launch, plus the two exemptions.
-    expect(directReaders.length).toBeGreaterThanOrEqual(7);
+    // Navigation menus x2 (the nested-apps menu was deleted, I-02), invitation
+    // acceptance, SSO launch, plus the two exemptions.
+    expect(directReaders.length).toBeGreaterThanOrEqual(6);
   });
 
   it("every route that reads the session directly records an impersonation (or is exempt)", () => {

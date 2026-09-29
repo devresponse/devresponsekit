@@ -119,6 +119,26 @@ export function AdministratorUsersGrid({
     [t, format, locale],
   );
 
+  // Mirror the server cap so the UI cannot submit a batch the server
+  // will reject (review #34). `MAX_BULK_IDS` is imported from the same
+  // module the route's Zod schema uses, so the two cannot drift, and
+  // the operator gets an actionable message naming the limit instead of
+  // the generic "Bulk action failed." a 400 would produce. Page mode counts
+  // the ticked rows; "select all matching" counts the matches the toolbar
+  // offered, and the server refuses it too when more users match (F-62).
+  // Every action checks this before its own dialog (and so before
+  // `runBulkAction`), so nobody confirms a batch that is then refused.
+  const refuseOverCap = useCallback(async (): Promise<boolean> => {
+    const count =
+      selection.mode === "all" ? (selection.matchingTotal ?? 0) : selection.selectedIds.size;
+    if (count <= MAX_BULK_IDS) return false;
+    await dialogs.notify({
+      description: tBulk("tooManyToast", { max: MAX_BULK_IDS }),
+      variant: "destructive",
+    });
+    return true;
+  }, [selection, dialogs, tBulk]);
+
   const runBulkAction = useCallback(
     async (action: BulkActionKey, options: { reason?: string } = {}) => {
       if (busy) return;
@@ -127,21 +147,6 @@ export function AdministratorUsersGrid({
       const explicitIds = Array.from(selection.selectedIds);
       if (selection.mode === "page" && explicitIds.length === 0) return;
 
-      // Mirror the server cap so the UI cannot submit a batch the server
-      // will reject (review #34). `MAX_BULK_IDS` is imported from the same
-      // module the route's Zod schema uses, so the two cannot drift, and
-      // the operator gets an actionable message naming the limit instead of
-      // the generic "Bulk action failed." a 400 would produce. Only page
-      // mode enumerates ids; "select all matching" sends `ids: "*"` and the
-      // server applies the cap while expanding the filter set.
-      if (selection.mode === "page" && explicitIds.length > MAX_BULK_IDS) {
-        await dialogs.notify({
-          description: tBulk("tooManyToast", { max: MAX_BULK_IDS }),
-          variant: "destructive",
-        });
-        return;
-      }
-
       setBusy(true);
       try {
         const body: Record<string, unknown> = { action, reason: options.reason };
@@ -149,14 +154,15 @@ export function AdministratorUsersGrid({
           body.ids = "*";
           // Forward the same allow-listed filter set the list endpoint
           // honours so "select all matching" cannot pivot to other
-          // columns. We read directly from the URL — same source the
-          // grid is already reading.
-          const params = new URLSearchParams(window.location.search);
+          // columns: the search and status filter the selection was made
+          // under, never the URL's current ones (F-114). This handler may
+          // resume after a dialog, still holding the selection of the render
+          // it was clicked in, while the URL moved on under the dialog (the
+          // search box commits on a timer); the confirmation named this
+          // selection's count.
+          const { q, filters: scoped } = selection.scope;
           const filters: Record<string, string | string[]> = {};
-          const status = params.getAll("filter[status]");
-          if (status.length === 1) filters.status = status[0]!;
-          else if (status.length > 1) filters.status = status;
-          const q = params.get("q");
+          if (scoped.status !== undefined) filters.status = scoped.status;
           if (q) filters.q = q;
           body.filters = filters;
         } else {
@@ -175,7 +181,20 @@ export function AdministratorUsersGrid({
           return;
         }
         if (!res.ok) {
-          await dialogs.notify({ description: tBulk("errorToast"), variant: "destructive" });
+          // F-62: more users match "select all" than one batch may act on,
+          // and the server applied nothing. Say so, with the limit, rather
+          // than the generic failure.
+          const refusal =
+            res.status === 400
+              ? ((await res.json().catch(() => null)) as { error?: string } | null)
+              : null;
+          await dialogs.notify({
+            description:
+              refusal?.error === "too_many_matches"
+                ? tBulk("tooManyToast", { max: MAX_BULK_IDS })
+                : tBulk("errorToast"),
+            variant: "destructive",
+          });
           return;
         }
 
@@ -203,17 +222,36 @@ export function AdministratorUsersGrid({
     [busy, selection, tBulk, dialogs],
   );
 
+  // F-114: approve and block run without a dialog on the rows an admin ticked,
+  // but "select all matching" can reach every user in the search, up to the
+  // bulk cap, so there they first ask, naming the count. Ban (reason prompt)
+  // and soft-delete (confirmation) already ask in both modes.
+  const runStatusAction = useCallback(
+    async (action: "approve" | "block", label: string) => {
+      if (await refuseOverCap()) return;
+      if (selection.mode === "all") {
+        const ok = await dialogs.confirm({
+          title: label,
+          description: tBulk("confirmAllMatching", { count: selection.matchingTotal ?? 0 }),
+        });
+        if (!ok) return;
+      }
+      await runBulkAction(action);
+    },
+    [selection, dialogs, tBulk, runBulkAction, refuseOverCap],
+  );
+
   const bulkActions = useMemo<BulkActionDescriptor[]>(
     () => [
       {
         key: "approve",
         label: tBulk("approve"),
-        onSelect: () => void runBulkAction("approve"),
+        onSelect: () => void runStatusAction("approve", tBulk("approve")),
       },
       {
         key: "block",
         label: tBulk("block"),
-        onSelect: () => void runBulkAction("block"),
+        onSelect: () => void runStatusAction("block", tBulk("block")),
       },
       {
         key: "ban",
@@ -221,6 +259,7 @@ export function AdministratorUsersGrid({
         destructive: true,
         onSelect: () => {
           void (async () => {
+            if (await refuseOverCap()) return;
             const reason = await dialogs.promptText({
               title: tBulk("ban"),
               label: tBulk("reasonPrompt"),
@@ -237,6 +276,7 @@ export function AdministratorUsersGrid({
         destructive: true,
         onSelect: () => {
           void (async () => {
+            if (await refuseOverCap()) return;
             const ok = await dialogs.confirm({
               title: tBulk("softDelete"),
               description: tBulk("confirmDelete"),
@@ -248,7 +288,7 @@ export function AdministratorUsersGrid({
         },
       },
     ],
-    [tBulk, runBulkAction, dialogs],
+    [tBulk, runBulkAction, runStatusAction, refuseOverCap, dialogs],
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(

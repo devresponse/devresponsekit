@@ -514,7 +514,8 @@
         "partialFailureToast": "{action} aplicada a {succeeded}/{attempted} utilizador(es); {failed} falharam.",
         "errorToast": "A ação em massa falhou.",
         "rateLimitedToast": "Demasiados pedidos em massa. Tente novamente dentro de momentos.",
-        "tooManyToast": "Selecione no máximo {max} usuários para uma ação em massa."
+        "tooManyToast": "Selecione no máximo {max} usuários para uma ação em massa.",
+        "confirmAllMatching": "Aplicar aos {count, number} utilizadores que correspondem à pesquisa e aos filtros atuais? A sua própria conta, se corresponder, é ignorada."
       },
       "impersonation": {
         "confirmTitle": "Personificar {email}?",
@@ -1293,6 +1294,7 @@
     "email_taken": "Este e-mail já está a ser utilizado.",
     "export_failed": "A exportação falhou antes de qualquer linha poder ser enviada.",
     "filters_required_for_select_all": "São necessários filtros ao selecionar tudo.",
+    "too_many_matches": "Demasiados utilizadores correspondem para uma única ação em massa. Restrinja a pesquisa ou os filtros.",
     "forbidden": "Não tem permissão para realizar esta ação.",
     "id_taken": "Este identificador já está a ser utilizado.",
     "audience_taken": "Esta audiência SSO já está a ser utilizada.",

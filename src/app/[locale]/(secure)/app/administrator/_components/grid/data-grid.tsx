@@ -205,7 +205,9 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
                   ? {
                       mode: selection.state.mode,
                       count: selection.state.selectedIds.size,
-                      onSelectAllMatching: selection.state.selectAllMatching,
+                      // The count the toolbar offers, kept for a confirmation
+                      // naming it (F-114).
+                      onSelectAllMatching: () => selection.state.selectAllMatching(total),
                       onClear: selection.state.clear,
                     }
                   : {

@@ -11,7 +11,8 @@
 
 /**
  * Maximum number of explicit ids one `POST /api/administrator/users/bulk`
- * request may carry. Also the cap the server applies when expanding
- * `ids: "*"` ("select all matching") into concrete rows.
+ * request may carry. Also the most matches `ids: "*"` ("select all
+ * matching") may expand to; more is refused with 400 `too_many_matches`
+ * (F-62).
  */
 export const MAX_BULK_IDS = 500;

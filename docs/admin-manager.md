@@ -441,8 +441,21 @@ Grids support per-row actions and two selection modes (the client state lives in
   is the literal set of chosen ids.
 - **select-all-matching mode** — selects every row matching the current filter /
   `q`, expressed to the server as `ids: "*"` plus the filter set. The server
-  re-applies the **same allow-listed filters** and caps the result, so "select
-  all" can never escape the visibility model or pivot to unindexed columns.
+  re-applies the **same allow-listed filters**, so "select all" can never escape
+  the visibility model or pivot to unindexed columns, and refuses the batch when
+  more rows match than one may act on (§13).
+
+A selection belongs to the search and filters it was made under: changing `q` or
+any filter clears it, in both modes (F-114). Before that, a "select all
+matching" made under one filter survived clearing it, so an Approve or Block sent
+`ids: "*"` with the new, wider filter set. Sorting and paging change no match, so
+they keep the selection. The selection also records those values, and a
+select-all request sends them rather than re-reading the URL, which can move on
+while a confirmation is open. On the users grid, **Approve** and **Block** in
+select-all-matching mode first ask for confirmation, naming the count the
+toolbar offered; on ticked rows they run at once. A selection over the bulk cap
+(ticked rows, or a count the toolbar offered) is refused before any action's
+dialog.
 
 Bulk actions and CSV export are surfaced by the grid toolbar
 (`_components/grid/data-grid-toolbar.tsx`) and detailed in §13 and §19.
@@ -1756,8 +1769,23 @@ restore`, and `ids` is either an explicit UUID array **or** the literal `"*"`
   **de-duplicated** (a repeated id would otherwise double-audit, inflate counts,
   and re-apply the action — e.g. a second ban resetting the expiry).
 - **`"*"` re-applies the allow-listed filters.** Select-all re-runs the same
-  filter set the list endpoint uses against `app_users`, capped at 500 — it
-  cannot pivot to unindexed columns or escape the visibility model (§7.1).
+  filter set the list endpoint uses against `app_users` — it cannot pivot to
+  unindexed columns or escape the visibility model (§7.1). A `status` value
+  outside the allow-list, or an empty list, is a 400 `invalid_body` (F-114): the
+  list endpoint drops one, which here used to widen the batch to every status.
+- **`"*"` is every match or nothing (F-62).** When more than 500 users match,
+  the call is a 400 `too_many_matches` carrying `matched` (the count) and `max`
+  (500), and nothing is applied; narrow the filters, or tick rows. It used to act
+  on an arbitrary 500 of them, in no order, while the grid said every match was
+  selected. The matches run newest first (`created_at`, then `id`), the grid's
+  default order, and never include the caller's own account.
+- **A batch never blocks or suspends its caller (F-62).** A `block` or
+  `suspend` row naming the caller's own account is refused per row with
+  `cannot_act_on_self`, so ticking one's own row, as the page's header checkbox
+  does, cannot lock the admin out of an org they may be the only admin of. A
+  `ban` or `soft_delete` of oneself is already refused (`auth_ban_failed`, §8.1).
+  The single-row `POST /users/[id]/status` names its target explicitly and
+  still accepts the caller's own id; REVOKE-2 refuses it for the last superadmin.
 - **Org scoping.** The batch is confined by `resolveOrgScope` (ADR-0001): a null
   scope touches no one; an org admin's batch is filtered to users with a
   membership in their org, so a foreign-org id simply resolves to `not_found`.
@@ -2033,8 +2061,8 @@ The UI returns the admin to `/app` (not `/`) after stopping.
 ### Bulk actions
 
 See §13. Bulk is a Phase 7 capability: dedup of explicit ids, `"*"` select-all
-re-applying the allow-listed filters, org scoping, per-row + summary audit, and
-the tighter bulk rate-limit budget.
+re-applying the allow-listed filters (all matches or none, never the caller),
+org scoping, per-row + summary audit, and the tighter bulk rate-limit budget.
 
 ### CSV export
 

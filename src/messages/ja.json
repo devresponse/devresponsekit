@@ -514,7 +514,8 @@
         "partialFailureToast": "{succeeded}/{attempted} 名のユーザーに「{action}」を適用しました。{failed} 件が失敗しました。",
         "errorToast": "一括操作に失敗しました。",
         "rateLimitedToast": "一括リクエストが多すぎます。しばらくしてからもう一度お試しください。",
-        "tooManyToast": "一括操作では最大 {max} 人のユーザーを選択してください。"
+        "tooManyToast": "一括操作では最大 {max} 人のユーザーを選択してください。",
+        "confirmAllMatching": "現在の検索とフィルターに一致する {count, number} 人のユーザー全員に適用しますか？ご自身のアカウントは、一致する場合も対象外です。"
       },
       "impersonation": {
         "confirmTitle": "{email} として代理ログインしますか？",
@@ -1293,6 +1294,7 @@
     "email_taken": "このメールアドレスはすでに使用されています。",
     "export_failed": "行を1つも送信する前にエクスポートが失敗しました。",
     "filters_required_for_select_all": "すべてを選択するにはフィルターが必要です。",
+    "too_many_matches": "一括操作の対象となるユーザーが多すぎます。検索条件やフィルターを絞り込んでください。",
     "forbidden": "この操作を実行する権限がありません。",
     "id_taken": "この識別子はすでに使用されています。",
     "audience_taken": "この SSO オーディエンスはすでに使用されています。",

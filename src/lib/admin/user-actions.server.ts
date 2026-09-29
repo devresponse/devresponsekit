@@ -131,6 +131,9 @@ export interface BulkUserOptions {
 export type BulkUserOutcome =
   { ok: true; appUserId: string } | { ok: false; appUserId: string; error: string };
 
+/** A `block` / `suspend` row naming the batch's own actor (F-62). */
+export const CANNOT_ACT_ON_SELF_ERROR = "cannot_act_on_self";
+
 const STATUS_ACTION_MAP: Partial<
   Record<
     BulkUserAction,
@@ -801,6 +804,17 @@ export async function executeBulkUserAction(
   actor: BulkUserActor,
   options: BulkUserOptions = {},
 ): Promise<BulkUserOutcome> {
+  // F-62: a batch never blocks or suspends the admin who sent it. The grid's
+  // header checkbox selects their own row like any other, and "Block
+  // selected" then locked them out of an org they may be the only admin of.
+  // A ban or soft-delete of oneself is already refused (`banBetterAuthUser`),
+  // and approve or reactivate cannot lock anyone out.
+  if (
+    (action === "block" || action === "suspend") &&
+    target.betterAuthUserId === actor.betterAuthUserId
+  ) {
+    return { ok: false, appUserId: target.appUserId, error: CANNOT_ACT_ON_SELF_ERROR };
+  }
   // Privilege ordering (review #7): every bulk action is a lockout / status
   // primitive, so — exactly like the single-row routes — a non-SUPERADMIN may
   // not apply it to a target who outranks them (a single-org superadmin, or a

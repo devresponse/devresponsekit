@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql, type Kysely } from "kysely";
 import { db } from "@/db/database";
 import type { AppDatabase } from "@/db/schema/app-schema";
+import { MCP_AGENT_ID_PREFIX } from "@/lib/admin/service-account";
 import { createOauthClient, type CreatedOauthClient } from "@/lib/api-auth/oauth-clients.server";
 import type { McpRegistrationStatus } from "./registration";
 
@@ -44,7 +45,9 @@ export async function provisionMcpAgent(
   input: ProvisionMcpAgentInput,
   executor: Kysely<AppDatabase> = db,
 ): Promise<ProvisionedMcpAgent> {
-  const betterAuthUserId = `mcp-agent:${randomUUID()}`;
+  // The prefix is what marks the account as having no Better Auth user, so the
+  // Users console's login actions refuse it (F-77, `service-account.ts`).
+  const betterAuthUserId = `${MCP_AGENT_ID_PREFIX}${randomUUID()}`;
   // A non-deliverable, reserved-TLD address (RFC 6761 `.invalid`) that is
   // unique per agent — machine principals never receive or send mail.
   const email = `mcp-agent-${randomUUID()}@agents.mcp.invalid`;

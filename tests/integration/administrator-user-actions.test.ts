@@ -1904,3 +1904,183 @@ describe("soft-deleted users: one precondition, earlier bans kept, credentials r
     );
   });
 });
+
+/**
+ * F-77 — an MCP agent's service account (`provisionMcpAgent`) has a
+ * synthesized `mcp-agent:` id and no Better Auth user. Every action here that
+ * works on the Better Auth user found none: ban, unban, soft-delete, restore
+ * and setting the password or platform role answered 502 with a failure row,
+ * and a reset email was reported sent to its undeliverable address. Each now
+ * refuses it with 409 `not_applicable_to_service_account` before anything is
+ * asked or written. And approving or reactivating one is an agent approval,
+ * which needs `admin.clients.manage` as the Agents console's does.
+ */
+const AGENT_BA = "mcp-agent:5b0c7f6e-0c1e-4a57-9d3a-1f2e3d4c5b6a";
+const agentRow = { ...targetRow, better_auth_user_id: AGENT_BA };
+const LOGIN_ACCOUNT_ROUTES = new Set([
+  "POST /users/[id]/password (mode=set)",
+  "POST /users/[id]/password (mode=reset_email)",
+  "POST /users/[id]/ban",
+  "POST /users/[id]/unban",
+  "DELETE /users/[id] (soft delete)",
+  "POST /users/[id]/restore",
+]);
+
+/** The actor holds `perms`; the agent target resolves as a plain member. */
+function actorVsAgent(perms: string[]) {
+  sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
+  accessGetter.mockImplementation((id: string) =>
+    id === ACTOR_BA
+      ? { ...grantedAccess(perms[0]!), permissions: [...perms, "shell.view"] }
+      : { ...grantedAccess(perms[0]!), permissions: ["shell.view"] },
+  );
+}
+
+function expectServiceAccountRefusal(body: unknown) {
+  expect(body).toEqual(
+    expect.objectContaining({
+      error: "not_applicable_to_service_account",
+      message: "errors.not_applicable_to_service_account",
+    }),
+  );
+}
+
+describe.each(guardedRoutes.filter((r) => LOGIN_ACCOUNT_ROUTES.has(r.name)))(
+  "$name — an agent service account (F-77)",
+  (route) => {
+    beforeEach(() => {
+      armEffects();
+      actorVsAgent([route.perm]);
+      // Restore's agent is one the registration reaper expired (`deactivated`).
+      dbMock.mockResolvedValue({ ...(route.row ?? targetRow), better_auth_user_id: AGENT_BA });
+    });
+
+    it("is 409 not_applicable_to_service_account, before Better Auth is asked, with no failure row", async () => {
+      const res = await route.invoke();
+      expect(res.status).toBe(409);
+      expectServiceAccountRefusal(await res.json());
+      expect(route.effect()).not.toHaveBeenCalled();
+      expect(authRestoreBan).not.toHaveBeenCalled();
+      expect(revokeCredentialsMock).not.toHaveBeenCalled();
+      for (const outcome of ["failure", "error", "success"]) {
+        expect(auditMock).not.toHaveBeenCalledWith(expect.objectContaining({ outcome }));
+      }
+    });
+  },
+);
+
+describe("the rest of the Users console on an agent service account (F-77)", () => {
+  beforeEach(() => {
+    armEffects();
+    dbMock.mockResolvedValue(agentRow);
+  });
+
+  async function postStatus(action: string) {
+    const { POST } = await import("@/app/api/administrator/users/[id]/status/route");
+    return POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/status`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+  }
+
+  it("a reset email is refused without spending the mail budget or the target's cooldown", async () => {
+    actorVsAgent(["admin.users.setPassword"]);
+    const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "reset_email" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(409);
+    expect(orgMailBudgetMock).not.toHaveBeenCalled();
+    expect(recipientCooldownMock).not.toHaveBeenCalled();
+    expect(authForget).not.toHaveBeenCalled();
+  });
+
+  it("POST …/role is 409 for a superadmin too: the platform role lives on the Better Auth user", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
+    accessGetter.mockResolvedValue(withSuperuser("admin.users.setRole"));
+    const { POST } = await import("@/app/api/administrator/users/[id]/role/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/role`, {
+        method: "POST",
+        body: JSON.stringify({ role: "admin" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(409);
+    expectServiceAccountRefusal(await res.json());
+    expect(authSetRole).not.toHaveBeenCalled();
+  });
+
+  it("PATCH renames it without mirroring to Better Auth, so no failure row", async () => {
+    actorVsAgent(["admin.users.update"]);
+    const { PATCH } = await import("@/app/api/administrator/users/[id]/route");
+    const res = await PATCH(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ displayName: "Build bot" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(authUpdateUser).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.update_auth_mirror_failed" }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.updated", outcome: "success" }),
+    );
+  });
+
+  it.each(["approve", "reactivate"])(
+    "POST …/status %s without admin.clients.manage is 403, audited, and changes nothing",
+    async (action) => {
+      actorVsAgent(["admin.users.manage"]);
+      const res = await postStatus(action);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual(expect.objectContaining({ error: "forbidden" }));
+      expect(statusChangeMock).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.user.action_denied",
+          outcome: "denied",
+          reason: "agent_requires_clients_manage",
+          actorBetterAuthUserId: ACTOR_BA,
+          appUserId: TARGET_ID,
+          organizationId: "o-1",
+          metadata: {
+            action,
+            targetBetterAuthUserId: AGENT_BA,
+            required: ["admin.clients.manage"],
+          },
+        }),
+      );
+    },
+  );
+
+  it("POST …/status approve with admin.clients.manage goes through", async () => {
+    actorVsAgent(["admin.users.manage", "admin.clients.manage"]);
+    const res = await postStatus("approve");
+    expect(res.status).toBe(200);
+    expect(statusChangeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ targetAppUserId: TARGET_ID, newStatus: "active" }),
+    );
+  });
+
+  it.each(["block", "suspend"])(
+    "POST …/status %s needs no admin.clients.manage: it only stops the agent",
+    async (action) => {
+      actorVsAgent(["admin.users.manage"]);
+      statusChangeMock.mockResolvedValue({ ok: true, status: "blocked" });
+      const res = await postStatus(action);
+      expect(res.status).toBe(200);
+      expect(statusChangeMock).toHaveBeenCalledTimes(1);
+    },
+  );
+});

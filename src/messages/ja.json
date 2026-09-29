@@ -1312,6 +1312,7 @@
     "no_changes": "変更が指定されていません。",
     "not_deactivated": "このユーザーは無効化されていません。",
     "use_restore": "このユーザーはソフト削除されています。先にユーザーを復元してください。",
+    "not_applicable_to_service_account": "これは AI エージェントのサービスアカウントで、サインインはありません。ここでブロックするか、Agents で取り消してください。",
     "not_found": "見つかりません。",
     "organization_not_found": "組織が見つかりません。",
     "permission_in_use": "この権限は使用中です。",

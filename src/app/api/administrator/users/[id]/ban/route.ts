@@ -19,6 +19,11 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { refuseSharedTarget } from "@/lib/admin/refusals.server";
+import {
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+  SERVICE_ACCOUNT_STATUS,
+} from "@/lib/admin/service-account";
 import { guardAppliedBan } from "@/lib/admin/user-actions.server";
 import {
   isResolvedUserResponse,
@@ -41,7 +46,9 @@ type RouteContext = { params: Promise<{ id: string }> };
  * semantics. The reason is persisted in the audit row's `reason` column
  * (docs/admin-manager.md §12). A ban that would leave no superadmin able to
  * sign in is undone and answered 409 `last_superadmin` (REVOKE-2, F-56). A
- * soft-deleted user is 409 `use_restore` (F-57).
+ * soft-deleted user is 409 `use_restore` (F-57), and an agent service
+ * account, which has no Better Auth user, 409
+ * `not_applicable_to_service_account` (F-77).
  *
  * Caller MUST hold `admin.users.ban`.
  */
@@ -86,6 +93,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
     return refuseSharedTarget(guard, target, request, "ban");
+  }
+
+  // F-77: an agent service account has no Better Auth user to ban, so this was
+  // a 502. It is stopped by a block here, or revoked in the Agents console.
+  if (isAgentServiceAccount(target)) {
+    return adminErrorResponse(SERVICE_ACCOUNT_ERROR, SERVICE_ACCOUNT_STATUS, request, {
+      requestId: guard.requestId,
+    });
   }
 
   // F-57: a soft-deleted account is already banned indefinitely, and only

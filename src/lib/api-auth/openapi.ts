@@ -625,6 +625,12 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           operationId: "setUserStatus",
           tags: ["Users"],
           summary: "Apply a status transition (supports `If-Match`)",
+          // F-77: a condition on the target, so no security requirement can carry it.
+          description:
+            "`approve` or `reactivate` of an MCP agent's service account (an " +
+            "`@agents.mcp.invalid` address) also needs `admin.clients.manage`, held as a " +
+            "permission and granted as a scope; without it the answer is `403` with a " +
+            "`detail` saying so.",
           parameters: [
             pathId(),
             {

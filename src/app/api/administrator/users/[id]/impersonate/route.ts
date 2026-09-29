@@ -25,6 +25,11 @@ import { decideSecureAccess } from "@/lib/auth-status";
 import { getImpersonatedAccessContext } from "@/lib/session-access.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
+import {
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+  SERVICE_ACCOUNT_STATUS,
+} from "@/lib/admin/service-account";
 import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -58,6 +63,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  *     not the admin, and impersonating FROM it re-bases the tenant
  *     confinement on the borrowed identity's reach instead of the human's.
  *     Refused with 403, audited against the human impersonator.
+ *   - The target MUST have a Better Auth user: an agent service account
+ *     is 409 `not_applicable_to_service_account` (F-77).
  *   - The target MUST be able to use the session (F-148): resolved as the
  *     borrowed session will resolve it, it must get `decideSecureAccess`
  *     "allow". Otherwise 403 with `reason: "target_not_active"`, audited.
@@ -342,6 +349,15 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
           requestId: guard.requestId,
           extra: { reason: "session_principal_mismatch" },
         });
+  }
+
+  // F-77: Better Auth opens the borrowed session on the target's Better Auth
+  // user, which an agent service account does not have, so this was a 502. An
+  // agent has no console to see either: it only calls the API.
+  if (isAgentServiceAccount(target)) {
+    return adminErrorResponse(SERVICE_ACCOUNT_ERROR, SERVICE_ACCOUNT_STATUS, request, {
+      requestId: guard.requestId,
+    });
   }
 
   // F-148 — THE BORROWED SESSION MUST BE ONE THE SECURE SHELL ADMITS. Nothing

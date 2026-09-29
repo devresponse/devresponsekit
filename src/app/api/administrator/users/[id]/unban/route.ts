@@ -17,6 +17,11 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import {
+  isAgentServiceAccount,
+  SERVICE_ACCOUNT_ERROR,
+  SERVICE_ACCOUNT_STATUS,
+} from "@/lib/admin/service-account";
+import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
   resolveTargetUser,
@@ -31,7 +36,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  * POST /api/administrator/users/[id]/unban
  *
  * Inverse of {@link ./../ban}. No body required. Caller MUST hold
- * `admin.users.ban`. A soft-deleted user is 409 `use_restore` (F-57).
+ * `admin.users.ban`. A soft-deleted user is 409 `use_restore` (F-57), and an
+ * agent service account 409 `not_applicable_to_service_account` (F-77).
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.ban");
@@ -62,6 +68,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
     return refuseSharedTarget(guard, target, request, "unban");
+  }
+
+  // F-77: an agent service account has no Better Auth user, so no ban to lift
+  // (this was a 502).
+  if (isAgentServiceAccount(target)) {
+    return adminErrorResponse(SERVICE_ACCOUNT_ERROR, SERVICE_ACCOUNT_STATUS, request, {
+      requestId: guard.requestId,
+    });
   }
 
   // F-57: lifting a soft-deleted account's ban would let Better Auth issue it

@@ -1312,6 +1312,7 @@
     "no_changes": "Aucune modification fournie.",
     "not_deactivated": "L’utilisateur n’est pas désactivé.",
     "use_restore": "Cet utilisateur a fait l’objet d’une suppression douce. Restaurez-le d’abord.",
+    "not_applicable_to_service_account": "Il s’agit du compte de service d’un agent d’IA, qui ne se connecte pas. Bloquez-le ici ou révoquez-le dans Agents.",
     "not_found": "Introuvable.",
     "organization_not_found": "Organisation introuvable.",
     "permission_in_use": "Cette permission est utilisée.",

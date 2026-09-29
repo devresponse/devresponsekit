@@ -10,6 +10,7 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { likeContains } from "@/lib/admin/list-query.server";
 import { DEFAULT_ADMIN_BULK_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { mayActivateAgents } from "@/lib/admin/service-account";
 import { isUuid } from "@/lib/admin/user-target.server";
 import {
   BULK_USER_ACTION_PERMISSIONS,
@@ -59,7 +60,11 @@ export const dynamic = "force-dynamic";
  *     `id`), the grid's default order.
  *   - Each row's outcome is captured in the response so the UI can
  *     surface partial failures; one row failing does not abort the
- *     batch.
+ *     batch. An agent service account's row is refused for `ban`,
+ *     `unban`, `soft_delete` and `restore`
+ *     (`not_applicable_to_service_account`), and for `approve` /
+ *     `reactivate` unless the caller also holds `admin.clients.manage`
+ *     (`forbidden_agent_activation`, audited; F-77).
  *   - The endpoint is rate-limited via the shared in-memory token
  *     bucket per actor (see {@link DEFAULT_ADMIN_BULK_LIMIT}).
  *   - A summary "admin.users.bulk_action" audit row is written in
@@ -305,6 +310,9 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
         request,
         scope,
         access: guard.access,
+        // F-77: an approve / reactivate row naming an agent service account
+        // needs this too, as the Agents console's approve does.
+        mayActivateAgents: mayActivateAgents(guard),
         requestId: guard.requestId,
       },
       { reason: parsed.data.reason, expiresInSeconds: parsed.data.expiresInSeconds },

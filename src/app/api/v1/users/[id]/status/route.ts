@@ -12,6 +12,12 @@ import {
 } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { USE_RESTORE_ERROR, USE_RESTORE_STATUS } from "@/lib/admin/deactivated-user";
+import { AGENT_ACTIVATION_REASON, USER_ACTION_DENIED_EVENT } from "@/lib/admin/refusals.server";
+import {
+  AGENT_ACTIVATION_PERMISSION,
+  isAgentServiceAccount,
+  mayActivateAgents,
+} from "@/lib/admin/service-account";
 import {
   isUuid,
   TARGET_OUTRANKS_ACTOR_EVENT,
@@ -53,7 +59,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  * not change the status of a target who outranks them (a single-org
  * superadmin, or a more-privileged peer) → `403 forbidden` problem +
  * `admin.user.action_denied` audit row. The machine API is a thin adapter
- * over the same status core, so it must carry the same guard.
+ * over the same status core, so it must carry the same guard. So does
+ * approving or reactivating an agent service account, which also needs
+ * `admin.clients.manage` as permission and scope (F-77): `403`, audited under
+ * the same event.
  *
  * (Design wrote `:approve`/`:block` action verbs; Next.js segments cannot
  * contain `:`, so the action is a JSON body field on a `/status`
@@ -164,6 +173,33 @@ export const POST = withV1Route(async function POST(request: NextRequest, ctx: R
   }
 
   const mapping = ACTIONS[parsed.data.action];
+  // F-77: the same refusal as the console's. Activating an agent service
+  // account is an agent approval, which needs `admin.clients.manage` too.
+  if (
+    mapping.newStatus === "active" &&
+    isAgentServiceAccount({ betterAuthUserId: current.better_auth_user_id }) &&
+    !mayActivateAgents(grant.caller)
+  ) {
+    await auditUserAction(USER_ACTION_DENIED_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: current.id,
+      organizationId: actingOrganizationId(grant.caller.access),
+      email: current.primary_email,
+      requestId: grant.requestId,
+      reason: AGENT_ACTIVATION_REASON,
+      metadata: {
+        action: parsed.data.action,
+        surface: "v1",
+        targetBetterAuthUserId: current.better_auth_user_id,
+        required: [AGENT_ACTIVATION_PERMISSION],
+      },
+    });
+    return problemResponse("forbidden", 403, request, {
+      detail: `Approving or reactivating an agent service account also needs ${AGENT_ACTIVATION_PERMISSION}.`,
+      requestId: grant.requestId,
+    });
+  }
   const result = await performAdminStatusChange({
     actorBetterAuthUserId: grant.caller.betterAuthUserId,
     scope,

@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { canAccessUser } from "@/lib/admin/access-scope.server";
+import { isAgentServiceAccount } from "@/lib/admin/service-account";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ImpersonateUserButton } from "./_impersonate-button";
@@ -92,8 +93,12 @@ export default async function AdministratorUserDetailPage({
   // (403 `target_not_active`), so the button is not offered for an account that
   // is not active. An active account whose memberships in the admin's reach are
   // all inactive is left to the route, which resolves them as the session would.
+  // Nor for an agent service account, which has no Better Auth user to open a
+  // session on (F-77: the route answers 409 `not_applicable_to_service_account`).
   const canImpersonate =
-    guard.access.permissions.includes("admin.users.impersonate") && user.status === "active";
+    guard.access.permissions.includes("admin.users.impersonate") &&
+    user.status === "active" &&
+    !isAgentServiceAccount({ betterAuthUserId: user.better_auth_user_id });
   const canReadAudit = guard.access.permissions.includes("admin.audit.read");
   // Review #76: the Sessions and Groups tabs each fetch an API that requires
   // MORE than `admin.users.read` — `admin.users.sessions` and

@@ -362,3 +362,86 @@ describe("POST /api/v1/users/[id]/status — sessions not ended (F-147)", () => 
     expect(body.detail).toMatch(/re-read the user/i);
   });
 });
+
+/**
+ * F-77: the console's rule on the machine surface. Activating an MCP agent's
+ * service account (its `mcp-agent:` id) is an agent approval, which needs
+ * `admin.clients.manage` as permission and scope; `admin.users.manage` alone
+ * activated one.
+ */
+describe("POST /api/v1/users/[id]/status — an agent service account (F-77)", () => {
+  const AGENT_BA = "mcp-agent:5b0c7f6e-0c1e-4a57-9d3a-1f2e3d4c5b6a";
+  /** An org-bound credential of an admin holding `permissions`, scoped to `scopes`. */
+  function credential(permissions: string[], scopes: string[]) {
+    const g = grant({ permissions: [...permissions, "shell.view"], organizationId: "o1" });
+    return { ...g, grant: { ...g.grant, caller: { ...g.grant.caller, grantedScopes: scopes } } };
+  }
+
+  beforeEach(() => {
+    state.current = { ...state.current!, better_auth_user_id: AGENT_BA };
+    performAdminStatusChange.mockResolvedValue({ ok: true, status: "active" });
+  });
+
+  it.each(["approve", "reactivate"] as const)(
+    "403 + denied audit for %s without admin.clients.manage, and nothing changes",
+    async (action) => {
+      requireApiPermission.mockResolvedValue(
+        credential(["admin.users.manage"], ["admin.users.manage"]),
+      );
+      const res = await POST(req(USER, { body: { action } }), ctx(USER));
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("forbidden");
+      expect(body.detail).toContain("admin.clients.manage");
+      expect(performAdminStatusChange).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.user.action_denied",
+          outcome: "denied",
+          reason: "agent_requires_clients_manage",
+          appUserId: USER,
+          organizationId: "o1",
+          requestId: "r1",
+          metadata: {
+            action,
+            surface: "v1",
+            targetBetterAuthUserId: AGENT_BA,
+            required: ["admin.clients.manage"],
+          },
+        }),
+      );
+    },
+  );
+
+  it("403 when the owner holds admin.clients.manage but the credential is not scoped to it", async () => {
+    requireApiPermission.mockResolvedValue(
+      credential(["admin.users.manage", "admin.clients.manage"], ["admin.users.manage"]),
+    );
+    const res = await POST(req(USER, { body: { action: "approve" } }), ctx(USER));
+    expect(res.status).toBe(403);
+    expect(performAdminStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("200 with admin.clients.manage as permission and scope", async () => {
+    requireApiPermission.mockResolvedValue(
+      credential(
+        ["admin.users.manage", "admin.clients.manage"],
+        ["admin.users.manage", "admin.clients.manage"],
+      ),
+    );
+    const res = await POST(req(USER, { body: { action: "approve" } }), ctx(USER));
+    expect(res.status).toBe(200);
+    expect(performAdminStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({ targetAppUserId: USER, newStatus: "active" }),
+    );
+  });
+
+  it("a block needs no admin.clients.manage: it only stops the agent", async () => {
+    requireApiPermission.mockResolvedValue(
+      credential(["admin.users.manage"], ["admin.users.manage"]),
+    );
+    performAdminStatusChange.mockResolvedValue({ ok: true, status: "blocked" });
+    const res = await POST(req(USER, { body: { action: "block" } }), ctx(USER));
+    expect(res.status).toBe(200);
+  });
+});

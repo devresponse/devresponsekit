@@ -43,6 +43,7 @@ const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
 const LOADERS = new Set([
   "getUserAccessContext",
   "getSessionAccessContext",
+  "getImpersonatedAccessContext",
   "resolveCaller",
   "resolveCallerDetailed",
 ]);
@@ -58,6 +59,8 @@ const UNGATED: Record<string, string> = {
   // scanned here.
   "lib/session-access.server.ts#getSessionAccessContext":
     "the session loader itself (derives ImpersonatedBy from the session); its callers apply the gate",
+  "lib/session-access.server.ts#getImpersonatedAccessContext":
+    "the impersonated-session loader itself, which getSessionAccessContext delegates to (F-148); it is in LOADERS, so its callers are scanned, and the impersonate route gates the TARGET's context with it on purpose",
   "lib/api-auth/resolve-caller.server.ts#resolveCaller":
     "the caller resolver itself; status and permission checks are the guard's (see its doc comment)",
   "lib/api-auth/resolve-caller.server.ts#resolveCallerDetailed":

@@ -906,10 +906,11 @@ status code; `/api/v1` returns the RFC 7807 twin.
 takes `for update of app_user_roles, app_organization_memberships,
 app_organizations, app_role_permissions, app_users, "user"`. The relation list matters: under READ COMMITTED a blocked
 `SELECT … FOR UPDATE` re-evaluates its predicate (EvalPlanQual) only for rows of
-a **locked** relation that the committing transaction actually changed. Only the
-role-assignment revoke writes `app_user_roles`; the membership paths and the
-lifecycle cascades write `app_organization_memberships`, and the permission strip
-writes `app_role_permissions`. Locking only the assignments would let a second
+a **locked** relation that the committing transaction actually changed. The
+role-assignment revoke and, since F-12, the two membership deletes write
+`app_user_roles`; the membership paths and the lifecycle cascades write
+`app_organization_memberships`, and the permission strip writes
+`app_role_permissions`. Locking only the assignments would let a second
 caller acquire the released lock on an unmodified tuple, skip the recheck, and
 still see the other superadmin's membership as `active` in its own pre-commit
 snapshot — so two concurrent revocations aimed at two different superadmins could
@@ -922,6 +923,20 @@ the last two grants, must not each see the other tenant as still active.
 status cascades write the account status and a ban writes the ban flags. A read
 that meets a ban Better Auth is still writing waits for it and then drops that
 account's grants, so a status change racing a ban cannot miss it.
+
+`tests/db/last-superadmin-race.db.test.ts` (F-128) races the lock against
+Postgres. For every guarded call site except the ban and soft-delete paths
+(whose check follows a ban that is already committed), it holds one
+revocation open right after its check while a second one, aimed at the other
+of the last two superadmins, arrives. The second must wait for the first and
+then answer 409. A call site that ran its check outside the writing
+transaction, or a list that names none of the relations the held path writes,
+lets both through. The race cannot see a dropped relation that its path always
+writes alongside another listed one: every guarded path that writes
+`app_users` also writes a membership, so only
+`tests/unit/superuser-grants-lock-sql.test.ts` pins `app_users` in the list.
+`"user"`, which only a ban writes, is pinned by the ban race in
+`tests/db/last-superadmin-sign-in.db.test.ts` (F-56).
 
 Every guarded path runs the grant read **before** its transaction writes any of
 those relations (a ban is Better Auth's own write, committed before the check),

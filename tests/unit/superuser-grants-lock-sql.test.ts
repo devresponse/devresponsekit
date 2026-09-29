@@ -20,9 +20,10 @@ import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
  * `SELECT … FOR UPDATE` re-evaluates its predicate (EvalPlanQual) only for rows
  * of a LOCKED relation that the committing transaction actually updated or
  * deleted; Postgres explicitly does not show it that transaction's effects on
- * other tables. Of the guarded paths only the role-assignment revoke writes
- * `app_user_roles` — the membership routes and the account-lifecycle cascades
- * write `app_organization_memberships`, and the permission strip writes
+ * other tables. Of the guarded paths the role-assignment revoke and, since
+ * F-12, the two membership deletes write `app_user_roles` — the membership
+ * routes and the account-lifecycle cascades write
+ * `app_organization_memberships`, and the permission strip writes
  * `app_role_permissions`. With `for update of "app_user_roles"` alone the second
  * caller blocks, acquires the lock on an UNMODIFIED assignment tuple, skips the
  * recheck, and still evaluates the joins against its own pre-commit snapshot —
@@ -31,6 +32,15 @@ import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
  * difference because none of them compile.
  *
  * `app_permissions` is deliberately NOT locked: it is a static catalog.
+ *
+ * The behaviour itself is proven against Postgres by
+ * tests/db/last-superadmin-race.db.test.ts (F-128), which races two real
+ * revocations of the last two superadmins through every guarded call site
+ * except the ban and soft-delete paths. This file stays as the pin that runs
+ * without a database, and it is the only one that holds `app_users` in the
+ * list: every guarded path that writes an account row also writes a
+ * membership, whose lock alone already forces the recheck there. `"user"` is
+ * pinned by the ban race in tests/db/last-superadmin-sign-in.db.test.ts.
  */
 const captured: string[] = [];
 

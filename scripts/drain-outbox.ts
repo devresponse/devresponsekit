@@ -17,15 +17,16 @@ import { pgPool } from "@/db/database";
  * increments the worker makes here die with it and never reach the server's
  * `/api/metrics` (F-27). What an operator gets from a run is the per-row
  * `email_delivery` log lines and the summary below; `expired` (counted inside
- * `failed` too) is broken out because only the worker produces it. See
- * observability.md §5.
+ * `failed` too) is broken out because only the worker produces it, and so is
+ * `superseded` (F-100: invitation mail withdrawn before a retry, which has no
+ * log line and is not in `failed`). See observability.md §5.
  */
 async function main(): Promise<void> {
   const raw = Number.parseInt(process.env.OUTBOX_DRAIN_LIMIT ?? "100", 10);
   const limit = Number.isFinite(raw) && raw > 0 ? raw : 100;
   const result = await drainOutbox(limit);
   console.log(
-    `[outbox] claimed=${result.claimed} sent=${result.sent} retried=${result.retried} failed=${result.failed} expired=${result.expired}`,
+    `[outbox] claimed=${result.claimed} sent=${result.sent} retried=${result.retried} failed=${result.failed} expired=${result.expired} superseded=${result.superseded}`,
   );
 }
 

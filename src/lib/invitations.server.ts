@@ -14,6 +14,7 @@ import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 import { auditEvent } from "@/lib/audit.server";
 import type { SendAppEmailResult } from "@/lib/email/send.server";
 import { getServerEnv } from "@/lib/env";
+import { INVITATION_TTL_MS } from "@/lib/token-ttls";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 /**
@@ -59,8 +60,11 @@ import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
  */
 
 const TOKEN_LENGTH = 32;
-/** Invitations expire 7 days after (re)issue. */
-export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Invitations expire 7 days after (re)issue. Defined in `token-ttls.ts`, which
+ * the outbox drain reads too, so the two cannot drift (F-103).
+ */
+export { INVITATION_TTL_MS };
 
 export type InvitationStatus = "pending" | "accepted" | "revoked" | "expired";
 
@@ -576,7 +580,11 @@ export async function consumeInvitation(input: {
   return { consumed: true, roleGranted };
 }
 
-/** Revokes a pending invitation. Returns false when there was none to revoke. */
+/**
+ * Revokes a pending invitation. Returns false when there was none to revoke.
+ * An email for it still queued in the outbox is not delivered afterwards: the
+ * drain checks the link against this table first (F-100).
+ */
 export async function revokeInvitation(input: {
   invitationId: string;
   organizationId: string;
@@ -599,7 +607,8 @@ export async function revokeInvitation(input: {
 
 /**
  * Rotates a pending invitation's token + expiry in place (resend): the old
- * link dies immediately and no duplicate pending row is created. Works on
+ * link dies immediately, an email carrying it that is still queued is not
+ * delivered (F-100), and no duplicate pending row is created. Works on
  * any still-`pending` row — including one past `expires_at`, which a resend
  * deliberately revives with a fresh 7-day window. Returns the new plaintext
  * exactly once, or null when the invitation was accepted/revoked meanwhile.

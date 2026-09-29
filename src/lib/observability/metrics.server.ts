@@ -88,12 +88,16 @@ export const preAuthRefusalsTotal = new Counter({
 /**
  * Email delivery outcomes (F-27), one increment per outcome written to an
  * `app_outbox` row: `sent`, `retry` (a transient failure, rescheduled),
- * `failed` (terminal: a permanent provider rejection or the attempt cap),
- * `expired` (the drain worker failed a row whose one-time link had died,
- * without calling the provider) and `logged` (no provider configured, so
- * nothing was sent). Before this an inline failure left no trace outside the
- * row itself, so a sender the provider refuses failed every reset,
- * verification and invitation email without anything alerting. The only
+ * `failed` (terminal: a permanent provider rejection, the attempt cap, or an
+ * invitation email the drain found with no accept link, F-100), `expired`
+ * (the drain worker failed a row whose one-time link had died, without
+ * calling the provider), `superseded` (the drain worker failed an invitation
+ * row unsent because its invitation was revoked, resent, accepted or deleted
+ * since it was queued, F-100; counter only, no log line) and `logged` (no
+ * provider configured, so nothing was sent). Before this an inline failure
+ * left no trace outside the row itself, so a sender the provider refuses
+ * failed every reset, verification and invitation email without anything
+ * alerting. The only
  * writer is `recordOutboxDelivery` (src/lib/email/delivery-telemetry.server.ts),
  * which maps any template key outside the built-in set to `other`, so both
  * labels have a fixed cardinality. The worker's outcomes land here only when
@@ -102,7 +106,7 @@ export const preAuthRefusalsTotal = new Counter({
  */
 export const outboxDeliveryTotal = new Counter({
   name: "devresponsekit_outbox_delivery_total",
-  help: "Email outbox delivery outcomes (sent, retry, failed, expired, logged), by template.",
+  help: "Email outbox delivery outcomes (sent, retry, failed, expired, superseded, logged), by template.",
   labelNames: ["outcome", "template"],
   registers: [registry],
 });

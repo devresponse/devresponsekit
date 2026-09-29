@@ -25,6 +25,7 @@ import { CLIENT_IP_HEADER } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { ORG_SIGNUP_HINT_COOKIE, readCookieValue } from "@/lib/scoped-auth";
 import { SOCIAL_PROVIDERS, type SocialProvider } from "@/lib/social-providers";
+import { EMAIL_VERIFICATION_TOKEN_TTL_MS, PASSWORD_RESET_TOKEN_TTL_MS } from "@/lib/token-ttls";
 import { getTrustedOrigins } from "@/lib/trusted-origins";
 
 /**
@@ -185,6 +186,12 @@ export const auth = betterAuth({
     // after the reset) but does not yet expose it in its options type, so
     // the block is asserted to the option type.
     revokeSessionsOnPasswordReset: true,
+    // F-103: the lifetime the outbox drain measures a queued reset email
+    // against (`TOKEN_TTL_MS_BY_TEMPLATE`), from the one constant both read.
+    // Better Auth's default is the same hour; stating it here means neither a
+    // change on this side nor a new vendor default can leave the drain
+    // delivering dead links.
+    resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_TTL_MS / 1000,
     // F-03: a completed reset PROVES the mailbox (the link was delivered
     // there) and replaces whatever password was set before, so the address is
     // no longer unproven — clear the marker that refuses provider linking.
@@ -323,6 +330,9 @@ export const auth = betterAuth({
   emailVerification: {
     sendOnSignUp: true,
     autoSignInAfterVerification: false,
+    // F-103: like `resetPasswordTokenExpiresIn` above, the drain's TTL for a
+    // queued verification email, stated rather than left to the vendor default.
+    expiresIn: EMAIL_VERIFICATION_TOKEN_TTL_MS / 1000,
     sendVerificationEmail: async ({ user, url }) => {
       // Per-org signup policy (0007): the `user.create.before` hook below
       // pre-verifies sign-ups whose organization waives verification, but

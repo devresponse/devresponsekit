@@ -1100,8 +1100,8 @@ Manages the tenant entity and its memberships.
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
 | `GET/PATCH /auth-settings/defaults` | `admin.orgs.read` / `.update` + **superadmin** | The platform-default sign-up policy (`organization_id IS NULL`); 403 for org admins; no DELETE (the baseline must always exist); `admin.platform.auth_policy_updated` |
 | `GET/POST …/[id]/invitations` | `admin.orgs.read` / `admin.orgs.update` | Organization invitations (0008): paginated list (token hashes never exposed) and create-with-email (outbox-first accept link; 409 `member_exists` / `invitation_exists`, 409 `organization_not_active` while the org is not `active` (F-09), 404 `role_not_found` for a cross-org role; an attached `roleId` is a deferred role assignment under the AUTHZ-3 conferral guard — 403 `forbidden` when the role confers a permission the non-superadmin caller cannot confer, and re-checked against the inviter's current authority at accept time; the accept also re-checks that the inviter can still invite, and voids the invitation of one who cannot (F-149) — see [Sign-up Policy §6](./auth-signup-policy.md#6-invitations)); a caller confined to the org spends its daily admin-mail budget, 429 `rate_limited` once spent (F-64, §2.5); `ok` is `false` in the 201 when the mail provider rejected the email: the invitation exists but nobody received its link, so fix the address or sending setup and resend (F-104); `admin.organization.invitation_created`, `error` for a rejected email (`email_rejected`) or a send that threw (`email_send_failed`), with `metadata.outboxId` / `metadata.emailStatus` |
-| `DELETE …/[id]/invitations/[invitationId]` | `admin.orgs.update` | Revoke a pending invitation (the link dies immediately); `admin.organization.invitation_revoked` |
-| `POST …/[id]/invitations/[invitationId]/resend` | `admin.orgs.update` | Rotate the token + expiry in place and re-send (revives expired-pending); 409 `organization_not_active` while the org is not `active` (the current link is left alone); 409 `invitation_inviter_lacks_standing` when the original inviter can no longer invite (banned, soft-deleted, blocked or suspended, removed or demoted, or deleted): acceptance would refuse the link, so the invitation is voided instead of re-sent (audited `invitation.access.denied`, F-149) and the caller sends a new one; 429 `rate_limited` when the invitation was resent in the last 10 minutes, by anyone, or when a confined caller's org has spent its daily admin-mail budget (F-64, §2.5); `ok` is `false` when the mail provider rejected the email: the token was rotated, so the old link is dead too (F-104); `admin.organization.invitation_resent`, with the create route's `error` reasons and metadata |
+| `DELETE …/[id]/invitations/[invitationId]` | `admin.orgs.update` | Revoke a pending invitation (the link dies immediately, and an email for it still waiting for a retry is never delivered, F-100); `admin.organization.invitation_revoked` |
+| `POST …/[id]/invitations/[invitationId]/resend` | `admin.orgs.update` | Rotate the token + expiry in place and re-send (revives expired-pending; an earlier email still waiting for a retry is dropped, so it cannot arrive after the fresh one, F-100); 409 `organization_not_active` while the org is not `active` (the current link is left alone); 409 `invitation_inviter_lacks_standing` when the original inviter can no longer invite (banned, soft-deleted, blocked or suspended, removed or demoted, or deleted): acceptance would refuse the link, so the invitation is voided instead of re-sent (audited `invitation.access.denied`, F-149) and the caller sends a new one; 429 `rate_limited` when the invitation was resent in the last 10 minutes, by anyone, or when a confined caller's org has spent its daily admin-mail budget (F-64, §2.5); `ok` is `false` when the mail provider rejected the email: the token was rotated, so the old link is dead too (F-104); `admin.organization.invitation_resent`, with the create route's `error` reasons and metadata |
 
 Acceptance itself is NOT an administrator surface: invitees land on the public
 `/invite?token=…` page, and signed-in users accept via
@@ -1555,7 +1555,7 @@ a grid, with per-row drill-in to the event metadata.
 
 **Outbox bodies never carry a live credential (review #21).** Password-reset, email-verification and invitation emails embed a one-time link. `sendAppEmail` stores a **redacted** rendering — the `/reset-password/<token>` path segment and every `token=` query value replaced by `[redacted]` — in `subject` / `body_html` / `body_text` / `variables`, so an org admin holding `admin.email.read` can inspect what was sent to a co-member (a single-org superadmin included) without being able to mint and lift that user's reset link. The real message is delivered from memory on the inline attempt; for a retry it lives only in the DB-only `app_outbox.delivery_payload` column (never selected by any administrator route, nulled once the row is `sent` / `failed`). Consequence for development with no `EMAIL_PROVIDER`: the reset / invite link is no longer readable in the Email workspace — read `delivery_payload` from the database instead (see [Developer onboarding §9.4](./developer-onboarding.md#94-email-in-dev)).
 
-**Why a row can be `failed` (reading the Email workspace).** Three distinct
+**Why a row can be `failed` (reading the Email workspace).** Four distinct
 causes, all visible in the row's `error`:
 
 - **`token_expired: …` (review #90)** — the row carried a one-time link whose
@@ -1574,6 +1574,19 @@ causes, all visible in the row's `error`:
   Treat a burst of these as a delivery-configuration alarm.
 - **Retry budget exhausted** — transient failures (`429`, 5xx, timeouts) up to
   `OUTBOX_MAX_ATTEMPTS`. The inline attempts count toward it.
+- **`invitation_superseded: …` (F-100)** — an invitation email waiting for a
+  retry whose invitation was revoked, resent, accepted or deleted with its
+  organization before the retry came due. The drain checks that the link's
+  token still opens a pending invitation, and fails the row **without** a
+  delivery attempt when it does not. So a revoked invitation's address does not
+  hear about the organization after all, and after a resend only the fresh
+  email arrives. Nothing to fix: the mail was withdrawn, not lost, which is why
+  the drain counts it apart from `failed` (`superseded`, see
+  [Observability §5](./observability.md#5-metrics)). The row reads `failed`
+  because `app_outbox` has no separate cancelled state. An invitation email
+  that carries no accept link at all is failed the same way, but reads
+  `invitation_link_missing: …` and counts as a real `failed`: its template
+  lost `{{acceptUrl}}`, so fix the template.
 
 ### 8.13 MCP agents
 

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_EMAIL_TEMPLATES,
@@ -6,6 +8,7 @@ import {
   renderEmailTemplate,
 } from "@/lib/email/templates";
 import { defaultLocale, locales } from "@/config/i18n-config";
+import { INVITATION_TTL_MS } from "@/lib/token-ttls";
 
 /**
  * Unit tests for the email template catalog + renderer (specs.md §35).
@@ -175,6 +178,202 @@ describe("localized templates (P3-8)", () => {
           );
         }
       }
+    }
+  });
+});
+
+/** One row a `locales/*.sql` migration seeds into `app_email_templates`. */
+interface SeededTemplateRow {
+  key: string;
+  locale: string;
+  subject: string;
+  bodyHtml: string;
+  bodyText: string;
+}
+
+type SqlToken = { kind: "string" | "word"; value: string };
+
+/**
+ * Splits a seed file into string literals and words, skipping whitespace and
+ * `--` comments. Literals are read as Postgres reads them with
+ * `standard_conforming_strings` on: `'…'` doubles a quote and takes a
+ * backslash literally; `E'…'` also takes the backslash escapes the seed files
+ * use. Anything else throws, so a file in a shape this does not know fails
+ * the test instead of being read wrong.
+ */
+function tokenizeSql(source: string): SqlToken[] {
+  const escapes: Record<string, string> = { n: "\n", r: "\r", t: "\t", "\\": "\\", "'": "'" };
+  const tokens: SqlToken[] = [];
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i]!;
+    if (/\s/.test(ch)) {
+      i++;
+    } else if (source.startsWith("--", i)) {
+      const end = source.indexOf("\n", i);
+      i = end === -1 ? source.length : end + 1;
+    } else if (ch === "'" || (/[Ee]/.test(ch) && source[i + 1] === "'")) {
+      const extended = ch !== "'";
+      i += extended ? 2 : 1;
+      let value = "";
+      for (;;) {
+        const c = source[i];
+        if (c === undefined) throw new Error("unterminated string literal");
+        if (c === "'" && source[i + 1] === "'") {
+          value += "'";
+          i += 2;
+        } else if (c === "'") {
+          i++;
+          break;
+        } else if (extended && c === "\\") {
+          const escaped = escapes[source[i + 1] ?? ""];
+          if (escaped === undefined) throw new Error(`unsupported escape at ${i}`);
+          value += escaped;
+          i += 2;
+        } else {
+          value += c;
+          i++;
+        }
+      }
+      tokens.push({ kind: "string", value });
+    } else if (/[A-Za-z_]/.test(ch)) {
+      const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(source.slice(i))![0];
+      tokens.push({ kind: "word", value: word.toLowerCase() });
+      i += word.length;
+    } else if ("(),;".includes(ch)) {
+      tokens.push({ kind: "word", value: ch });
+      i++;
+    } else {
+      throw new Error(`unexpected ${JSON.stringify(ch)} at ${i}`);
+    }
+  }
+  return tokens;
+}
+
+/**
+ * The rows of a seed file's one statement, `insert into app_email_templates
+ * (key, locale, subject, body_html, body_text, description) values (…), …
+ * on conflict (key, locale) do nothing;`. The description is not compared (the
+ * SQL copy lists the variables; the code keeps them in `variables`).
+ */
+function parseSeededTemplates(source: string): SeededTemplateRow[] {
+  const tokens = tokenizeSql(source);
+  let at = 0;
+  const expectWords = (words: string) => {
+    for (const word of words.split(" ")) {
+      const token = tokens[at++];
+      if (token?.kind !== "word" || token.value !== word) {
+        throw new Error(`expected "${word}", got ${JSON.stringify(token)}`);
+      }
+    }
+  };
+  const nextString = () => {
+    const token = tokens[at++];
+    if (token?.kind !== "string")
+      throw new Error(`expected a literal, got ${JSON.stringify(token)}`);
+    return token.value;
+  };
+  expectWords(
+    "insert into app_email_templates ( key , locale , subject , body_html , body_text , description ) values",
+  );
+  const rows: SeededTemplateRow[] = [];
+  for (;;) {
+    expectWords("(");
+    const [key, locale, subject, bodyHtml, bodyText] = [0, 1, 2, 3, 4].map((n) => {
+      if (n > 0) expectWords(",");
+      return nextString();
+    }) as [string, string, string, string, string];
+    expectWords(",");
+    nextString(); // description
+    expectWords(")");
+    rows.push({ key, locale, subject, bodyHtml, bodyText });
+    const next = tokens[at];
+    if (next?.kind !== "word" || next.value !== ",") break;
+    at++;
+  }
+  expectWords("on conflict ( key , locale ) do nothing ;");
+  if (at !== tokens.length) throw new Error("the file holds more than the one insert");
+  return rows;
+}
+
+/**
+ * F-103: the seeded `locales/*.sql` rows and `DEFAULT_EMAIL_TEMPLATES` were
+ * kept in sync by a comment, and the fr invitation had drifted: the code copy
+ * used typographic apostrophes (`l’invitation`) where the seeded row has
+ * straight ones. Only the code copy moved: an applied migration file is
+ * checksummed in the ledger.
+ */
+describe("seeded SQL copies of the templates (F-103)", () => {
+  const dir = path.resolve(__dirname, "../../src/db/migrations/locales");
+  const seeded = readdirSync(dir)
+    .filter((file) => file.endsWith(".sql"))
+    .flatMap((file) =>
+      parseSeededTemplates(readFileSync(path.join(dir, file), "utf8")).map((row) => ({
+        file,
+        ...row,
+      })),
+    );
+
+  it("reads SQL literals the way Postgres does", () => {
+    const [row] = parseSeededTemplates(
+      "-- a comment\ninsert into app_email_templates (key, locale, subject, body_html, body_text, description) values\n" +
+        "  ('k', 'fr', 'l''a', 'a\\n', E'x\\ny''z\\\\', 'd')\non conflict (key, locale) do nothing;",
+    );
+    // A plain literal keeps its backslash; an E'' literal reads `\n` as a
+    // newline and `\\` as one backslash.
+    expect(row).toEqual({
+      key: "k",
+      locale: "fr",
+      subject: "l'a",
+      bodyHtml: "a\\n",
+      bodyText: "x\ny'z\\",
+    });
+  });
+
+  it("seeds exactly one row per template and supported locale, in that locale's file", () => {
+    const expected = DEFAULT_EMAIL_TEMPLATES.flatMap((t) => locales.map((l) => `${t.key}/${l}`));
+    expect(seeded.map((r) => `${r.key}/${r.locale}`).sort()).toEqual(expected.sort());
+    for (const row of seeded) {
+      expect(row.file).toMatch(new RegExp(`^\\d{4}-email-templates-${row.locale}\\.sql$`));
+    }
+  });
+
+  it("every seeded row's subject and bodies equal the code default, byte for byte", () => {
+    for (const row of seeded) {
+      const template = getDefaultEmailTemplate(row.key, row.locale)!;
+      expect(
+        { subject: row.subject, bodyHtml: row.bodyHtml, bodyText: row.bodyText },
+        `${row.file}: ${row.key}/${row.locale}`,
+      ).toEqual({
+        subject: template.subject,
+        bodyHtml: template.bodyHtml,
+        bodyText: template.bodyText,
+      });
+    }
+  });
+
+  /**
+   * The invitation body tells the invitee how long the link lives ("expires in
+   * 7 days", in every locale), and so does the admin's invite dialog. That
+   * number is `INVITATION_TTL_MS`, which the invitation module stamps and the
+   * outbox drain enforces, so a change to it must change the copy too; the
+   * parity test above then carries the email's to SQL.
+   */
+  it("states the invitation TTL the code enforces, in every locale's email and invite dialog", () => {
+    const days = INVITATION_TTL_MS / (24 * 60 * 60_000);
+    expect(Number.isInteger(days)).toBe(true);
+    const stated = new RegExp(`(^|\\D)${days}(\\D|$)`);
+    for (const locale of locales) {
+      const template = getDefaultEmailTemplate("organization_invitation", locale)!;
+      expect(template.bodyHtml, `organization_invitation/${locale} html`).toMatch(stated);
+      expect(template.bodyText, `organization_invitation/${locale} text`).toMatch(stated);
+      const messages = JSON.parse(
+        readFileSync(path.resolve(__dirname, `../../src/messages/${locale}.json`), "utf8"),
+      ) as { administrator: { orgs: { invitations: { dialogDescription: string } } } };
+      expect(
+        messages.administrator.orgs.invitations.dialogDescription,
+        `${locale}.json administrator.orgs.invitations.dialogDescription`,
+      ).toMatch(stated);
     }
   });
 });

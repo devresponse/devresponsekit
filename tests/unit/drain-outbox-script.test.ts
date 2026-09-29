@@ -26,16 +26,25 @@ afterEach(() => {
 });
 
 describe("scripts/drain-outbox.ts summary line", () => {
-  it("prints every DrainOutboxResult bucket, expired included, then closes the pool", async () => {
+  it("prints every DrainOutboxResult bucket, expired and superseded included, then closes the pool", async () => {
     vi.stubEnv("OUTBOX_DRAIN_LIMIT", "");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    drainOutbox.mockResolvedValue({ claimed: 6, sent: 2, retried: 1, failed: 3, expired: 2 });
+    drainOutbox.mockResolvedValue({
+      claimed: 7,
+      sent: 2,
+      retried: 1,
+      failed: 3,
+      expired: 2,
+      superseded: 1,
+    });
 
     await import("../../scripts/drain-outbox");
     await vi.waitFor(() => expect(poolEnd).toHaveBeenCalledTimes(1));
 
     expect(drainOutbox).toHaveBeenCalledWith(100);
-    expect(log.mock.calls).toEqual([["[outbox] claimed=6 sent=2 retried=1 failed=3 expired=2"]]);
+    expect(log.mock.calls).toEqual([
+      ["[outbox] claimed=7 sent=2 retried=1 failed=3 expired=2 superseded=1"],
+    ]);
     expect(process.exitCode).toBeUndefined();
   });
 });

@@ -24,6 +24,10 @@ const state = vi.hoisted(() => ({
   selectCount: 0,
   /** Simulates the claim transaction's COMMIT failing after the callback ran. */
   commitFails: false,
+  /** F-100: whether the invitation lookup finds a pending invitation. */
+  invitationPending: false,
+  /** F-100: the `where` arguments of each invitation lookup. */
+  invitationLookups: [] as unknown[][][],
 }));
 
 // Only the provider LOOKUP is stubbed: the failure classification
@@ -41,10 +45,23 @@ vi.mock("@/lib/observability/logger.server", () => ({
 
 function makeTrx() {
   return {
-    selectFrom: () => {
+    selectFrom: (table: string) => {
       const chain: Record<string, unknown> = {};
       for (const m of ["select", "where", "orderBy", "limit", "forUpdate", "skipLocked"]) {
         chain[m] = () => chain;
+      }
+      // F-100: the invitation an `organization_invitation` row's link opens.
+      if (table === "app_organization_invitations") {
+        const wheres: unknown[][] = [];
+        chain.where = (...args: unknown[]) => {
+          wheres.push(args);
+          return chain;
+        };
+        chain.executeTakeFirst = async () => {
+          state.invitationLookups.push(wheres);
+          return state.invitationPending ? { id: "inv-1" } : undefined;
+        };
+        return chain;
       }
       // Return the configured due row exactly once, then "no more due rows" so
       // the drainer's loop terminates.
@@ -118,6 +135,8 @@ beforeEach(async () => {
   state.updateSets = [];
   state.selectCount = 0;
   state.commitFails = false;
+  state.invitationPending = false;
+  state.invitationLookups = [];
   log.error.mockReset();
   log.warn.mockReset();
   metrics = await import("@/lib/observability/metrics.server");
@@ -172,6 +191,7 @@ describe("drainOutbox", () => {
       retried: 0,
       failed: 0,
       expired: 0,
+      superseded: 0,
     });
     expect(state.updateSets).toHaveLength(0);
   });
@@ -297,6 +317,16 @@ describe("outboxTokenExpired (review #90)", () => {
     );
   });
 
+  it("reads each TTL from the constant the minting side reads too (F-103)", async () => {
+    const ttls = await import("@/lib/token-ttls");
+    const { TOKEN_TTL_MS_BY_TEMPLATE } = await import("@/lib/email/outbox-worker.server");
+    expect(TOKEN_TTL_MS_BY_TEMPLATE).toEqual({
+      password_reset: ttls.PASSWORD_RESET_TOKEN_TTL_MS,
+      email_verification: ttls.EMAIL_VERIFICATION_TOKEN_TTL_MS,
+      organization_invitation: ttls.INVITATION_TTL_MS,
+    });
+  });
+
   it("never expires mail that carries no time-limited credential", () => {
     const far = plus(365 * 24 * 60 * 60_000);
     expect(outboxTokenExpired("test_email", t0, far)).toBe(false);
@@ -335,6 +365,115 @@ describe("drainOutbox — expired tokens are never delivered (review #90)", () =
     const r = await drainOutbox(10);
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(r).toMatchObject({ sent: 1, expired: 0 });
+  });
+});
+
+/**
+ * F-100: an invitation email queued before its invitation was revoked,
+ * resent, accepted or deleted used to be delivered at the next drain anyway.
+ * The drain now asks whether the link's token still opens a pending
+ * invitation. The lookup is stubbed here; tests/db/outbox-drainer.db.test.ts
+ * drives it through the real invitation functions and Postgres.
+ */
+describe("drainOutbox — withdrawn invitations are never delivered (F-100)", () => {
+  const LIVE_URL = "http://x/en/invite?token=LiveInvTok";
+  const invitationRow = (payload: { html: string; text: string } | null = null) => ({
+    ...row(2),
+    template_key: "organization_invitation",
+    created_at: new Date(),
+    body_html: '<a href="http://x/en/invite?token=[redacted]">Accept</a>',
+    body_text: "http://x/en/invite?token=[redacted]",
+    delivery_payload: {
+      subject: "You're invited to join Acme",
+      ...(payload ?? { html: `<a href="${LIVE_URL}">Accept</a>`, text: LIVE_URL }),
+    },
+  });
+
+  it("delivers the row while its token opens a pending invitation, looked up by hash", async () => {
+    const deliver = vi.fn().mockResolvedValue({ providerMessageId: "m1" });
+    state.provider = { id: "resend", deliver };
+    state.invitationPending = true;
+    state.dueRow = invitationRow();
+
+    const r = await drainOutbox(10);
+
+    expect(r).toMatchObject({ claimed: 1, sent: 1, superseded: 0 });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    const { hashSecret } = await import("@/lib/api-auth/api-key");
+    expect(state.invitationLookups).toEqual([
+      [
+        ["token_hash", "in", [await hashSecret("LiveInvTok")]],
+        ["status", "=", "pending"],
+      ],
+    ]);
+  });
+
+  it("fails the row WITHOUT calling the provider once the invitation is no longer pending", async () => {
+    const deliver = vi.fn().mockResolvedValue({ providerMessageId: "m1" });
+    state.provider = { id: "resend", deliver };
+    state.invitationPending = false;
+    state.dueRow = invitationRow();
+
+    const r = await drainOutbox(10);
+
+    expect(deliver).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ claimed: 1, sent: 0, failed: 0, expired: 0, superseded: 1 });
+    const upd = state.updateSets[0]!;
+    expect(upd).toMatchObject({ status: "failed", next_attempt_at: null, delivery_payload: null });
+    expect(String(upd.error)).toMatch(/^invitation_superseded: /);
+    // No attempt was made against the provider, so the counter is untouched.
+    expect(upd.attempts).toBeUndefined();
+    // Withdrawn, not lost: counted, but no failure line and no drain summary.
+    expect(log.error).not.toHaveBeenCalled();
+    const metric = await metrics.outboxDeliveryTotal.get();
+    expect(
+      metric.values.find(
+        (v) => v.labels.outcome === "superseded" && v.labels.template === "organization_invitation",
+      )?.value,
+    ).toBe(1);
+  });
+
+  it("fails an invitation email that carries no link as a logged failure, without a lookup", async () => {
+    const deliver = vi.fn();
+    state.provider = { id: "resend", deliver };
+    state.invitationPending = true;
+    state.dueRow = invitationRow({ html: "<p>Join us</p>", text: "Join us" });
+
+    // Not `superseded`: nothing withdrew the invitation, the email itself is
+    // broken (a template that lost `{{acceptUrl}}`), so it alarms like any
+    // mail that will never be delivered.
+    expect(await drainOutbox(10)).toMatchObject({ claimed: 1, failed: 1, superseded: 0 });
+    expect(deliver).not.toHaveBeenCalled();
+    expect(state.invitationLookups).toHaveLength(0);
+    const upd = state.updateSets[0]!;
+    expect(upd).toMatchObject({ status: "failed", next_attempt_at: null, delivery_payload: null });
+    expect(String(upd.error)).toMatch(/^invitation_link_missing: /);
+    expect(upd.attempts).toBeUndefined();
+    const line = log.error.mock.calls.find(
+      ([, fields]) => (fields as { kind?: string }).kind === "email_delivery",
+    );
+    expect(line?.[1]).toMatchObject({
+      outcome: "failed",
+      reason: "invitation_link_missing",
+      template: "organization_invitation",
+      attempts: 2,
+    });
+    const metric = await metrics.outboxDeliveryTotal.get();
+    expect(
+      metric.values.find(
+        (v) => v.labels.outcome === "failed" && v.labels.template === "organization_invitation",
+      )?.value,
+    ).toBe(1);
+  });
+
+  it("never consults invitations for another template", async () => {
+    const deliver = vi.fn().mockResolvedValue({ providerMessageId: "m1" });
+    state.provider = { id: "resend", deliver };
+    state.invitationPending = false;
+    state.dueRow = secretRow(0);
+
+    expect(await drainOutbox(10)).toMatchObject({ claimed: 1, sent: 1, superseded: 0 });
+    expect(state.invitationLookups).toHaveLength(0);
   });
 });
 

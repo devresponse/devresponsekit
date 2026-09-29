@@ -31,9 +31,10 @@ export const REDACTED_TOKEN = "[redacted]";
  * `token=<value>` in a query string. Matches the raw (`&`) and the
  * HTML-escaped (`&amp;`) separator so a link inside an entity-escaped HTML
  * body is caught too; the value ends at the next separator / delimiter, which
- * also keeps `&amp;callbackURL=…` intact.
+ * also keeps `&amp;callbackURL=…` intact. The value is group 2, which
+ * {@link findQueryTokens} reads.
  */
-const QUERY_TOKEN_RE = /((?:[?&]|&amp;)token=)[^&\s"'<>#]*/gi;
+const QUERY_TOKEN_RE = /((?:[?&]|&amp;)token=)([^&\s"'<>#]*)/gi;
 
 /**
  * Better Auth's reset link carries the token as a PATH segment:
@@ -50,6 +51,29 @@ export function redactEmailSecrets(text: string): string {
   return text
     .replace(QUERY_TOKEN_RE, `$1${REDACTED_TOKEN}`)
     .replace(RESET_PATH_TOKEN_RE, `$1${REDACTED_TOKEN}`);
+}
+
+/**
+ * The `token=` query values in `text`, URL-decoded: exactly the values
+ * {@link redactEmailSecrets} would replace, minus the placeholder itself. The
+ * drain reads the invitation token out of an `organization_invitation` row's
+ * unredacted payload with this, to check that the invitation is still pending
+ * before it delivers the link (F-100).
+ */
+export function findQueryTokens(text: string): string[] {
+  const tokens: string[] = [];
+  for (const match of text.matchAll(QUERY_TOKEN_RE)) {
+    const raw = match[2] ?? "";
+    if (raw === "" || raw === REDACTED_TOKEN) continue;
+    try {
+      tokens.push(decodeURIComponent(raw));
+    } catch {
+      // A malformed escape, which no link we build carries: kept as it is,
+      // so it simply matches nothing.
+      tokens.push(raw);
+    }
+  }
+  return tokens;
 }
 
 /** The exact message handed to a provider — subject + rendered bodies. */

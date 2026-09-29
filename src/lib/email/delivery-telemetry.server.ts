@@ -26,6 +26,9 @@ import { DEFAULT_EMAIL_TEMPLATES } from "./templates";
  *   - transient (`retry`) → `warn`: the worker still owns the row;
  *   - `sent` / `logged` → the counter only. A `logged` count in production
  *     means `EMAIL_PROVIDER` is unset and nobody receives mail.
+ *   - `superseded` → the counter only: the drain dropped an invitation email
+ *     whose invitation was revoked, resent, accepted or deleted since it was
+ *     queued (F-100). Withdrawn, not lost, so it is no failure to alert on.
  *
  * The counter is per-process. The worker's increments reach `/api/metrics`
  * only when the drain runs in the server (the `/api/internal/outbox-drain`
@@ -42,7 +45,8 @@ import { DEFAULT_EMAIL_TEMPLATES } from "./templates";
  * as the recipient. `app_outbox.error` keeps that text for the row.
  */
 
-export type OutboxDeliveryOutcome = "sent" | "retry" | "failed" | "expired" | "logged";
+export type OutboxDeliveryOutcome =
+  "sent" | "retry" | "failed" | "expired" | "superseded" | "logged";
 
 export interface OutboxDeliveryRecord {
   outcome: OutboxDeliveryOutcome;
@@ -56,6 +60,11 @@ export interface OutboxDeliveryRecord {
   attempts: number;
   /** The thrown delivery error, for `retry` and a provider-driven `failed`. */
   error?: unknown;
+  /**
+   * The log line's `reason` when the outcome and error do not give it: the
+   * drain failing an invitation email that carries no accept link (F-100).
+   */
+  reason?: "invitation_link_missing";
 }
 
 /**
@@ -98,10 +107,13 @@ function describeDeliveryError(error: unknown): Record<string, unknown> {
 /**
  * Why a row stopped: a code literal, so an alert can split "the provider
  * refuses our mail" (`provider_rejected`: fix the sender, the domain or the
- * key) from "the provider never answered" (`attempts_exhausted`) and from
- * "the cron drains slower than links expire" (`token_expired`).
+ * key) from "the provider never answered" (`attempts_exhausted`), from
+ * "the cron drains slower than links expire" (`token_expired`) and from "the
+ * invitation template lost its link" (`invitation_link_missing`, the caller's
+ * {@link OutboxDeliveryRecord.reason}).
  */
 function reasonFor(record: OutboxDeliveryRecord): string | undefined {
+  if (record.reason) return record.reason;
   switch (record.outcome) {
     case "retry":
       return "transient";
@@ -117,7 +129,9 @@ function reasonFor(record: OutboxDeliveryRecord): string | undefined {
 export function recordOutboxDelivery(record: OutboxDeliveryRecord): void {
   const template = outboxTemplateLabel(record.templateKey);
   outboxDeliveryTotal.inc({ outcome: record.outcome, template });
-  if (record.outcome === "sent" || record.outcome === "logged") return;
+  if (record.outcome === "sent" || record.outcome === "logged" || record.outcome === "superseded") {
+    return;
+  }
 
   const fields = {
     kind: "email_delivery",

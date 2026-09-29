@@ -1,10 +1,17 @@
 import "server-only";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
+import { hashSecret } from "@/lib/api-auth/api-key";
 import { logServerError } from "@/lib/observability/logger.server";
+import {
+  EMAIL_VERIFICATION_TOKEN_TTL_MS,
+  INVITATION_TTL_MS,
+  PASSWORD_RESET_TOKEN_TTL_MS,
+} from "@/lib/token-ttls";
 import { getConfiguredEmailProvider, isRetryableDeliveryError } from "./providers.server";
 import { recordOutboxDelivery, type OutboxDeliveryRecord } from "./delivery-telemetry.server";
-import { parseOutboxDeliveryPayload } from "./outbox-secrets";
+import { findQueryTokens, parseOutboxDeliveryPayload, type RenderedEmail } from "./outbox-secrets";
 
 /**
  * Outbox retry worker (review D1).
@@ -17,11 +24,14 @@ import { parseOutboxDeliveryPayload } from "./outbox-secrets";
  * While the inline send is still at work, the row's `next_attempt_at` is a
  * short lease in the future, so no drain claims it mid-delivery (F-101).
  *
- * Three ways a row stops short of that budget:
+ * Four ways a row stops short of that budget:
  *   - the provider rejected it PERMANENTLY (a non-retryable 4xx) → terminal on
  *     the attempt that saw it (review #219)
  *   - the one-time token it carries has already expired → terminal WITHOUT a
  *     delivery attempt, so nobody receives a dead link (review #90)
+ *   - it is an invitation whose invitation was revoked, resent, accepted or
+ *     deleted since, or whose email carries no accept link → terminal WITHOUT
+ *     a delivery attempt (F-100)
  *   - `EMAIL_PROVIDER` was switched → the row waits (see the claim predicate)
  *
  * Concurrency-safe: each row is claimed in its own short transaction with
@@ -72,16 +82,16 @@ const ERROR_MAX_LEN = 200;
  * is visible in the admin Email workspace with its reason, and the user's own
  * "forgot password" / "resend verification" action mints a live token.
  *
- * Values mirror Better Auth's defaults, which `src/lib/auth.ts` does not
- * override (`resetPasswordTokenExpiresIn` / `emailVerification.expiresIn`,
- * both 1h) and `INVITATION_TTL_MS` in `invitations.server.ts` (7 days,
- * inlined so the worker does not pull the invitation module into the cron
- * path). Overriding a TTL there means updating it here.
+ * F-103: the values come from `src/lib/token-ttls.ts`, the constants the
+ * minting side reads too: `auth.ts` hands the reset and verification TTLs to
+ * Better Auth (`resetPasswordTokenExpiresIn` / `emailVerification.expiresIn`)
+ * and `invitations.server.ts` stamps `expires_at` with the invitation one.
+ * They used to be copied here, kept in step by a comment.
  */
 export const TOKEN_TTL_MS_BY_TEMPLATE: Readonly<Record<string, number>> = {
-  password_reset: 60 * 60_000,
-  email_verification: 60 * 60_000,
-  organization_invitation: 7 * 24 * 60 * 60_000,
+  password_reset: PASSWORD_RESET_TOKEN_TTL_MS,
+  email_verification: EMAIL_VERIFICATION_TOKEN_TTL_MS,
+  organization_invitation: INVITATION_TTL_MS,
 };
 
 /**
@@ -105,6 +115,51 @@ export function outboxTokenExpired(
   // An unparseable timestamp must not silently expire live mail.
   if (Number.isNaN(created.getTime())) return false;
   return created.getTime() + ttl <= now.getTime();
+}
+
+/**
+ * F-100: whether the accept link in an `organization_invitation` row still
+ * opens a PENDING invitation, checked just before the drain delivers it.
+ *
+ * The row is queued when the invitation is created or resent, and nothing tied
+ * it to the invitation afterwards. So a row whose inline send failed
+ * transiently was still delivered by the next drain after the admin had
+ * revoked the invitation (telling an address the admin withdrew about the org
+ * and the inviter), after a resend had rotated the token (the stale mail then
+ * landed after the fresh one and looked like the newest link) or after the org
+ * was deleted, which cascades the invitation away. Asking the invitation table
+ * at send time covers each of those, and any later way an invitation dies,
+ * without a link column on `app_outbox`: the unredacted payload holds the
+ * token, and the table stores its hash (`invitations.server.ts` hashes with
+ * the same `hashSecret`).
+ *
+ * The link is found as the redaction rule finds it (`findQueryTokens`). Any
+ * one of the tokens opening a pending invitation is enough (`live`), since
+ * only an invitation token can; none doing so is `dead`. An email that
+ * carries no token at all (a template edited to drop `{{acceptUrl}}`) is
+ * `missing`: it cannot be accepted, but nothing withdrew it either, so the
+ * caller fails it as a broken email rather than a superseded one. An
+ * invitation's `expires_at` is left to the TTL rule above it, and a suspended
+ * org's still-pending invitation is delivered as before (F-09 keeps those
+ * rows for a reactivation).
+ */
+async function invitationLinkState(
+  trx: Transaction<AppDatabase>,
+  message: RenderedEmail,
+): Promise<"live" | "dead" | "missing"> {
+  const tokens = new Set([
+    ...findQueryTokens(message.html),
+    ...findQueryTokens(message.text ?? ""),
+  ]);
+  if (tokens.size === 0) return "missing";
+  const hashes = await Promise.all([...tokens].map((token) => hashSecret(token)));
+  const live = await trx
+    .selectFrom("app_organization_invitations")
+    .select("id")
+    .where("token_hash", "in", hashes)
+    .where("status", "=", "pending")
+    .executeTakeFirst();
+  return live === undefined ? "dead" : "live";
 }
 
 /** Backoff before the Nth attempt (1-indexed): base · 2^(n-1), capped. */
@@ -145,11 +200,19 @@ export interface DrainOutboxResult {
    * token-bearing mail faster than the cron drains it".
    */
   expired: number;
+  /**
+   * Invitation rows failed WITHOUT a delivery attempt because their
+   * invitation was revoked, resent, accepted or deleted since they were
+   * queued (F-100). Not counted in `failed`: the mail was withdrawn, nobody is
+   * waiting for it, so it is no alarm. The row itself is `failed`, the only
+   * terminal state short of `sent` that `app_outbox` allows.
+   */
+  superseded: number;
 }
 
 /** One claimed row's result: its bucket in {@link DrainOutboxResult}, and what to report (F-27). */
 interface DrainStep {
-  outcome: "sent" | "retried" | "failed" | "expired";
+  outcome: "sent" | "retried" | "failed" | "expired" | "superseded";
   delivery: OutboxDeliveryRecord;
 }
 
@@ -160,7 +223,14 @@ interface DrainStep {
  */
 export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
   const provider = getConfiguredEmailProvider();
-  const result: DrainOutboxResult = { claimed: 0, sent: 0, retried: 0, failed: 0, expired: 0 };
+  const result: DrainOutboxResult = {
+    claimed: 0,
+    sent: 0,
+    retried: 0,
+    failed: 0,
+    expired: 0,
+    superseded: 0,
+  };
   if (!provider) return result;
 
   for (let i = 0; i < limit; i++) {
@@ -249,6 +319,49 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
         html: row.body_html,
         text: row.body_text,
       };
+
+      // F-100: an invitation email is delivered only while its link still
+      // opens a pending invitation (see `invitationLinkState`). Otherwise the
+      // row ends here like an expired one: no attempt, and the unredacted
+      // payload dropped (#21). A dead link was withdrawn (`superseded`, no
+      // alarm); an email with no link at all is broken, so it is a logged
+      // `failed` with its own reason.
+      const link =
+        row.template_key === "organization_invitation"
+          ? await invitationLinkState(trx, message)
+          : "live";
+      if (link !== "live") {
+        const missing = link === "missing";
+        await trx
+          .updateTable("app_outbox")
+          .set({
+            status: "failed",
+            // NOT incremented: no attempt was made against the provider.
+            last_attempt_at: now,
+            next_attempt_at: null,
+            error: missing
+              ? "invitation_link_missing: the email carries no accept link"
+              : "invitation_superseded: the invitation was revoked, resent, accepted or deleted before delivery",
+            delivery_payload: null,
+          })
+          .where("id", "=", row.id)
+          .execute();
+        return missing
+          ? {
+              outcome: "failed",
+              delivery: {
+                ...delivery,
+                outcome: "failed",
+                attempts: row.attempts,
+                reason: "invitation_link_missing",
+              },
+            }
+          : {
+              outcome: "superseded",
+              delivery: { ...delivery, outcome: "superseded", attempts: row.attempts },
+            };
+      }
+
       try {
         const delivered = await provider.deliver({
           to: row.to_email,
@@ -317,6 +430,7 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
       result.expired++;
       result.failed++;
     } else {
+      // A `superseded` row counts in its own bucket only (F-100).
       result[outcome]++;
     }
   }

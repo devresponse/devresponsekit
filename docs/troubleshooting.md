@@ -521,9 +521,12 @@ lift a co-member's live one-time link. Locally, read the DB-only
 **Spurious "… is not a function" from Vitest.** Use the sharded runner `pnpm test`,
 not a single `vitest run` — see [Testing → sharded runner](./testing.md#why-the-sharded-runner).
 
-**Coverage gate fails though all tests pass.** New untested code dropped global
-coverage below the ratchet. Add tests; reproduce locally with `pnpm test:coverage`
-(the sharded `pnpm test` does **not** compute coverage).
+**Coverage gate fails though all tests pass.** New untested code dropped coverage
+below the ratchet: globally, or for one floored file (every route file under
+`src/app`, and the security modules), which the `ERROR` line names. Add tests;
+reproduce locally with `pnpm test:coverage` (the sharded `pnpm test` does **not**
+compute coverage). [Testing §4](./testing.md#4-coverage-the-ratchet) says how the
+floors are set.
 
 **Playwright suites fail to start.** They need a built, running, seeded app and
 installed browsers: `pnpm playwright install --with-deps`, migrate + seed,

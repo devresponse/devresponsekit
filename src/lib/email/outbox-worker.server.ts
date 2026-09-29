@@ -10,9 +10,12 @@ import { parseOutboxDeliveryPayload } from "./outbox-secrets";
  * Outbox retry worker (review D1).
  *
  * `sendAppEmail` records every email in `app_outbox` and attempts delivery
- * once inline. A transient provider failure leaves the row RETRYABLE
+ * inline, retrying a transient failure a bounded number of times (F-99). A
+ * transient failure that outlasts those leaves the row RETRYABLE
  * (`status='pending'` with a future `next_attempt_at`); this worker re-attempts
  * those rows on a schedule until they succeed or exhaust {@link OUTBOX_MAX_ATTEMPTS}.
+ * While the inline send is still at work, the row's `next_attempt_at` is a
+ * short lease in the future, so no drain claims it mid-delivery (F-101).
  *
  * Three ways a row stops short of that budget:
  *   - the provider rejected it PERMANENTLY (a non-retryable 4xx) → terminal on
@@ -185,6 +188,9 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
         // through the new provider would use a `from` the new provider may
         // not own. Rows for the old provider wait until it is active again.
         .where("provider", "=", provider.id)
+        // Due: `next_attempt_at` past, or null. A row the inline send is still
+        // delivering holds a lease in the future (F-101), so it is not due;
+        // null is left only by rows written before that lease existed.
         .where((eb) =>
           eb.or([eb("next_attempt_at", "is", null), eb("next_attempt_at", "<=", new Date())]),
         )

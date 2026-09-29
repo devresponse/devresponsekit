@@ -64,6 +64,19 @@ describe("sendInvitationEmail", () => {
     expect(arg.variables.acceptUrl).toContain("/en/invite?token=tok-abc");
   });
 
+  // F-104: the routes answer and audit with this, so it must not be dropped.
+  it("returns what became of the email", async () => {
+    sendAppEmailMock.mockResolvedValue({ outboxId: "out-9", status: "failed" });
+    const result = await sendInvitationEmail({
+      to: "invitee@example.com",
+      organizationId: "org-1",
+      organizationName: "Acme",
+      inviterAppUserId: null,
+      plaintextToken: "tok",
+    });
+    expect(result).toEqual({ outboxId: "out-9", status: "failed" });
+  });
+
   // review #220: without an explicit `organizationId`, `sendAppEmail` falls
   // back to resolving the org from `relatedBetterAuthUserId` — which an
   // invitation never has (the invitee has no account yet) — so the row landed

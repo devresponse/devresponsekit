@@ -13,6 +13,10 @@ import type * as ProvidersModule from "@/lib/email/providers.server";
  *   Edge C — a redacted row (review #21) must be delivered from the jsonb
  *     `delivery_payload` (the real link), never from the stored `[redacted]`
  *     body, and the payload must be nulled once the row is `sent`.
+ *   F-101 — a row the inline send is still delivering is leased, so a drain
+ *     does not claim it and send the email twice.
+ *   F-99 — a row whose inline retries all failed stays `pending` for the
+ *     drain. The retry wait is stubbed to return at once.
  *
  * Runs `drainOutbox` against real Postgres; only the provider is mocked (the
  * `db` pool is real). Driven by `pnpm test:db`. Fixtures use `__dbtest_`.
@@ -32,8 +36,12 @@ vi.mock("@/lib/email/providers.server", async (importOriginal) => {
   return { ...actual, getConfiguredEmailProvider: () => state.provider };
 });
 
+vi.mock("node:timers/promises", () => ({ setTimeout: async () => undefined }));
+
 const { db, pgPool } = await import("@/db/database");
 const { drainOutbox } = await import("@/lib/email/outbox-worker.server");
+const { INLINE_MAX_ATTEMPTS, sendAppEmail } = await import("@/lib/email/send.server");
+const { EmailDeliveryError } = await import("@/lib/email/providers.server");
 
 const PREFIX = "__dbtest_drain_";
 
@@ -155,5 +163,85 @@ describe("drainOutbox (DB-backed, P3-8)", () => {
     const row = await getRow(id);
     expect(row.status).toBe("sent");
     expect(row.delivery_payload).toBeNull();
+  });
+});
+
+/**
+ * F-101 / F-99 against real Postgres: the drain's claim query is what must
+ * skip a row the inline send is still delivering, so the lease is proved
+ * with the real `sendAppEmail` and the real claim, not a stub of either.
+ */
+describe("sendAppEmail and the drain (DB-backed, F-101 / F-99)", () => {
+  const to = `${PREFIX}inline@dbtest.local`;
+  const send = () =>
+    sendAppEmail({
+      to,
+      templateKey: "test_email",
+      organizationId: null,
+      variables: { appName: "App", sentBy: "dbtest" },
+    });
+
+  it("F-101: a drain does not claim a row the inline send is still delivering", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let inFlight!: () => void;
+    const started = new Promise<void>((resolve) => (inFlight = resolve));
+    const deliveries: string[] = [];
+    state.provider = {
+      id: "resend",
+      deliver: async (e) => {
+        deliveries.push((e as { idempotencyKey: string }).idempotencyKey);
+        // Only the first (inline) call waits; a second one is the duplicate.
+        if (deliveries.length === 1) {
+          inFlight();
+          await gate;
+        }
+        return { providerMessageId: `m-${deliveries.length}` };
+      },
+    };
+
+    const sending = send();
+    await started; // the row is written and the provider call is in flight
+    const drained = await drainOutbox(10);
+    release();
+    const result = await sending;
+
+    expect(drained.claimed).toBe(0);
+    expect(deliveries).toHaveLength(1);
+    expect(result.status).toBe("sent");
+    const row = await getRow(result.outboxId);
+    expect(row).toMatchObject({ status: "sent", attempts: 1, error: null });
+  });
+
+  it("F-99: a row whose inline retries all failed stays pending, and the drain delivers it", async () => {
+    state.provider = {
+      id: "resend",
+      deliver: async () => {
+        throw new EmailDeliveryError("resend", 503, "unavailable");
+      },
+    };
+
+    const result = await send();
+
+    expect(result.status).toBe("pending");
+    const pending = await getRow(result.outboxId);
+    expect(pending).toMatchObject({ status: "pending", attempts: INLINE_MAX_ATTEMPTS });
+    // Not due yet: the backoff after the inline attempts keeps the drain off it.
+    expect((await drainOutbox(10)).claimed).toBe(0);
+
+    // Time passes (the backoff runs out) and the provider recovers.
+    await db
+      .updateTable("app_outbox")
+      .set({ next_attempt_at: new Date(Date.now() - 1000) })
+      .where("id", "=", result.outboxId)
+      .execute();
+    state.provider = { id: "resend", deliver: async () => ({ providerMessageId: "m-drain" }) };
+
+    expect(await drainOutbox(10)).toMatchObject({ claimed: 1, sent: 1 });
+    expect(await getRow(result.outboxId)).toMatchObject({
+      status: "sent",
+      attempts: INLINE_MAX_ATTEMPTS + 1,
+      error: null,
+    });
   });
 });

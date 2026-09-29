@@ -191,7 +191,8 @@ beforeEach(async () => {
   selectFirst.mockResolvedValue(ORG_ROW);
   executeMock.mockResolvedValue([]);
   sendEmailMock.mockResolvedValue({ outboxId: "out-1", status: "logged" });
-  sendInvitationEmailMock.mockResolvedValue(undefined);
+  // F-104: the routes read what became of the email.
+  sendInvitationEmailMock.mockResolvedValue({ outboxId: "out-1", status: "sent" });
   createInvitationMock.mockResolvedValue({
     id: INVITATION_ID,
     plaintextToken: "tok-plain",
@@ -403,6 +404,14 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
       expect.objectContaining({
         eventType: "admin.organization.invitation_created",
         organizationId: ORG_ID,
+      }),
+    );
+    // F-104: the answer and the audit row say the email went out.
+    expect(await res.json()).toMatchObject({ ok: true, id: INVITATION_ID });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "success",
+        metadata: expect.objectContaining({ outboxId: "out-1", emailStatus: "sent" }),
       }),
     );
   });
@@ -625,5 +634,141 @@ describe("F-64: invitation mail is budgeted across instances", () => {
     expect((await resend()).status).toBe(404);
     expect(orgMailBudgetMock).not.toHaveBeenCalled();
     expect(recipientCooldownMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-104: both routes discarded what became of the email and answered, and
+ * audited, success whatever happened. The accept link exists only in that
+ * email, so an address the provider rejected left the admin reading "sent"
+ * for an invitation nobody could accept. And a send that threw after the
+ * invitation was written left it with no audit row.
+ */
+describe("F-104: the invitation routes report the email's delivery", () => {
+  const create = () => createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
+  const resend = () => resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
+
+  beforeEach(() => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+  });
+
+  it("create: a rejected email answers ok:false, and audits an error naming the outbox row", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    sendInvitationEmailMock.mockResolvedValue({ outboxId: "out-9", status: "failed" });
+
+    const res = await create();
+
+    // The invitation exists (201), but its link was not delivered.
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ ok: false, id: INVITATION_ID });
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.invitation_created",
+        outcome: "error",
+        reason: "email_rejected",
+        metadata: expect.objectContaining({
+          invitationId: INVITATION_ID,
+          outboxId: "out-9",
+          emailStatus: "failed",
+        }),
+      }),
+    );
+  });
+
+  it("create: an email queued for retry still answers ok:true", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    sendInvitationEmailMock.mockResolvedValue({ outboxId: "out-2", status: "pending" });
+
+    const res = await create();
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ ok: true });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "success",
+        metadata: expect.objectContaining({ emailStatus: "pending" }),
+      }),
+    );
+  });
+
+  it("create: a send that throws after the insert still leaves the invitation's audit row", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    sendInvitationEmailMock.mockRejectedValue(new Error("outbox insert failed"));
+
+    const res = await create();
+
+    expect(res.status).toBe(500);
+    expect(createInvitationMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.invitation_created",
+        outcome: "error",
+        reason: "email_send_failed",
+        metadata: expect.objectContaining({
+          invitationId: INVITATION_ID,
+          outboxId: null,
+          emailStatus: null,
+        }),
+      }),
+    );
+  });
+
+  it("resend: a rejected email answers ok:false, and audits an error naming the outbox row", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    sendInvitationEmailMock.mockResolvedValue({ outboxId: "out-7", status: "failed" });
+
+    const res = await resend();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: false });
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.invitation_resent",
+        outcome: "error",
+        reason: "email_rejected",
+        metadata: expect.objectContaining({
+          invitationId: INVITATION_ID,
+          outboxId: "out-7",
+          emailStatus: "failed",
+        }),
+      }),
+    );
+  });
+
+  it("resend: a delivered email answers ok:true and audits success", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+
+    const res = await resend();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.invitation_resent",
+        outcome: "success",
+        metadata: expect.objectContaining({ outboxId: "out-1", emailStatus: "sent" }),
+      }),
+    );
+  });
+
+  it("resend: a send that throws after the rotation is audited before the 500", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    sendInvitationEmailMock.mockRejectedValue(new Error("outbox insert failed"));
+
+    const res = await resend();
+
+    expect(res.status).toBe(500);
+    expect(regenerateMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.invitation_resent",
+        outcome: "error",
+        reason: "email_send_failed",
+        metadata: expect.objectContaining({ invitationId: INVITATION_ID, emailStatus: null }),
+      }),
+    );
   });
 });

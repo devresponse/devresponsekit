@@ -23,8 +23,13 @@ interface CapturedOptions {
     enabled?: boolean;
     requireEmailVerification?: boolean;
     revokeSessionsOnPasswordReset?: boolean;
+    resetPasswordTokenExpiresIn?: number;
   };
-  emailVerification?: { sendOnSignUp?: boolean; autoSignInAfterVerification?: boolean };
+  emailVerification?: {
+    sendOnSignUp?: boolean;
+    autoSignInAfterVerification?: boolean;
+    expiresIn?: number;
+  };
   account?: {
     accountLinking?: {
       enabled?: boolean;
@@ -87,6 +92,24 @@ describe("Better Auth security subtree (review #121)", () => {
     const opts = await capture();
     expect(opts.session?.expiresIn).toBe(8 * 60 * 60);
     expect(opts.session?.updateAge).toBe(15 * 60);
+  });
+
+  /**
+   * F-103: the outbox drain fails a queued reset or verification email once
+   * `TOKEN_TTL_MS_BY_TEMPLATE` says its link is dead. That map and these
+   * options read one set of constants; before, the options were left to
+   * Better Auth's defaults and the drain copied them, so a TTL set here (or a
+   * new vendor default) would have drifted from it with every test green.
+   */
+  it("hands Better Auth the reset and verification TTLs the outbox drain measures against", async () => {
+    const opts = await capture();
+    const { TOKEN_TTL_MS_BY_TEMPLATE } = await import("@/lib/email/outbox-worker.server");
+    expect(opts.emailAndPassword.resetPasswordTokenExpiresIn).toBe(
+      TOKEN_TTL_MS_BY_TEMPLATE.password_reset! / 1000,
+    );
+    expect(opts.emailVerification?.expiresIn).toBe(
+      TOKEN_TTL_MS_BY_TEMPLATE.email_verification! / 1000,
+    );
   });
 
   it("derives trustedOrigins from the SAME env allow-list the admin origin guard uses (deduplicated, normalized)", async () => {

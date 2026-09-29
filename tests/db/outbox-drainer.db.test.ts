@@ -17,6 +17,9 @@ import type * as ProvidersModule from "@/lib/email/providers.server";
  *     does not claim it and send the email twice.
  *   F-99 — a row whose inline retries all failed stays `pending` for the
  *     drain. The retry wait is stubbed to return at once.
+ *   F-100 — such a row for an invitation is delivered only while the
+ *     invitation is still pending under the token it carries: one revoked,
+ *     resent, accepted or deleted with its org since is failed unsent.
  *
  * Runs `drainOutbox` against real Postgres; only the provider is mocked (the
  * `db` pool is real). Driven by `pnpm test:db`. Fixtures use `__dbtest_`.
@@ -42,6 +45,8 @@ const { db, pgPool } = await import("@/db/database");
 const { drainOutbox } = await import("@/lib/email/outbox-worker.server");
 const { INLINE_MAX_ATTEMPTS, sendAppEmail } = await import("@/lib/email/send.server");
 const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+const { createInvitation, regenerateInvitationToken, revokeInvitation, sendInvitationEmail } =
+  await import("@/lib/invitations.server");
 
 const PREFIX = "__dbtest_drain_";
 
@@ -88,6 +93,8 @@ beforeEach(async () => {
 });
 afterAll(async () => {
   await db.deleteFrom("app_outbox").where("to_email", "like", `${PREFIX}%`).execute();
+  // Invitations cascade with their org.
+  await db.deleteFrom("app_organizations").where("slug", "like", `${PREFIX}%`).execute();
   await pgPool.end();
 });
 
@@ -243,5 +250,155 @@ describe("sendAppEmail and the drain (DB-backed, F-101 / F-99)", () => {
       attempts: INLINE_MAX_ATTEMPTS + 1,
       error: null,
     });
+  });
+});
+
+/**
+ * F-100 against real Postgres: the invitation is created, revoked and rotated
+ * by the real invitation functions, its email is queued by the real
+ * `sendInvitationEmail` while the provider is down (so the row waits for the
+ * drain, as in the review's scenario), and the drain's lookup runs its real
+ * query over the stored token hashes.
+ */
+describe("invitation mail after its invitation dies (DB-backed, F-100)", () => {
+  const INVITEE = `${PREFIX}invitee@dbtest.local`;
+  let orgId: string;
+  let delivered: string[];
+
+  beforeEach(async () => {
+    await db.deleteFrom("app_organizations").where("slug", "like", `${PREFIX}%`).execute();
+    orgId = (
+      await db
+        .insertInto("app_organizations")
+        .values({ slug: `${PREFIX}org`, name: "DBTest Drain Org" })
+        .returning("id")
+        .executeTakeFirstOrThrow()
+    ).id;
+    delivered = [];
+  });
+
+  /** Queues the invitation email while the provider is down, then makes the row due. */
+  async function queueWhileProviderDown(plaintextToken: string): Promise<string> {
+    state.provider = {
+      id: "resend",
+      deliver: async () => {
+        throw new EmailDeliveryError("resend", 503, "unavailable");
+      },
+    };
+    const sent = await sendInvitationEmail({
+      to: INVITEE,
+      organizationId: orgId,
+      organizationName: "DBTest Drain Org",
+      inviterAppUserId: null,
+      plaintextToken,
+    });
+    expect(sent.status).toBe("pending");
+    await db
+      .updateTable("app_outbox")
+      .set({ next_attempt_at: new Date(Date.now() - 1000) })
+      .where("id", "=", sent.outboxId)
+      .execute();
+    return sent.outboxId;
+  }
+
+  /** The provider is back: records the text body of every email it is handed. */
+  function providerRecovers(): void {
+    state.provider = {
+      id: "resend",
+      deliver: async (e) => {
+        delivered.push((e as { text?: string }).text ?? "");
+        return { providerMessageId: `m-${delivered.length}` };
+      },
+    };
+  }
+
+  async function expectSuperseded(outboxId: string): Promise<void> {
+    const row = await getRow(outboxId);
+    // Failed without an attempt of its own, and the live link is not kept.
+    expect(row).toMatchObject({
+      status: "failed",
+      attempts: INLINE_MAX_ATTEMPTS,
+      delivery_payload: null,
+    });
+    expect(row.error).toMatch(/^invitation_superseded: /);
+  }
+
+  it("delivers a still-pending invitation's email, with its live link", async () => {
+    const { plaintextToken } = await createInvitation({ organizationId: orgId, email: INVITEE });
+    const outboxId = await queueWhileProviderDown(plaintextToken);
+    providerRecovers();
+
+    expect(await drainOutbox(10)).toMatchObject({ claimed: 1, sent: 1, superseded: 0 });
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toContain(`/invite?token=${plaintextToken}`);
+    expect((await getRow(outboxId)).status).toBe("sent");
+  });
+
+  it.each([
+    [
+      "revoked",
+      async (invitationId: string) => {
+        const revoked = await revokeInvitation({
+          invitationId,
+          organizationId: orgId,
+          revokedByBetterAuthUserId: `${PREFIX}admin`,
+        });
+        expect(revoked).toBe(true);
+      },
+    ],
+    [
+      // The state `consumeInvitation`'s guarded flip leaves, set directly: the
+      // accept path needs user and inviter fixtures this suite does not own.
+      "accepted",
+      async (invitationId: string) => {
+        await db
+          .updateTable("app_organization_invitations")
+          .set({ status: "accepted", accepted_at: new Date() })
+          .where("id", "=", invitationId)
+          .execute();
+      },
+    ],
+    [
+      // Invitations cascade with their org; the outbox row survives, org-less.
+      "deleted with its organization",
+      async () => {
+        await db.deleteFrom("app_organizations").where("id", "=", orgId).execute();
+      },
+    ],
+  ])("drops the queued email of an invitation %s since, unsent", async (_, kill) => {
+    const { id, plaintextToken } = await createInvitation({
+      organizationId: orgId,
+      email: INVITEE,
+    });
+    const outboxId = await queueWhileProviderDown(plaintextToken);
+    await kill(id);
+    providerRecovers();
+
+    expect(await drainOutbox(10)).toMatchObject({
+      claimed: 1,
+      sent: 0,
+      failed: 0,
+      superseded: 1,
+    });
+    expect(delivered).toEqual([]);
+    await expectSuperseded(outboxId);
+  });
+
+  it("after a resend, delivers only the fresh email and drops the stale one", async () => {
+    const { id, plaintextToken: staleToken } = await createInvitation({
+      organizationId: orgId,
+      email: INVITEE,
+    });
+    const staleId = await queueWhileProviderDown(staleToken);
+    const rotated = await regenerateInvitationToken({ invitationId: id, organizationId: orgId });
+    const freshId = await queueWhileProviderDown(rotated!.plaintextToken);
+    providerRecovers();
+
+    expect(await drainOutbox(10)).toMatchObject({ claimed: 2, sent: 1, superseded: 1 });
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]).toContain(`/invite?token=${rotated!.plaintextToken}`);
+    expect(delivered[0]).not.toContain(staleToken);
+    expect((await getRow(freshId)).status).toBe("sent");
+    await expectSuperseded(staleId);
   });
 });

@@ -33,11 +33,18 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
 }
 
 /**
- * Built-in defaults. Keep in sync with the seeded rows in the SQL migrations,
- * which now live entirely under `locales/` — one file per locale, each carrying
- * all four templates for that locale: the `en` BASE in
- * `locales/0000-email-templates-en.sql` (always applied) and the localized rows
- * in `locales/0001`–`0007` (fr, es, uk, pt, zh, hi, ja).
+ * Built-in defaults. The seeded rows in the SQL migrations live entirely under
+ * `locales/` — one file per locale, each carrying all four templates for that
+ * locale: the `en` BASE in `locales/0000-email-templates-en.sql` (always
+ * applied) and the localized rows in `locales/0001`–`0007` (fr, es, uk, pt, zh,
+ * hi, ja).
+ *
+ * F-103: each seeded row's subject and bodies must equal the default here, and
+ * tests/unit/email-templates.test.ts parses every `locales/*.sql` file and
+ * fails on a drift (the fr invitation had drifted to typographic apostrophes
+ * here). A drift from an existing row is fixed on THIS side: an applied
+ * migration file is checksummed in the ledger, and its `on conflict do
+ * nothing` would not reach a database that is already seeded.
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -357,13 +364,13 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
         bodyHtml:
           "<p>Bonjour,</p>" +
           "<p>{{inviterName}} vous a invité à rejoindre <strong>{{organizationName}}</strong>.</p>" +
-          '<p><a href="{{acceptUrl}}">Accepter l’invitation</a></p>' +
-          "<p>Cette invitation expire dans 7 jours. Si vous ne l’attendiez pas, vous pouvez ignorer cet e-mail.</p>",
+          '<p><a href="{{acceptUrl}}">Accepter l\'invitation</a></p>' +
+          "<p>Cette invitation expire dans 7 jours. Si vous ne l'attendiez pas, vous pouvez ignorer cet e-mail.</p>",
         bodyText:
           "Bonjour,\n\n" +
           "{{inviterName}} vous a invité à rejoindre {{organizationName}}.\n\n" +
-          "Accepter l’invitation :\n{{acceptUrl}}\n\n" +
-          "Cette invitation expire dans 7 jours. Si vous ne l’attendiez pas, vous pouvez ignorer cet e-mail.",
+          "Accepter l'invitation :\n{{acceptUrl}}\n\n" +
+          "Cette invitation expire dans 7 jours. Si vous ne l'attendiez pas, vous pouvez ignorer cet e-mail.",
       },
       es: {
         subject: "Te han invitado a unirte a {{organizationName}}",

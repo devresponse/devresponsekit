@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   REDACTED_TOKEN,
+  findQueryTokens,
   parseOutboxDeliveryPayload,
   redactEmailSecrets,
   redactRenderedEmail,
@@ -53,6 +54,23 @@ describe("redactEmailSecrets", () => {
     expect(redactEmailSecrets(plain)).toBe(plain);
     const once = redactEmailSecrets(RESET);
     expect(redactEmailSecrets(once)).toBe(once);
+  });
+});
+
+/**
+ * F-100: the drain reads the invitation token back out of a row's unredacted
+ * payload with this, so it must find exactly what redaction hides.
+ */
+describe("findQueryTokens", () => {
+  it("returns the decoded `token=` values, raw and inside an entity-escaped body", () => {
+    expect(findQueryTokens(`Accept: ${INVITE}`)).toEqual(["inv-plaintext-token"]);
+    expect(findQueryTokens(`<a href="${escapeHtml(VERIFY)}">Verify</a>`)).toEqual(["T0k3n+v"]);
+  });
+
+  it("finds nothing in a redacted or token-free text, nor in a reset path segment", () => {
+    expect(findQueryTokens(redactEmailSecrets(`${INVITE} ${VERIFY}`))).toEqual([]);
+    expect(findQueryTokens("Hi Ada, see http://app.local/en/app")).toEqual([]);
+    expect(findQueryTokens(RESET)).toEqual([]);
   });
 });
 

@@ -172,6 +172,19 @@ describe("recordOutboxDelivery (F-27)", () => {
     expect(await counterValue("logged", "password_reset")).toBe(1);
   });
 
+  it("counts a withdrawn invitation email (`superseded`, F-100) without logging it as a failure", async () => {
+    telemetry.recordOutboxDelivery({
+      ...base,
+      path: "worker",
+      templateKey: "organization_invitation",
+      outcome: "superseded",
+      attempts: 3,
+    });
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(await counterValue("superseded", "organization_invitation")).toBe(1);
+  });
+
   it("keeps the template label to the built-in keys, so a stray key cannot mint a series", async () => {
     for (const key of [
       "password_reset",

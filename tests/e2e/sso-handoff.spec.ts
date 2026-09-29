@@ -53,10 +53,10 @@ test("sso handoff: the public JWKS is served, cacheable, and carries no private 
 });
 
 /**
- * Ensures the destination app exists. The row's id is fixed (see above) and a
- * launched handoff leaves a nonce row referencing it, so the cleanup delete is
- * refused (`application_in_use`) and a previous test or project run may have
- * left the row behind — it is written only when absent. Its origin sits under
+ * Ensures the destination app exists. The row's id is fixed (see above). Each
+ * test's cleanup deletes it, taking its launches' handoff nonces with it
+ * (F-84), so each test re-creates it here; it is written only when absent, in
+ * case an interrupted run left it behind. Its origin sits under
  * the configured SSO_ALLOWED_ORIGIN_SUFFIXES (devresponse.com); no test here
  * ever reaches that host.
  *
@@ -95,9 +95,9 @@ async function ensurePortalApp(api: APIRequestContext): Promise<void> {
 }
 
 /**
- * Best-effort cleanup: the nonce row a launch leaves references the app, so
- * this is normally refused with 409 application_in_use and the row persists
- * for the next run (handled by {@link ensurePortalApp}).
+ * Best-effort cleanup: deletes the portal row together with the handoff nonces
+ * its launches left (F-84); the next test re-creates it through
+ * {@link ensurePortalApp}.
  */
 async function tryDeletePortalApp(api: APIRequestContext): Promise<void> {
   await api.delete(`/api/administrator/enterprise-apps/${APP_ID}`, {
@@ -125,7 +125,7 @@ test("sso handoff: launch -> consume -> replay rejected", async ({ page }, testI
     // can be set up to have another app's tokens accepted. The holder is a
     // throwaway foreign row, not the portal: this deployment's own audience is
     // refused before the catalog is read (F-83), which would prove nothing
-    // here. It is never launched, so the cleanup delete below succeeds.
+    // here. The cleanup below deletes it.
     const holderRes = await page.request.post("/api/administrator/enterprise-apps", {
       headers: ADMIN_API_HEADERS,
       data: foreignApp(foreignSlug),

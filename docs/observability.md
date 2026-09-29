@@ -31,9 +31,10 @@ correlate them during an incident, and what is deliberately still on the roadmap
 > **Retention is an ops concern.** `app_audit_events` and `app_outbox` grow
 > without bound unless the retention prune runs. It applies the configured
 > windows (`AUDIT_RETENTION_DAYS`, default 365; `OUTBOX_RETENTION_DAYS`,
-> default 90) and prunes expired token revocations. On Vercel the daily
-> `/api/internal/outbox-drain` cron runs it after each drain and logs a
-> `kind: "retention"` line with the counts (F-96). Elsewhere, schedule
+> default 90) and prunes expired token revocations and long-expired SSO
+> handoff nonces. On Vercel the daily `/api/internal/outbox-drain` cron runs
+> it after each drain and logs a `kind: "retention"` line with the counts
+> (F-96). Elsewhere, schedule
 > **`pnpm db:prune`** (`scripts/prune-retention.ts`) or call that route. See
 > [Deployment](./deployment.md#4-deploy--post-deploy-verification).
 

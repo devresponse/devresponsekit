@@ -19,6 +19,8 @@ const selectFirst = vi.fn();
 const insertExecute = vi.fn();
 const updateExecute = vi.fn();
 const countExecute = vi.fn();
+/** F-98: the revoked-credential DELETEs on the transaction, called with their table. */
+const purgeExecute = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -86,15 +88,23 @@ vi.mock("@/db/database", () => {
   // `deleteFrom(...).where(...).execute()`. Deliberately narrow — the audit
   // call inside the transaction goes through the mocked `@/lib/audit.server`,
   // never through this handle.
+  //
+  // F-98: the DELETE also clears the org's revoked credentials on the handle
+  // first. Those statements answer `purgeExecute(table)`, so `itemsExecute`
+  // stays the org DELETE alone and a rejection staged on it models that
+  // statement's FK violation, not the purge's.
   const trx = {
     // The PATCH's update runs on the handle too (F-40), answering updateExecute.
     updateTable: () => ({ set: () => ({ where: () => ({ execute: () => updateExecute() }) }) }),
-    deleteFrom: () => ({
-      where: () => ({
-        execute: itemsExecute,
-        where: () => ({ execute: itemsExecute }),
-      }),
-    }),
+    deleteFrom: (table: string) =>
+      table === "app_organizations"
+        ? {
+            where: () => ({
+              execute: itemsExecute,
+              where: () => ({ execute: itemsExecute }),
+            }),
+          }
+        : { where: () => ({ where: () => ({ execute: () => purgeExecute(table) }) }) },
   };
   return {
     db: {
@@ -195,9 +205,11 @@ beforeEach(async () => {
     updateExecute,
     countExecute,
     isDefaultLockedMock,
+    purgeExecute,
   ])
     m.mockReset();
   isDefaultLockedMock.mockResolvedValue(false);
+  purgeExecute.mockResolvedValue([]);
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET, POST } = await import("@/app/api/administrator/organizations/route"));
@@ -388,6 +400,30 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     expect(recheckOrder as number).toBeLessThan(auditOrder as number);
   });
 
+  it("F-98: clears the org's revoked credentials on the transaction, after the audit and before the delete", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
+    itemsExecute.mockResolvedValue([]);
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
+    expect(res.status).toBe(200);
+    // Both credential tables, inside the transaction, so a delete that is
+    // refused rolls them back. Which rows (revoked only) is pinned against
+    // real Postgres in tests/db/organizations-delete-route.db.test.ts.
+    expect(purgeExecute.mock.calls.map(([table]) => table)).toEqual([
+      "app_api_keys",
+      "app_oauth_clients",
+    ]);
+    const [auditOrder] = auditMock.mock.invocationCallOrder;
+    const [deleteOrder] = itemsExecute.mock.invocationCallOrder;
+    for (const purgeOrder of purgeExecute.mock.invocationCallOrder) {
+      expect(purgeOrder).toBeGreaterThan(auditOrder as number);
+      expect(purgeOrder).toBeLessThan(deleteOrder as number);
+    }
+  });
+
   it("F-40: an org made the default after the pool guards ran is refused INSIDE the transaction — 409, nothing deleted", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
@@ -402,6 +438,7 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "organization_is_default" });
     expect(itemsExecute).not.toHaveBeenCalled();
+    expect(purgeExecute).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -425,7 +462,17 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body).toMatchObject({ error: "organization_in_use" });
-    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
+    // F-98: the denial names the foreign key that refused the delete.
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.delete_blocked",
+        outcome: "denied",
+        metadata: expect.objectContaining({
+          reason: "organization_in_use",
+          blockedBy: "app_roles_organization_id_fkey",
+        }),
+      }),
+    );
     // The success audit written inside the transaction is discarded by the
     // ROLLBACK, which a stubbed `db.transaction` cannot model — that half of
     // DB-3 is asserted against real Postgres in

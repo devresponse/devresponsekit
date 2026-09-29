@@ -4,9 +4,9 @@ import { pgPool } from "@/db/database";
 
 /**
  * Data-retention pruner (review D3). Prunes expired token revocations and
- * applies the configured retention windows to `app_audit_events` and
- * `app_outbox`. Designed to run on a schedule — a cron job, a Kubernetes
- * CronJob, or any periodic init task:
+ * long-expired SSO handoff nonces, and applies the configured retention
+ * windows to `app_audit_events` and `app_outbox`. Designed to run on a
+ * schedule — a cron job, a Kubernetes CronJob, or any periodic init task:
  *
  *   pnpm db:prune        # one pass
  *
@@ -26,7 +26,7 @@ import { pgPool } from "@/db/database";
 async function main(): Promise<void> {
   const result = await pruneAll();
   console.log(
-    `[retention] revocations=${result.revocations} audit=${result.auditEvents} outbox=${result.outbox} staleOutboxFailed=${result.staleOutboxFailed}`,
+    `[retention] revocations=${result.revocations} audit=${result.auditEvents} outbox=${result.outbox} staleOutboxFailed=${result.staleOutboxFailed} ssoNonces=${result.ssoNonces}`,
   );
 }
 

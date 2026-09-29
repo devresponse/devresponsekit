@@ -1,13 +1,19 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
-import { isForeignKeyViolation, isUniqueViolation } from "@/db/pg-errors";
+import {
+  FOREIGN_KEY_VIOLATION,
+  isForeignKeyViolation,
+  isUniqueViolation,
+  violatedConstraint,
+} from "@/db/pg-errors";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   AdminError,
   assertOrgEmpty,
   assertOrgNotDefault,
+  deleteRevokedOrgCredentials,
   loadOrgOrThrow,
 } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -271,7 +277,10 @@ export const PATCH = withAdminRoute(async function PATCH(
 /**
  * DELETE /api/administrator/organizations/:id
  *
- * Deletes an organization if empty and not the default.
+ * Deletes an organization if empty and not the default. Its revoked API keys
+ * and OAuth clients are deleted with it (F-98); anything else still pointing
+ * at it (roles, provider bindings, enterprise apps, active credentials)
+ * refuses the delete with 409 `organization_in_use`.
  * Caller MUST hold `admin.orgs.delete`.
  */
 export const DELETE = withAdminRoute(async function DELETE(
@@ -349,6 +358,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   // that rolls back (the FK 409 below, or any later failure) takes the success
   // row with it, and a tenant can no longer be removed without one.
   let blockedByForeignKey = false;
+  let blockingConstraint: string | null = null;
   let vanishedMidRequest = false;
   let becameDefault = false;
   try {
@@ -399,19 +409,29 @@ export const DELETE = withAdminRoute(async function DELETE(
         throw err;
       }
 
+      // F-98: revoked API keys and OAuth clients go with the org, so only an
+      // ACTIVE credential still blocks the delete below. Rolled back with the
+      // rest when anything else refuses it.
+      await deleteRevokedOrgCredentials(trx, id);
+
       try {
         await trx.deleteFrom("app_organizations").where("id", "=", id).execute();
       } catch (err) {
         // The emptiness guard only covers memberships. An org can still own
-        // roles, provider bindings, enterprise apps, or API/OAuth credentials
-        // whose FKs block the delete. Translate that FK violation into the
-        // documented 409 (DB-1) instead of letting it surface as a raw 500.
-        // The flag is set HERE, on the delete statement alone, so an FK error
-        // from any other statement in the transaction still surfaces as itself
-        // rather than being mislabelled `organization_in_use`. F-132: any 23503
-        // on this DELETE is a referencing row, whichever table holds it, so no
-        // constraint is named (see `isForeignKeyViolation`).
-        if (isForeignKeyViolation(err)) blockedByForeignKey = true;
+        // roles, provider bindings, enterprise apps, or ACTIVE API/OAuth
+        // credentials whose FKs block the delete. Translate that FK violation
+        // into the documented 409 (DB-1) instead of letting it surface as a raw
+        // 500. The flag is set HERE, on the delete statement alone, so an FK
+        // error from any other statement in the transaction still surfaces as
+        // itself rather than being mislabelled `organization_in_use`. F-132:
+        // any 23503 on this DELETE is a referencing row, whichever table holds
+        // it, so no constraint is named (see `isForeignKeyViolation`). F-98:
+        // the one it hit is kept for the audit row, which then names the table
+        // that still blocks the delete.
+        if (isForeignKeyViolation(err)) {
+          blockedByForeignKey = true;
+          blockingConstraint = violatedConstraint(err, FOREIGN_KEY_VIOLATION);
+        }
         // Rethrow regardless: the failed statement has already aborted the
         // transaction, and rolling back is what discards the success audit.
         throw err;
@@ -429,7 +449,12 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       organizationId: id,
-      metadata: { organizationId: id, slug: existing.slug, reason: "organization_in_use" },
+      metadata: {
+        organizationId: id,
+        slug: existing.slug,
+        reason: "organization_in_use",
+        blockedBy: blockingConstraint,
+      },
     });
     return adminErrorResponse("organization_in_use", 409, request);
   }

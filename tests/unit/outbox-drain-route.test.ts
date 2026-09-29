@@ -21,7 +21,13 @@ vi.mock("@/lib/observability/logger.server", () => ({
   logServerError: logServerErrorSpy,
 }));
 
-const RETENTION = { revocations: 0, auditEvents: 4, outbox: 120, staleOutboxFailed: 2 };
+const RETENTION = {
+  revocations: 0,
+  auditEvents: 4,
+  outbox: 120,
+  staleOutboxFailed: 2,
+  ssoNonces: 1,
+};
 
 const SECRET = "test-cron-secret-value-at-least-32-chars-long";
 let GET: typeof RouteModule.GET;

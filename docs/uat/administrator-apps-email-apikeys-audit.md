@@ -92,20 +92,20 @@ User stories
     | 3 | Confirm the Administrator sidebar never showed an Apps group for you | No apps link was ever offered |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
-- UAT-ADMIN-AEK-APPS-LIST-S3 — As an Org Admin, I want to delete an unused application, so that stale SSO targets are removed.
-  - Acceptance criteria: Given the app has no SSO handoff nonces referencing it, when I confirm Delete, then the row disappears; given it is still in use, then I see an inline "application in use" message and the row stays (`_enterprise-apps-grid.tsx:76`; API `DELETE` returns 409 `application_in_use` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:224`).
+- UAT-ADMIN-AEK-APPS-LIST-S3 — As an Org Admin, I want to delete an application I no longer use, so that stale SSO targets are removed.
+  - Acceptance criteria: Given an app, launched or not, when I confirm Delete, then the row disappears, and the SSO handoff nonces its launches left are deleted with it (F-84). Only a row in some other table still referencing the app (none does today) would refuse it: then I see an inline "application in use" message and the row stays (`_enterprise-apps-grid.tsx:76`; API `DELETE` returns 409 `application_in_use`, `src/app/api/administrator/enterprise-apps/[id]/route.ts`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | As Org Admin, on the list, click **Delete** on an unused app row | A destructive confirm dialog appears with the app label |
     | 2 | Confirm the dialog | The row is removed and the grid refreshes |
-    | 3 | Click **Delete** on an app that is still referenced by an SSO handoff, then confirm | An inline red alert reads that the application is in use; the row remains |
+    | 3 | Launch another app from the dashboard, set it to **Disabled**, then click **Delete** on it and confirm | The row is removed; its earlier launch does not block the delete (F-84) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
 - Out-of-scope access -> Not Found: as Org Admin the list simply omits other orgs' and global apps (empty page for a null scope, `src/app/api/administrator/enterprise-apps/route.ts:66`); a Member/Limited Admin hitting the URL gets 404 at the page guard.
 - Empty state: with no apps in scope the grid renders its empty state (no rows) rather than an error.
-- Delete refused -> friendly inline message ("application in use"); non-409 failures show the generic delete-error text (`_enterprise-apps-grid.tsx:85`).
+- Delete refused (409 `application_in_use`, only if a future table references the app) -> friendly inline message ("application in use"); non-409 failures show the generic delete-error text (`_enterprise-apps-grid.tsx:85`).
 - Rate limit: repeated deletes are subject to the admin mutation limiter; a limited response yields the generic delete error inline. `TODO: verify` the exact user-facing text on 429 (the grid maps only 409 specially).
 
 Accessibility: keyboard-reach the search box, filter, and each row link/Delete; visible focus on the confirm dialog with Esc to cancel; the inline error uses `role="alert"` (`_enterprise-apps-grid.tsx:186`).

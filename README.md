@@ -93,7 +93,7 @@ Full detail, and what adopting either would take, is in
 | `pnpm db:reset:reload` | Drop all tables, then re-run migrations + seed (local only) |
 | `pnpm db:provision` | Provision a fresh database in one shot: Better Auth + app schema + seed |
 | `pnpm db:app:migrate` | Apply the app schema migrations                  |
-| `pnpm db:prune`   | Prune expired revocations + aged audit/outbox rows (cron — see [Deployment](docs/deployment.md)) |
+| `pnpm db:prune`   | Prune expired revocations/SSO nonces + aged audit/outbox rows (cron — see [Deployment](docs/deployment.md)) |
 | `pnpm outbox:drain` | Retry pending outbox emails (cron)               |
 | `pnpm mcp:reap`   | Expire stale pending MCP self-registrations (cron) |
 | `pnpm openapi:export` | Write the admin OpenAPI document to `docs/`      |

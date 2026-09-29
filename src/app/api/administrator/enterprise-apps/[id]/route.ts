@@ -201,10 +201,9 @@ export const PATCH = withAdminRoute(async function PATCH(
 /**
  * DELETE /api/administrator/enterprise-apps/:id
  *
- * Deletes an enterprise application. Refuses with `application_in_use`
- * (409) when SSO handoff nonces still reference the row — the app id
- * is a stable foreign key and removing a row that's still in use would
- * orphan audit trails.
+ * Deletes an enterprise application, together with the SSO handoff nonces
+ * its launches left behind (F-84). Refuses with `application_in_use` (409)
+ * only if some other row still references it; none does today.
  *
  * Caller MUST hold `admin.apps.manage`.
  */
@@ -243,11 +242,45 @@ export const DELETE = withAdminRoute(async function DELETE(
     return adminErrorResponse("application_not_found", 404, request);
   }
 
+  let vanished = false;
   try {
-    await db.deleteFrom("app_enterprise_applications").where("id", "=", id).execute();
+    await db.transaction().execute(async (trx) => {
+      // F-84: every launch leaves a handoff-nonce row naming the app, under a
+      // foreign key with no ON DELETE action, and only a later launch of some
+      // AVAILABLE app purged them (rows expired over an hour). So retiring an
+      // app the usual way, disable it and then delete it, answered 409
+      // `application_in_use`, and kept answering it when no other app was
+      // launched afterwards. A nonce is a one-time replay guard for a token
+      // that lives at most 60 s, not a record (the launch is audited on its
+      // own), so the app's nonces go with it, in the same transaction.
+      //
+      // The app row is locked first: a nonce INSERT takes a key-share lock on
+      // the row it references, so a launch racing this delete either commits
+      // its nonce before the lock is granted (and the DELETE below removes
+      // it) or waits and then fails its foreign key against the deleted app.
+      const locked = await trx
+        .selectFrom("app_enterprise_applications")
+        .select("id")
+        .where("id", "=", id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!locked) {
+        // Deleted by another request after the lookup above: answer as that
+        // lookup would have, and claim no deletion in the audit log.
+        vanished = true;
+        return;
+      }
+      await trx
+        .deleteFrom("app_sso_handoff_nonces")
+        .where("target_application_id", "=", id)
+        .execute();
+      await trx.deleteFrom("app_enterprise_applications").where("id", "=", id).execute();
+    });
   } catch (err) {
     // F-132: any 23503 on this DELETE is a row still pointing at the app,
     // whichever referencing table holds it (see `isForeignKeyViolation`).
+    // Deleting nonces cannot raise one (nothing references them), so it came
+    // from the app DELETE: a table a later migration points at the app.
     if (isForeignKeyViolation(err)) {
       await auditEvent({
         eventType: "admin.app.delete_blocked",
@@ -261,6 +294,9 @@ export const DELETE = withAdminRoute(async function DELETE(
       return adminErrorResponse("application_in_use", 409, request);
     }
     throw err;
+  }
+  if (vanished) {
+    return adminErrorResponse("application_not_found", 404, request);
   }
 
   await auditEvent({

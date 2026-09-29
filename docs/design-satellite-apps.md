@@ -245,8 +245,8 @@ demo fleet all are. The as-built detail is in the
 `theme/**`, `i18n/**`, `ui/**`, `navigation/**`; `src/app/[locale]/layout.tsx` +
 `(root)` + `(secure)/layout.tsx`; `proxy.ts`, `instrumentation.ts`,
 `next.config.mjs`, `Dockerfile`; the `(auth)/sso/confirm` page;
-`jwt-handoff.server.ts` (verify side). Theme + Zustand are localStorage-only — no
-DB dependency.
+`jwt-handoff.server.ts` (verify side). The theme is localStorage-only — no DB
+dependency.
 
 **STRIP (delete):**
 

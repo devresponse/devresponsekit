@@ -134,11 +134,11 @@ cannot break on it).
 
 Any option can be overridden via `options`.
 
-The same module exports `applyServerErrors(form, fieldErrors, fallbackMessage?)`,
-which maps a server response's per-field errors back onto the form via
-`setError`, falling back to the form `root` (rendered as a banner) when no field
-error applies. So a 409 "email already taken" lands **on the email field**, and
-only genuinely form-level failures (network, 403) use the banner.
+A server-only failure is mapped back with `form.setError`: onto the offending
+field when the error code names one (the new enterprise-app form puts a 409
+`id_taken` on `id` and a 400 `invalid_origin` on `origin`), otherwise onto the
+form `root`, rendered as a banner. Only genuinely form-level failures (network,
+403) use the banner.
 
 ### Settings forms seeded from server props (F-39)
 

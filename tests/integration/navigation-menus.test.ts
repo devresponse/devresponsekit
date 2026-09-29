@@ -3,12 +3,11 @@ import type * as AuthStatusModule from "@/lib/auth-status";
 import type { NextRequest } from "next/server";
 
 /**
- * Route integration tests for the three navigation menu APIs (§29.6.9):
+ * Route integration tests for the two navigation menu APIs (§29.6.9):
  *   - GET /api/navigation/applications
  *   - GET /api/navigation/shell-menu
- *   - GET /api/navigation/nested-apps
  *
- * All three share the same auth/permission contract: 401 when there is
+ * Both share the same auth/permission contract: 401 when there is
  * no session, 403 (audited as `navigation.menu.denied`) when the access
  * decision is anything other than `allow`, 400 for invalid query, and
  * 200 with a `NavigationMenuResponse` envelope on success.
@@ -19,7 +18,6 @@ const accessGetter = vi.fn();
 const auditMock = vi.fn();
 const loadApplicationsMenu = vi.fn();
 const loadShellMenu = vi.fn();
-const loadNestedAppsMenu = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -37,7 +35,6 @@ vi.mock("@/lib/audit.server", () => ({
 vi.mock("@/lib/navigation.server", () => ({
   loadApplicationsMenu: (...args: unknown[]) => loadApplicationsMenu(...args),
   loadShellMenu: (...args: unknown[]) => loadShellMenu(...args),
-  loadNestedAppsMenu: (...args: unknown[]) => loadNestedAppsMenu(...args),
 }));
 
 function makeRequest(url: string): NextRequest {
@@ -67,7 +64,6 @@ beforeEach(() => {
   auditMock.mockReset();
   loadApplicationsMenu.mockReset();
   loadShellMenu.mockReset();
-  loadNestedAppsMenu.mockReset();
 });
 afterEach(() => vi.resetModules());
 
@@ -162,47 +158,11 @@ describe("GET /api/navigation/shell-menu", () => {
   });
 });
 
-describe("GET /api/navigation/nested-apps", () => {
-  async function call(url: string) {
-    const { GET } = await import("@/app/api/navigation/nested-apps/route");
-    return GET(makeRequest(url));
-  }
-
-  it("returns 400 without applicationId", async () => {
-    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    const res = await call("http://localhost/api/navigation/nested-apps?locale=en");
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 401 without a session", async () => {
-    sessionGetter.mockResolvedValue(null);
-    const res = await call("http://localhost/api/navigation/nested-apps?applicationId=portal");
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 200 with the nested-apps envelope", async () => {
-    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(ACTIVE_ACCESS);
-    loadNestedAppsMenu.mockResolvedValue({
-      menuId: "nested-apps:portal",
-      kind: "nested-apps",
-      locale: "en",
-      generatedAt: "x",
-      items: [],
-    });
-    const res = await call(
-      "http://localhost/api/navigation/nested-apps?applicationId=portal&locale=en",
-    );
-    expect(res.status).toBe(200);
-    expect(loadNestedAppsMenu).toHaveBeenCalledWith(ACTIVE_ACCESS, "portal", "en");
-  });
-});
-
 /**
  * F-105 family: like the scoped sign-in applicator, these GETs wrote an
  * append-only row on every hit. A blocked or pending session is still refused
  * every time, but its `navigation.menu.denied` row is sampled per actor
- * (at most about once a minute, across all three menus), so a loop cannot grow
+ * (at most about once a minute, across both menus), so a loop cannot grow
  * the audit table by a row per request.
  */
 describe("navigation.menu.denied is sampled per actor (F-105)", () => {
@@ -214,10 +174,6 @@ describe("navigation.menu.denied is sampled per actor (F-105)", () => {
     {
       load: () => import("@/app/api/navigation/shell-menu/route"),
       url: "http://localhost/api/navigation/shell-menu?scope=primary",
-    },
-    {
-      load: () => import("@/app/api/navigation/nested-apps/route"),
-      url: "http://localhost/api/navigation/nested-apps?applicationId=portal",
     },
   ];
 
@@ -242,7 +198,7 @@ describe("navigation.menu.denied is sampled per actor (F-105)", () => {
   it("refuses every request but audits the loop once", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     const statuses = await hitEveryMenu(5);
-    expect(statuses).toEqual(Array(15).fill(403));
+    expect(statuses).toEqual(Array(10).fill(403));
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({

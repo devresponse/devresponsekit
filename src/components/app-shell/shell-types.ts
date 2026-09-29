@@ -16,15 +16,6 @@ export type ShellFooterMode = "visible" | "hidden";
  *     header sits adjacent to it, over the content columns only.
  */
 export type ShellLayout = "header-first" | "sidebar-first";
-/** Identifier for shell regions whose visibility can be toggled. */
-export type ShellRegion = "left" | "right" | "footer";
-/** Visibility scope distinguishes the root shell from nested workspaces. */
-export type ShellVisibilityScope = "root" | "workspace";
-
-export interface ShellSlotProps {
-  children?: ReactNode;
-  className?: string;
-}
 
 export interface ShellControlledVisibilityProps {
   leftVisible?: boolean;
@@ -100,9 +91,3 @@ export interface ApplicationShellProps extends ShellControlledVisibilityProps {
   /** Localized accessible name for the left region landmark (#106). */
   leftAriaLabel?: string;
 }
-
-export type {
-  EnterpriseApplicationMenuItem,
-  NavigationMenuItem,
-  NavigationMenuResponse,
-} from "@/components/navigation/menu-types";

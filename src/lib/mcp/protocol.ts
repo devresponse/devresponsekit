@@ -80,7 +80,6 @@ export const RPC_PARSE_ERROR = -32700;
 export const RPC_INVALID_REQUEST = -32600;
 export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_INVALID_PARAMS = -32602;
-export const RPC_INTERNAL_ERROR = -32603;
 /** Server-reserved range (-32000..-32099): unauthenticated caller. */
 export const RPC_UNAUTHORIZED = -32001;
 
@@ -97,15 +96,6 @@ export function rpcError(
   const error: JsonRpcErrorResponse["error"] = { code, message };
   if (data !== undefined) error.data = data;
   return { jsonrpc: "2.0", id, error };
-}
-
-/** A parsed body is usable when it is an object carrying a string `method`. */
-export function isJsonRpcMessage(value: unknown): value is JsonRpcMessage & { method: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as JsonRpcMessage).method === "string"
-  );
 }
 
 /**

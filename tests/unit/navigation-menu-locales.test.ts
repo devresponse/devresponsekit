@@ -13,7 +13,7 @@ import ja from "@/messages/ja.json";
 /**
  * Menu-label locale completeness (review #135).
  *
- * `navigation.server.ts` builds shell/nested menu labels from its own
+ * `navigation.server.ts` builds shell menu labels from its own
  * `MESSAGE_LOADERS` map rather than the request-scoped translator. That map
  * covered en/fr/es/uk only, so pt/zh/hi/ja readers got ENGLISH menu labels in
  * an otherwise fully localized shell — a silent half-fleet regression that
@@ -92,11 +92,6 @@ describe("shell menu labels are localized for EVERY supported locale (review #13
       }
     },
   );
-
-  it.each(locales)("nested-app menu labels are localized for %s", async (locale) => {
-    const res = await mod.loadNestedAppsMenu(ACTIVE, "portal", locale);
-    expect(res.items[0]!.label).toBe(shellLabel(locale, "settings"));
-  });
 
   it("still falls back to the default locale for an unsupported input", async () => {
     const res = await mod.loadShellMenu(ACTIVE, "primary-sidebar", "kl");

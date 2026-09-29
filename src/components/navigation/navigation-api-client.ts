@@ -50,9 +50,3 @@ export function fetchShellMenu(scope: string, locale: string) {
     `/api/navigation/shell-menu?scope=${encodeURIComponent(scope)}&locale=${encodeURIComponent(locale)}`,
   );
 }
-
-export function fetchNestedAppsMenu(applicationId: string, locale: string) {
-  return getJson<NavigationMenuResponse<NavigationMenuItem>>(
-    `/api/navigation/nested-apps?applicationId=${encodeURIComponent(applicationId)}&locale=${encodeURIComponent(locale)}`,
-  );
-}

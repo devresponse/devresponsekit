@@ -356,7 +356,7 @@ The application tables link to Better Auth's `user` table logically via `app_use
 ## 6. State management
 
 - **Server state** is the database, read directly in Server Components or via route handlers. There is no global client data store for server data.
-- **Client UI state** uses **Zustand** for small cross-component concerns and **React Hook Form + Zod** for forms. Most interactivity is local component state.
+- **Client UI state** is local component state, plus **React Hook Form + Zod** for forms. No client state library is used; the theme choice is the only preference kept in `localStorage`.
 - **Active organization** is persisted via a cookie and read server-side so permission resolution reflects the chosen tenant.
 
 ## 7. Important design patterns

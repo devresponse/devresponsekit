@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import {
   AppSwitcherSkeleton,
-  NavbarMenuSkeleton,
   NavigationMenuSkeleton,
   SidebarMenuSkeleton,
 } from "@/components/app-shell/navigation-menu-skeleton";
@@ -40,8 +39,5 @@ describe("NavigationMenuSkeleton", () => {
 
     const sidebar = renderWithIntl(<SidebarMenuSkeleton />);
     expect(sidebar.container.querySelector('[role="status"]')).not.toBeNull();
-
-    const navbar = renderWithIntl(<NavbarMenuSkeleton />);
-    expect(navbar.container.querySelector('[role="status"]')).not.toBeNull();
   });
 });

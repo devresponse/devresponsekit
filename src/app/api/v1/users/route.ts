@@ -32,6 +32,8 @@ import {
   scopeOrganizationId,
 } from "@/lib/admin/access-scope.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { CROSS_ORG_REACH_REQUIRED_REASON } from "@/lib/admin/refusals.server";
+import { auditEvent } from "@/lib/audit.server";
 import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -184,7 +186,27 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
   // admin twin and `POST /api/administrator/users/[id]/role`. Every API key and
   // JWT is org-bound (MACHINE-2) and so has no cross-org reach: on this surface
   // only a superadmin's cookie session can mint one.
+  //
+  // F-58: the refusal is audited, as on the admin twin, under this surface's
+  // denial event (`api.access.denied`, the v1 guard's), the caller's org and
+  // the address the request named.
   if (input.role === "admin" && !hasCrossOrgReach(grant.caller.access)) {
+    await auditEvent({
+      eventType: "api.access.denied",
+      outcome: "denied",
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      organizationId: actingOrganizationId(grant.caller.access),
+      email,
+      reason: CROSS_ORG_REACH_REQUIRED_REASON,
+      request,
+      requestId: grant.requestId,
+      metadata: {
+        action: "user_create",
+        role: "admin",
+        callerKind: grant.caller.kind,
+        credentialId: grant.caller.credentialId,
+      },
+    });
     return problemResponse("forbidden", 403, request, { requestId: grant.requestId });
   }
 

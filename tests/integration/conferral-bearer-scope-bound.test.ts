@@ -26,6 +26,9 @@ import type * as GroupRouteModule from "@/app/api/administrator/groups/[id]/rout
 const requireAdminMock = vi.fn();
 const auditMock = vi.fn();
 const auditOrgMock = vi.fn();
+// F-58: the conferral refusal's own row (`refuseUnconferrable` writes it
+// through `auditEvent`).
+const auditEventMock = vi.fn();
 const deleteMock = vi.fn();
 const rowExecuteTakeFirst = vi.fn();
 const rowsExecute = vi.fn();
@@ -49,6 +52,9 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
 vi.mock("@/lib/admin/audit-helpers.server", () => ({
   auditRoleAction: (...a: unknown[]) => auditMock(...a),
   auditOrgAction: (...a: unknown[]) => auditOrgMock(...a),
+}));
+vi.mock("@/lib/audit.server", () => ({
+  auditEvent: (...a: unknown[]) => auditEventMock(...a),
 }));
 vi.mock("@/db/database", () => ({
   pgPool: {},
@@ -86,6 +92,35 @@ function req(body: unknown): NextRequest {
 }
 const ctx = { params: Promise.resolve({ id: ROLE_ID }) };
 
+/**
+ * F-58: the refusal is audited with the keys the credential could not confer,
+ * as the catalog knows them: the refusal reads them back from
+ * `app_permissions` (`rowsExecute`) so the row never holds the body's strings.
+ */
+function expectConferralDenied(action: string, unheldPermissions: string[]): void {
+  expect(auditEventMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      eventType: "admin.permission.conferral_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: "ba-actor",
+      organizationId: "org-a",
+      reason: "unheld_permissions",
+      requestId: "req-test",
+      metadata: {
+        action,
+        roleId: ROLE_ID,
+        key: "custom.role",
+        unknownPermissionKeyCount: 0,
+        unheldPermissions,
+      },
+    }),
+  );
+}
+/** The catalog lookup the refusal makes finds these keys. */
+function catalogKnows(...keys: string[]): void {
+  rowsExecute.mockResolvedValue(keys.map((key) => ({ key })));
+}
+
 function grant(permissions: string[], grantedScopes: string[] | null) {
   return {
     betterAuthUserId: "ba-actor",
@@ -112,6 +147,7 @@ beforeEach(async () => {
   requireAdminMock.mockReset();
   auditMock.mockReset();
   auditOrgMock.mockReset();
+  auditEventMock.mockReset();
   deleteMock.mockReset();
   rowExecuteTakeFirst.mockReset();
   rowsExecute.mockReset();
@@ -133,9 +169,11 @@ describe("POST /api/administrator/roles/[id]/permissions — bearer scope bound 
     requireAdminMock.mockResolvedValue(
       grant(["admin.roles.update", "admin.users.delete", "superuser"], ["admin.roles.update"]),
     );
+    catalogKnows("admin.users.delete");
     const res = await POST(req({ ids: ["admin.users.delete"] }), ctx);
     expect(res.status).toBe(403);
     expect(auditMock).not.toHaveBeenCalled();
+    expectConferralDenied("role_permissions_add", ["admin.users.delete"]);
   });
 
   it("ALLOWS a bearer key to confer a permission within its (wildcard) scopes", async () => {
@@ -154,9 +192,11 @@ describe("POST /api/administrator/roles/[id]/permissions — bearer scope bound 
 
   it("still REJECTS (403) a cookie org-admin conferring a permission they lack (unchanged behavior)", async () => {
     requireAdminMock.mockResolvedValue(grant(["admin.roles.update"], null));
+    catalogKnows("admin.users.delete");
     const res = await POST(req({ ids: ["admin.users.delete"] }), ctx);
     expect(res.status).toBe(403);
     expect(auditMock).not.toHaveBeenCalled();
+    expectConferralDenied("role_permissions_add", ["admin.users.delete"]);
   });
 });
 
@@ -165,17 +205,21 @@ describe("DELETE /api/administrator/roles/[id]/permissions — bearer scope boun
     requireAdminMock.mockResolvedValue(
       grant(["admin.roles.update", "admin.users.delete", "superuser"], ["admin.roles.update"]),
     );
+    catalogKnows("admin.users.delete");
     const res = await DELETE(req({ ids: ["admin.users.delete"] }), ctx);
     expect(res.status).toBe(403);
     expect(auditMock).not.toHaveBeenCalled();
+    expectConferralDenied("role_permissions_remove", ["admin.users.delete"]);
   });
 
   it("REJECTS (403) a superuser-owned key detaching the `superuser` marker itself", async () => {
     requireAdminMock.mockResolvedValue(
       grant(["admin.roles.update", "superuser"], ["admin.roles.update"]),
     );
+    catalogKnows("superuser");
     const res = await DELETE(req({ ids: ["superuser"] }), ctx);
     expect(res.status).toBe(403);
+    expectConferralDenied("role_permissions_remove", ["superuser"]);
   });
 
   it("ALLOWS a bearer key to detach a permission within its (wildcard) scopes", async () => {

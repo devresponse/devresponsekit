@@ -150,6 +150,25 @@ function req(path: string, init?: { method?: string; body?: unknown }): NextRequ
 }
 const ctx = { params: Promise.resolve({ id: ROLE }) };
 
+/**
+ * F-58: the refusal's row, filed under the role's org, naming the operation
+ * and the keys the actor could not confer. It is the only row.
+ */
+function expectConferralDenied(metadata: Record<string, unknown>): void {
+  expect(auditMock).toHaveBeenCalledTimes(1);
+  expect(auditMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      eventType: "admin.permission.conferral_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: "ba-actor",
+      appUserId: null,
+      organizationId: ORG_A,
+      reason: "unheld_permissions",
+      metadata,
+    }),
+  );
+}
+
 let permsGET: typeof PermsRoute.GET;
 let permsPOST: typeof PermsRoute.POST;
 let permsDELETE: typeof PermsRoute.DELETE;
@@ -212,12 +231,20 @@ describe("roles/[id]/permissions — org scoping + superuser guard", () => {
   it("POST 403 attaching a permission the actor does NOT hold (AUTHZ-3)", async () => {
     // Org admin holds only admin.roles.update; cannot grant admin.users.delete
     // (which they lack) and then assign the role to themselves.
+    state.catalogPerms = [{ id: "p-del", key: "admin.users.delete" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
     const res = await permsPOST(
       req("permissions", { method: "POST", body: { ids: ["admin.users.delete"] } }),
       ctx,
     );
     expect(res.status).toBe(403);
+    expectConferralDenied({
+      action: "role_permissions_add",
+      roleId: ROLE,
+      key: "editor",
+      unknownPermissionKeyCount: 0,
+      unheldPermissions: ["admin.users.delete"],
+    });
   });
 
   it("POST 200 — a SUPERADMIN may attach any permission", async () => {
@@ -240,12 +267,20 @@ describe("roles/[id]/permissions — org scoping + superuser guard", () => {
   });
 
   it("POST 403 when a non-superadmin attaches `superuser`", async () => {
+    state.catalogPerms = [{ id: "p-super", key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
     const res = await permsPOST(
       req("permissions", { method: "POST", body: { ids: ["superuser"] } }),
       ctx,
     );
     expect(res.status).toBe(403);
+    expectConferralDenied({
+      action: "role_permissions_add",
+      roleId: ROLE,
+      key: "editor",
+      unknownPermissionKeyCount: 0,
+      unheldPermissions: ["superuser"],
+    });
   });
 
   it("POST 200 when a SUPERADMIN attaches `superuser`", async () => {
@@ -286,6 +321,40 @@ describe("roles/[id]/permissions — org scoping + superuser guard", () => {
 });
 
 /**
+ * F-58 / F-15: the subset test measures the raw requested keys, so unknown
+ * strings are refused, but the refusal row records only the refused keys the
+ * catalog knows and a count of the rest. `ids` take 500 strings of 120
+ * characters and the table is append-only: recorded verbatim, one refused
+ * request parked about 61 KB of the caller's text in it.
+ */
+describe("roles/[id]/permissions — a refusal never records the caller's strings", () => {
+  const junk = Array.from({ length: 499 }, (_, i) => `${i}`.padStart(120, "x"));
+
+  it.each(["POST", "DELETE"] as const)(
+    "%s with 499 unknown 120-character keys and one real one",
+    async (method) => {
+      state.catalogPerms = [{ id: "p-del", key: "admin.users.delete" }];
+      accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+      const handler = method === "POST" ? permsPOST : permsDELETE;
+      const res = await handler(
+        req("permissions", { method, body: { ids: [...junk, "admin.users.delete"] } }),
+        ctx,
+      );
+      expect(res.status).toBe(403);
+      expectConferralDenied({
+        action: method === "POST" ? "role_permissions_add" : "role_permissions_remove",
+        roleId: ROLE,
+        key: "editor",
+        unknownPermissionKeyCount: 499,
+        unheldPermissions: ["admin.users.delete"],
+      });
+      const row = auditMock.mock.calls[0]![0] as { metadata: object };
+      expect(JSON.stringify(row.metadata).length).toBeLessThan(500);
+    },
+  );
+});
+
+/**
  * REVOKE-1 / REVOKE-2 on `DELETE roles/[id]/permissions` — the mirror image of
  * the POST guards above. Detaching a permission is a mutation of authority, so
  * it takes the same AUTHZ-3 subset test; and stripping `superuser` off the
@@ -296,13 +365,43 @@ describe("DELETE roles/[id]/permissions — revocation guards", () => {
     permsDELETE(req("permissions", { method: "DELETE", body: { ids } }), ctx);
 
   it("403 when a non-superadmin detaches a permission they do NOT hold (REVOKE-1)", async () => {
+    state.catalogPerms = [{ id: "p-del", key: "admin.users.delete" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
     expect((await del(["admin.users.delete"])).status).toBe(403);
+    expectConferralDenied({
+      action: "role_permissions_remove",
+      roleId: ROLE,
+      key: "editor",
+      unknownPermissionKeyCount: 0,
+      unheldPermissions: ["admin.users.delete"],
+    });
   });
 
   it("403 when a non-superadmin detaches `superuser`", async () => {
+    state.catalogPerms = [{ id: "p-super", key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
     expect((await del(["superuser"])).status).toBe(403);
+    expectConferralDenied({
+      action: "role_permissions_remove",
+      roleId: ROLE,
+      key: "editor",
+      unknownPermissionKeyCount: 0,
+      unheldPermissions: ["superuser"],
+    });
+  });
+
+  it("403 for a key the catalog does not know, recorded as a count, not as the string", async () => {
+    // A key retired from the catalog is in nobody's held set (review #444).
+    state.catalogPerms = [];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+    expect((await del(["crm.retired.key"])).status).toBe(403);
+    expectConferralDenied({
+      action: "role_permissions_remove",
+      roleId: ROLE,
+      key: "editor",
+      unknownPermissionKeyCount: 1,
+      unheldPermissions: [],
+    });
   });
 
   it("200 — a SUPERADMIN may detach `superuser` while another grant survives", async () => {
@@ -445,6 +544,12 @@ describe("roles/[id]/duplicate — org scoping", () => {
     // the clone would hand them an editable role exceeding their authority.
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.create"]));
     expect((await duplicatePOST(req("duplicate", { method: "POST" }), ctx)).status).toBe(403);
+    expectConferralDenied({
+      action: "role_duplicate",
+      sourceRoleId: ROLE,
+      sourceKey: "editor",
+      unheldPermissions: ["admin.users.read"],
+    });
   });
 
   it("POST 404 for a foreign-org role", async () => {

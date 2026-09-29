@@ -15,6 +15,7 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
@@ -60,7 +61,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   const scope = resolveOrgScope(guard.access);
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseSharedTarget(guard, target, request, "unban");
   }
 
   // F-57: lifting a soft-deleted account's ban would let Better Auth issue it

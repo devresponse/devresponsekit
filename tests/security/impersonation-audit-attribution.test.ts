@@ -34,6 +34,7 @@ const TARGET_ID = "11111111-1111-4111-8111-111111111101";
 const KEY_ID = "22222222-2222-4222-8222-222222222202";
 const ORG_ID = "33333333-3333-4333-8333-333333333303";
 const INVITATION_ID = "44444444-4444-4444-8444-444444444404";
+const GROUP_ID = "55555555-5555-4555-8555-555555555505";
 
 const IMPERSONATED = { user: { id: BORROWED }, session: { id: "s-imp", impersonatedBy: HUMAN } };
 const OWN_SESSION = { user: { id: "ba-admin" }, session: { id: "s-own" } };
@@ -69,6 +70,8 @@ const writes = vi.hoisted(() => ({
   inserts: [] as { table: string; values: Record<string, unknown> }[],
   sets: [] as { table: string; values: Record<string, unknown> }[],
 }));
+/** F-58: whether the AUTHZ-2 rule finds the target shared with another org. Default: no. */
+const sharedTarget = vi.hoisted(() => ({ value: false }));
 /**
  * Canned read results, keyed `${verb}:${table}` (`select:app_users`,
  * `update:app_organization_invitations`). Unset: no row, no rows.
@@ -87,7 +90,7 @@ vi.mock("@/lib/admin/access-scope.server", async () => {
   const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
   return {
     ...actual,
-    requiresSuperadminForSharedTarget: async () => false,
+    requiresSuperadminForSharedTarget: async () => sharedTarget.value,
     membershipCascadeStripsLastGlobalSuperuser: async () => false,
     banStripsLastGlobalSuperuser: async () => false,
   };
@@ -240,6 +243,7 @@ beforeEach(() => {
   writes.sets.length = 0;
   reads.first = {};
   reads.rows = {};
+  sharedTarget.value = false;
   for (const m of [
     sessionGetter,
     accessGetter,
@@ -526,6 +530,75 @@ describe("invitation acceptance — POST /api/invitations/accept (reads the sess
       const keys = await bucketKeys();
       expect(keys).toContain(`invitations.accept:${human}`);
       if (borrowed) expect(keys).not.toContain(`invitations.accept:${borrowed}`);
+    },
+  );
+});
+
+/**
+ * F-58: the refusals the privilege guards now audit are written through the
+ * same `auditEvent`, with the route's request, so an impersonated session's
+ * refusal names the human too, with the borrowed identity in its metadata.
+ */
+describe("admin console — F-58 refusals are attributed like every other row", () => {
+  it.each(SESSIONS)(
+    "$label: a shared-target refusal (AUTHZ-2) names the human",
+    async ({ session, human, borrowed }) => {
+      sessionGetter.mockResolvedValue(session);
+      accessGetter.mockResolvedValue(access(["admin.users.delete"]));
+      sharedTarget.value = true;
+
+      const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
+      const res = await DELETE(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, "DELETE", {
+          reason: "spam",
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+      expect(res.status).toBe(403);
+      expect(authBan).not.toHaveBeenCalled();
+
+      const row = auditRow("admin.user.action_denied");
+      expect(row).toMatchObject({
+        outcome: "denied",
+        reason: "shared_target_requires_superadmin",
+        app_user_id: TARGET_ID,
+        organization_id: "o-1",
+      });
+      expectAttributedTo(row, human, borrowed);
+      expect(metadataOf(row)).toMatchObject({ action: "soft_delete" });
+    },
+  );
+
+  it.each(SESSIONS)(
+    "$label: a conferral refusal (AUTHZ-3) names the human",
+    async ({ session, human, borrowed }) => {
+      sessionGetter.mockResolvedValue(session);
+      accessGetter.mockResolvedValue(access(["admin.groups.assign"]));
+      reads.first["select:app_groups"] = { id: GROUP_ID, organization_id: "o-1", key: "admins" };
+      // What the group confers to its members (`permissionKeysForGroup`).
+      reads.rows["select:app_group_roles as gr"] = [{ key: "superuser" }];
+
+      const { POST } = await import("@/app/api/administrator/groups/[id]/members/route");
+      const res = await POST(
+        makeRequest(`http://test.local/api/administrator/groups/${GROUP_ID}/members`, "POST", {
+          appUserIds: [TARGET_ID],
+        }),
+        { params: Promise.resolve({ id: GROUP_ID }) },
+      );
+      expect(res.status).toBe(403);
+      expect(insertsInto("app_group_memberships")).toEqual([]);
+
+      const row = auditRow("admin.permission.conferral_denied");
+      expect(row).toMatchObject({
+        outcome: "denied",
+        reason: "unheld_permissions",
+        organization_id: "o-1",
+      });
+      expectAttributedTo(row, human, borrowed);
+      expect(metadataOf(row)).toMatchObject({
+        action: "group_members_add",
+        unheldPermissions: ["superuser"],
+      });
     },
   );
 });

@@ -6,6 +6,7 @@ import { getOrgAuthSettingsRow, upsertOrgAuthSettings } from "@/lib/admin/auth-s
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { FAIL_CLOSED_AUTH_POLICY } from "@/lib/auth-policy.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { authPolicySettingsSchema } from "@/lib/validation/auth-policy";
@@ -36,7 +37,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseWithoutCrossOrgReach(guard, request, "platform_auth_policy_read");
   }
 
   const settings = await getOrgAuthSettingsRow(null);
@@ -62,7 +63,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseWithoutCrossOrgReach(guard, request, "platform_auth_policy_update");
   }
 
   const limited = enforceRateLimit(

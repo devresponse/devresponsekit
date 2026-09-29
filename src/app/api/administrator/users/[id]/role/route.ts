@@ -7,7 +7,8 @@ import { setBetterAuthUserRole } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
+import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -50,8 +51,15 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // role is account-global — it has no tenant at all — so an ORG-BOUND bearer
   // credential must not be able to mint one, or a key minted in org A would
   // hand its holder the admin console over every tenant.
+  //
+  // F-58: the refusal is audited. The target is not resolved yet (and an org
+  // admin may not resolve one outside its org), so the row records only the
+  // requested id, and only when it is well formed.
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
+    const { id: requestedId } = await ctx.params;
+    return refuseWithoutCrossOrgReach(guard, request, "user_role_set", {
+      requestedTargetId: isUuid(requestedId) ? requestedId : null,
+    });
   }
 
   const limited = enforceRateLimit(

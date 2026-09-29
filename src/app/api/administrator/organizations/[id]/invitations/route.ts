@@ -21,6 +21,7 @@ import {
 import { loadScopedOrg, ORGANIZATION_NOT_ACTIVE_ERROR } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { createInvitation, sendInvitationEmail } from "@/lib/invitations.server";
 import { createInvitationSchema } from "@/lib/validation/invitations";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
@@ -122,7 +123,8 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * Attaching a role is a deferred role ASSIGNMENT, so it is bound by the same
  * privilege-escalation guard (AUTHZ-3) as `users/[id]/app-roles`: a
  * non-SUPERADMIN may only attach a role whose conferred permissions are a
- * subset of what they can confer themselves — 403 `forbidden` otherwise.
+ * subset of what they can confer themselves — 403 `forbidden` and an
+ * `admin.permission.conferral_denied` row otherwise (F-58).
  *
  * Caller MUST hold `admin.orgs.update`.
  */
@@ -185,12 +187,21 @@ export const POST = withAdminRoute(async function POST(
     // global-superadmin account. Identical wiring to the sibling conferral
     // routes: a bearer credential is bounded by its scopes and never takes
     // the SUPERADMIN fast-path (P1-1). `consumeInvitation` re-checks against
-    // the inviter's authority at accept time (defense in depth).
+    // the inviter's authority at accept time (defense in depth). A refusal is
+    // audited under this org, naming the address and the role (F-58).
     if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
       const conferred = await permissionKeysForRoles([role.id]);
       const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
       const unheld = unheldPermissionKeys(conferrable, conferred);
-      if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+      if (unheld.length > 0) {
+        return refuseUnconferrable(guard, request, {
+          action: "invitation_create",
+          organizationId: org.id,
+          unheld,
+          email,
+          metadata: { roleId: role.id },
+        });
+      }
     }
   }
 

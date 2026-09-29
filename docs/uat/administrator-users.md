@@ -323,7 +323,7 @@ Negative & edge cases
 2. 400 (malformed body) → a form-level banner ("invalid body", `_new-user-form.tsx:85`); 403 → a "forbidden" banner (defensive — the page already 404s non-creators).
 3. Rate limit → repeated creates hit the mutation budget; the server returns 429 (`api/.../users/route.ts:173`) and the form shows the generic error toast.
 4. Concurrency → two creates racing on the same email: the loser gets the same 409 `email_taken`. There is no unique index on the `app_users` email; Better Auth's unique email refuses the loser inside the create call, and the route maps that refusal to 409 (F-30, `src/lib/admin/auth-email-taken.ts`). The loser also leaves one `admin.user.create_failed` row (reason `auth_user_exists`) in the Audit log, with an empty Target and the address in the Email field of the row's detail pane (**View**). An address Better Auth holds with no user row at all (for example a self-sign-up whose provisioning failed) gets the same 409 and the same row, never a 500.
-5. The platform role is Superadmin-only (F-13) → as `orgadmin@orga.local`, the **Better Auth role** select offers only `user`. A hand-made `POST /api/administrator/users` (or `POST /api/v1/users`) with `"role":"admin"` answers **403** `forbidden` and creates nobody, the same rule as `POST /users/[id]/role`. As `superuser@orga.local` the select also offers `admin`, and the create succeeds.
+5. The platform role is Superadmin-only (F-13) → as `orgadmin@orga.local`, the **Better Auth role** select offers only `user`. A hand-made `POST /api/administrator/users` (or `POST /api/v1/users`) with `"role":"admin"` answers **403** `forbidden` and creates nobody, the same rule as `POST /users/[id]/role`; the audit explorer shows `administrator.access.denied` (`api.access.denied` for the v1 call) with reason `cross_org_reach_required` (F-58). As `superuser@orga.local` the select also offers `admin`, and the create succeeds.
 6. Machine callers can do what the console does (F-13) → with `API_KEYS_ENABLED` on, sign in as `superuser@orga.local`, create a key on **Account → API keys** with the `admin.users.create`, `admin.users.read`, `admin.users.update`, `admin.users.manage`, `admin.users.ban` and `admin.users.sessions` scopes ticked (`admin.users.update` because the create enrols the user in the key's org, and `admin.users.manage` because an Active user is an approval: case 7), and call with `Authorization: Bearer drk_…`: `POST /api/v1/users` with `"initialAppStatus":"active"` answers **201** and the new user can sign in with the password you sent. The key is bound to one org, and the create enrols the user there with an **active** membership (the default `pending_approval` gives a pending one, which `POST /api/v1/users/{id}/status` with `{"action":"approve"}` activates along with the user). So the key reaches the user it created with no Superadmin step between: `GET /api/v1/users/{id}` answers **200** and `GET /api/administrator/users/{id}/memberships` lists that one org; `POST /api/administrator/users/{id}/ban` (`{"reason":"…"}`) answers **200** and signs that user out; `GET /api/administrator/users/{id}/sessions` lists their sessions. Before F-13 the create, ban and session calls answered **502** after passing the permission checks (the MCP `createUser` tool too), and until the create enrolled the user, every call on `/users/{id}` answered **404** to the key. Banning the key's own owner is refused (502 `auth_ban_failed`), as it is from the console. The platform role is the exception: the same `POST /api/v1/users` with `"role":"admin"` answers **403** `forbidden` although the key's owner is a Superadmin, because every key is bound to one org (MACHINE-2); only a Superadmin's cookie session mints that role (case 5).
 7. A confined create grants no more than the explicit paths would (F-480) → with a key like case 6's but scoped to `admin.users.create` and `admin.users.read` only, `POST /api/v1/users` answers **403** `forbidden` whatever `initialAppStatus` says, with a `detail` naming `admin.users.update or admin.orgs.update`, and nobody is created (as the Superadmin, the **Users** list has no such address). Add `admin.users.update` to the scopes: the default create answers **201** with a pending membership, while `"initialAppStatus":"active"` answers **403** naming `admin.users.manage`. The **Audit** log shows each refusal as `admin.user.create_denied` (`denied`) with an empty Target, the address in the Email field, and reason `enrolment_not_permitted` or `activation_not_permitted`. The same key (with `admin.users.update`) creating an address on a domain a Superadmin bound to another org (Organizations → *org* → **Providers**, provider `email`) gets **403** with reason `email_domain_claimed`: invite that address instead. Sign in as the pending user in an org whose sign-up policy is `auto_active` (the seeded platform default): it lands on the pending-approval page, and stays pending until `POST /api/v1/users/{id}/status` `approve`. A follow-up `POST /api/administrator/users/{id}/memberships` for the key's own org answers **409** `membership_exists`: the create already enrolled the user there.
 
@@ -413,7 +413,7 @@ i18n: run `en` + `uk`; field labels and the created/updated line localize; the i
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **sees the assignments list** (has `admin.users.read`) but **no** Assign button and **no** per-row Remove (lacks `admin.roles.assign`).
-  - Org Admin / Superadmin → list + Assign + Remove. An org admin may assign only roles in their own org, and (privilege-escalation guard) only roles whose conferred permissions are a subset of their own (`api/.../app-roles/route.ts:148`).
+  - Org Admin / Superadmin → list + Assign + Remove. An org admin may assign only roles in their own org, and (privilege-escalation guard) only roles whose conferred permissions are a subset of their own (`api/.../app-roles/route.ts:165`).
 - Preconditions & test data: a user in ORG A; at least one assignable ORG A role. The `dev-init` Engineering group confers the `admin` role, so ORG A has assignable roles.
 
 User stories
@@ -439,7 +439,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Privilege escalation blocked → an org admin assigning a role that confers a permission they lack gets 403 (`api/.../app-roles/route.ts:148`); the panel shows the assign error.
+1. Privilege escalation blocked → an org admin assigning a role that confers a permission they lack gets 403 (`api/.../app-roles/route.ts:165`); the panel shows the assign error, and the user's **Audit** tab shows `admin.permission.conferral_denied` (`metadata.action: role_assign`, the refused keys in `metadata.unheldPermissions`; F-58).
 2. Cross-tenant role/org → assigning with a foreign org/role id → 404 (not 403), so a foreign org's existence is not confirmed (`api/.../app-roles/route.ts:138`, `:141`).
 3. Remove is idempotent → removing an already-removed assignment still returns success (`api/.../app-roles/route.ts:190`).
 4. Inline error → a failed remove surfaces `role="alert"` text above the grid (`_user-roles-panel.tsx:184`).
@@ -458,7 +458,7 @@ i18n: run `en` + `uk`; column headers, buttons, dialog text, and error messages 
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Groups tab is **not rendered** at all: the `admin` role lacks `admin.groups.read`, which now gates the tab trigger (review #76). The API is still the boundary — a hand-made `GET …/groups` for that user answers 403.
-  - Org Admin / Superadmin → list + Add + Remove. An org admin sees only their org's groups; adding to a group whose conferred permissions exceed the admin's is blocked (`api/.../groups/route.ts:118`).
+  - Org Admin / Superadmin → list + Add + Remove. An org admin sees only their org's groups; adding to a group whose conferred permissions exceed the admin's is blocked (`api/.../groups/route.ts:119`).
 - Preconditions & test data: ORG A has the `Engineering` and `Customer Support` groups (`dev-init.ts:135`). Use a user who is not yet a member so the picker has something to add.
 
 User stories
@@ -484,7 +484,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Privilege escalation blocked → adding a user to a more-authoritative group → 403 (`api/.../groups/route.ts:118`); panel shows the add error.
+1. Privilege escalation blocked → adding a user to a more-authoritative group → 403 (`api/.../groups/route.ts:119`); panel shows the add error.
 2. User must belong to the group's org → the picker offers only the groups of the user's orgs (a user with no membership in scope is offered none); a hand-made `POST …/groups` naming a group in another org → 404 (`api/.../groups/route.ts:124`).
 3. Cross-tenant group id → 404 (not 403) (`api/.../groups/route.ts:108`).
 4. Empty state / loading skeleton / inline error are all handled by the panel (`_user-groups-panel.tsx:146`, `:152`).
@@ -547,7 +547,7 @@ i18n: run `en` + `uk`; column headers, the status badge, and the joined date loc
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Sessions tab is **not rendered** (the `admin` role lacks `admin.users.sessions`, which gates the trigger); a direct call to the sessions API answers 403, so revoke is impossible either way.
-  - Org Admin / Superadmin → list + revoke. A session is not tied to an org, so both revokes ("Revoke all" and the per-row **Revoke**) are account-global: for a user shared across tenants they are Superadmin-only, and an org admin may revoke only the sessions of a user confined to their org (`api/.../sessions/route.ts:113`, `api/.../sessions/[sessionId]/route.ts:75`, F-60; `access-scope.server.ts:358`).
+  - Org Admin / Superadmin → list + revoke. A session is not tied to an org, so both revokes ("Revoke all" and the per-row **Revoke**) are account-global: for a user shared across tenants they are Superadmin-only, and an org admin may revoke only the sessions of a user confined to their org (`api/.../sessions/route.ts:114`, `api/.../sessions/[sessionId]/route.ts:76`, F-60; `access-scope.server.ts:358`).
 - Preconditions & test data: sign the target user in on a second browser/device first so there is a live session to list and revoke.
 
 User stories
@@ -573,7 +573,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Shared-target guard → an org admin clicking "Revoke all", or **Revoke** on one session, on a cross-org user (`multi1@shared.local`) gets 403 (account-global action reserved for Superadmin, `api/.../sessions/route.ts:113`, `api/.../sessions/[sessionId]/route.ts:75`, F-60); the panel shows its error and the sessions stay.
+1. Shared-target guard → an org admin clicking "Revoke all", or **Revoke** on one session, on a cross-org user (`multi1@shared.local`) gets 403 (account-global action reserved for Superadmin, `api/.../sessions/route.ts:114`, `api/.../sessions/[sessionId]/route.ts:76`, F-60); the panel shows its error and the sessions stay. The **Audit** tab shows `admin.user.action_denied` with reason `shared_target_requires_superadmin` (F-58).
 2. Empty state → a user with no active sessions shows the "no sessions" message; "Revoke all" is disabled (`_user-sessions-panel.tsx:118`).
 3. Loading skeleton → shown while the list fetches (`_user-sessions-panel.tsx:130`).
 

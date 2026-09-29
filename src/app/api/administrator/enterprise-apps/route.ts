@@ -20,6 +20,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { canAccessOrg, hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -181,7 +182,9 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     !hasCrossOrgReach(guard.access) &&
     (targetOrg === null || !canAccessOrg(guard.access, targetOrg))
   ) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseWithoutCrossOrgReach(guard, request, "enterprise_app_create", {
+      requestedGlobal: targetOrg === null,
+    });
   }
 
   if (!isHttpsOrigin(input.origin)) {

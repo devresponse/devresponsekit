@@ -146,7 +146,7 @@ The pipeline, in order:
    `unauthenticated`.
 4. **Secure-access decision.** `decideSecureAccess(status, membershipStatus)`
    must return `allow`; a blocked / suspended / inactive caller or membership →
-   **403** `forbidden`. A membership in an organization that is not `active`
+   **403** `forbidden`, with no audit row (§12, the exception to F-58). A membership in an organization that is not `active`
    never resolves in the first place (F-09, §8.2), so an org admin of a
    suspended tenant is refused here too, and so is a credential bound to one.
 5. **Permission + scope check.** The caller must hold the required permission
@@ -163,7 +163,8 @@ The pipeline authorizes the **caller**; `[id]` routes then authorize the
 **target** in a fixed order right after `resolveTargetUser` (§6, §8.1):
 `canAccessUser` (out of scope → 404), then `refuseOutrankingTarget` (the target
 outranks a non-superadmin actor → 403 + `admin.user.action_denied`), then the
-AUTHZ-2 shared-target rule where the action is account-global. All three run
+AUTHZ-2 shared-target rule where the action is account-global (→ 403 + the same
+event, reason `shared_target_requires_superadmin`, F-58). All three run
 before the body is parsed or any Better Auth / DB side effect is issued (the
 password route included: the rank guard applies before the `mode` is read, so
 it covers `set` and `reset_email` alike). The machine API mirrors the same
@@ -330,7 +331,8 @@ Key helpers:
   (ban/unban, soft-delete/restore, setting a password, revoking sessions — all
   of them or one, F-60 — and the profile edit, F-61) on a user shared across
   orgs are reserved for a superadmin so the action cannot reach tenants the
-  actor does not administer.
+  actor does not administer. A refusal returns `refuseSharedTarget`
+  (`src/lib/admin/refusals.server.ts`), which audits it (F-58, §12).
 - `userIsGlobalSuperuser(appUserId)` — the global determination used by
   `getUserAccessContext` so an active-org selector can never downgrade a
   superadmin.
@@ -603,13 +605,13 @@ Manages the application user lifecycle and per-user administration.
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
-| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). It is a membership add, and an `active` one an approval, so a confined caller also needs `admin.users.update` or `admin.orgs.update`, plus `admin.users.manage` for `initialAppStatus: "active"`, each as permission and (bearer) scope; an address whose email domain is bound to another org is refused too. Each refusal is 403 `forbidden` before anything is written, audited `admin.user.create_denied` (reason `enrolment_not_permitted`, `activation_not_permitted` or `email_domain_claimed`; F-480, below). The enrolled membership carries no sign-up source, so the org's sign-up policy never activates it at sign-in. A superadmin's cookie session creates the user in no org, as before. A context with no org is refused with 403 `forbidden` before anything is written (defence in depth: the guard admits only an active member, whose context always names an org). The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
-| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore (`POST /users/[id]/restore`). The edit (display name and preferred locale) is account-global, so it is rank-gated and a user shared with other orgs is superadmin-only (403 `forbidden`, F-61). The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2). The soft-delete revokes the user's API keys and OAuth clients, and restore puts back a ban the soft-delete replaced; restoring a user who is not soft-deleted is 409 `not_deactivated` (see [Soft-delete and restore](#soft-delete-and-restore-f-57-i-19)) |
+| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). It is a membership add, and an `active` one an approval, so a confined caller also needs `admin.users.update` or `admin.orgs.update`, plus `admin.users.manage` for `initialAppStatus: "active"`, each as permission and (bearer) scope; an address whose email domain is bound to another org is refused too. Each refusal is 403 `forbidden` before anything is written, audited `admin.user.create_denied` (reason `enrolment_not_permitted`, `activation_not_permitted` or `email_domain_claimed`; F-480, below). The enrolled membership carries no sign-up source, so the org's sign-up policy never activates it at sign-in. A superadmin's cookie session creates the user in no org, as before. A context with no org is refused with 403 `forbidden` before anything is written (defence in depth: the guard admits only an active member, whose context always names an org). The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` and an `administrator.access.denied` row otherwise, F-13, F-58). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
+| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore (`POST /users/[id]/restore`). The edit (display name and preferred locale) is account-global, so it is rank-gated and a user shared with other orgs is superadmin-only (403 `forbidden` and an `admin.user.action_denied` row, F-61, F-58). The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2). The soft-delete revokes the user's API keys and OAuth clients, and restore puts back a ban the soft-delete replaced; restoring a user who is not soft-deleted is 409 `not_deactivated` (see [Soft-delete and restore](#soft-delete-and-restore-f-57-i-19)) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2). A soft-deleted user is 409 `use_restore` (F-57). A `block` / `suspend` that changes the account-wide status (a superadmin's cookie session, or any caller on a user in no org but the one it acts in) also ends every session the user holds and the ones they opened by impersonating someone, so `reactivate` brings none back; the event's `metadata.sessionsRevoked` is `true`. A caller confined to one org, meaning an org admin or any API key or JWT, a superadmin's included (MACHINE-2), changes only that membership of a user shared with other orgs and ends no session. If ending the sessions fails, the status stays applied and the call returns 502 `auth_revoke_all_failed` with an `admin.user.sessions_revoke_all_failed` row; a retry is safe (F-147) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself). A ban that would leave no superadmin able to sign in is undone and returns 409 `last_superadmin` (REVOKE-2, F-56). A soft-deleted user is 409 `use_restore` (F-57). While the ban lasts, the invitations the user sent admit nobody: accepting or resending one is refused and voids it (F-149). An invitation nobody tried to accept or resend during the ban works again after `/unban`, so revoke the user's pending invitations before lifting a ban imposed for cause (see [Sign-up Policy §6](./auth-signup-policy.md#6-invitations)); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it signs the user out everywhere: their own sessions and the ones they opened by impersonating someone. It also revokes every API key they own and every OAuth client that acts as them, which ends the tokens minted from those too. The reset email changes nothing until the user completes the reset, which does the same (F-08, F-10, §19). A failed step returns 502 and is safe to retry. `admin.user.password_set` / `.password_reset_email_sent`, plus an `api_key.revoked` / `oauth_client.revoked` row per credential with `metadata.reason` `password_set` |
-| `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`). Needs cross-org reach, so only a superadmin's cookie session: every API key and JWT is bound to one org (MACHINE-2, [design §3](./design-api-keys-and-tokens.md#3-caller-resolution)) and gets 403 `forbidden` |
-| `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). A session is not tied to an org, so both revokes (all, or one by id) of a user shared with other orgs are superadmin-only (403 `forbidden`, AUTHZ-2; F-60). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
+| `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`). Needs cross-org reach, so only a superadmin's cookie session: every API key and JWT is bound to one org (MACHINE-2, [design §3](./design-api-keys-and-tokens.md#3-caller-resolution)) and gets 403 `forbidden`, audited as `administrator.access.denied` (reason `cross_org_reach_required`, F-58) |
+| `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). A session is not tied to an org, so both revokes (all, or one by id) of a user shared with other orgs are superadmin-only (403 `forbidden` and an `admin.user.action_denied` row, AUTHZ-2; F-60, F-58). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
 | `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `PATCH/DELETE …/memberships` are rank-gated, and `DELETE …/app-roles` and `DELETE …/memberships` are conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2). `DELETE …/memberships` also deletes the user's roles and group memberships in that org (F-12, §8.3) |
 | `POST /users/bulk` | per-action key | Batch actions; see §13, §19 |
@@ -726,11 +728,13 @@ superadmin, or a more-privileged peer) receives **403** `forbidden` and an
 `admin.user.action_denied` (`denied`, reason `target_outranks_actor`,
 `metadata.action`, `requestId`) audit row; nothing is sent to Better Auth or
 written to the DB. A superadmin actor is exempt. The check runs **before** the
-AUTHZ-2 shared-target rule, which is kept as well. The `reset_email` mode is
-rank-gated too: a reset link on an out-ranking target is the first hop of a
-two-request chain (trigger the reset, read the live link from the email outbox
-with `admin.email.read` (§8.12), set the password), and a superadmin can
-self-serve a reset from the sign-in page, so nothing is lost. The machine API
+AUTHZ-2 shared-target rule, which is kept as well; its refusal writes the same
+event with reason `shared_target_requires_superadmin` (F-58), so one filter
+lists both. The `reset_email` mode is rank-gated too: a reset link on an
+out-ranking target is the first hop of a two-request chain (trigger the reset,
+read the live link from the email outbox with `admin.email.read` (§8.12), set
+the password), and a superadmin can self-serve a reset from the sign-in page,
+so nothing is lost. The machine API
 carries the same guard: `POST /api/v1/users/[id]/status` returns a **403**
 `forbidden` problem and audits `admin.user.action_denied`
 (`metadata.surface: "v1"`) for an out-ranking target, so a bearer credential
@@ -753,7 +757,8 @@ their grant twin:
   (`conferrablePermissions` + `unheldPermissionKeys`) against the **removed**
   set. A non-superadmin may only revoke what they could confer; a bearer
   credential is bounded by its scopes and never takes the superadmin fast-path
-  (P1-1). **403** `forbidden`, exactly as the POST twin. Since F-12 both
+  (P1-1). **403** `forbidden` and an `admin.permission.conferral_denied` row,
+  exactly as the POST twin (F-58). Since F-12 both
   membership DELETEs run it too, against the roles and group memberships they
   delete with the membership, less what the membership itself implies
   (`shell.view`; §8.3).
@@ -1214,7 +1219,7 @@ nullable; `NULL` = a global/platform role, superadmin-only).
 | `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization`, `scope`, `permission`; `q` matches key, name and the owning org's name (§7.3) |
 | `POST /roles` | `admin.roles.create` | Org admin may create only within their own org; `admin.role.created` |
 | `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete |
-| `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden`; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
+| `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden` and an `admin.permission.conferral_denied` row, F-58; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
 | `GET /roles/[id]/members` | `admin.roles.read` | Users carrying the role |
 | `POST /roles/[id]/duplicate` | `admin.roles.create` | Clone a role |
 
@@ -1301,8 +1306,8 @@ permissions directly, so they add zero new authority primitives.
 | `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped); `filter[organization]` may be repeated; `q` matches key, name and the owning org's name (§7.3) |
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
 | `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted`. DELETE carries the AUTHZ-3 subset test against everything the group confers (REVOKE-1, F-11): 403 `forbidden` and an `admin.group.delete_denied` row |
-| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed` (records the applied delta, F-38). A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1). The Roles editor saves POST-then-DELETE, as described in §8.4 |
-| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
+| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed` (records the applied delta, F-38). A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58). The Roles editor saves POST-then-DELETE, as described in §8.4 |
+| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58) |
 
 **Group revocation is bounded by the same guard as the grant (REVOKE-1).** The
 four routes that take a group-conferred role away —
@@ -1311,19 +1316,19 @@ four routes that take a group-conferred role away —
 deletes, which since F-12 remove the member from that org's groups (§8.3), run
 the same
 `conferrablePermissions` + `unheldPermissionKeys` subset test their POST twin
-does, measured against the permissions the removal destroys (403 `forbidden`; a
-bearer credential is bounded by its scopes and never takes the superadmin
-fast-path, P1-1). Without it the guard was one-directional: an admin holding
-only `admin.groups.assign` could not *build* a high-authority group but could
-dismantle one with a single DELETE, and AUTHZ-3 then forbade them from putting
-it back.
+does, measured against the permissions the removal destroys (403 `forbidden`
+and an `admin.permission.conferral_denied` row, F-58; a bearer credential is
+bounded by its scopes and never takes the superadmin fast-path, P1-1). Without
+it the guard was one-directional: an admin holding only `admin.groups.assign`
+could not *build* a high-authority group but could dismantle one with a single
+DELETE, and AUTHZ-3 then forbade them from putting it back.
 
 Deleting the group is the widest of the four (F-11): the cascade removes every
 bundled role from every member at once, so it is measured against everything
-the group confers, and a refusal is also audited as `admin.group.delete_denied`
-(`denied`, reason `unheld_permissions`, the refused keys in
-`metadata.unheldPermissions`). A group that bundles no roles confers nothing and
-deletes freely. The last-superadmin invariant (REVOKE-2) does not apply here: a
+the group confers, and its refusal keeps the event it was given first,
+`admin.group.delete_denied` (`denied`, reason `unheld_permissions`, the refused
+keys in `metadata.unheldPermissions`). A group that bundles no roles confers
+nothing and deletes freely. The last-superadmin invariant (REVOKE-2) does not apply here: a
 group delete removes only `app_group_roles` and `app_group_memberships` rows,
 and REVOKE-2 counts direct assignments alone (see below).
 `tests/unit/group-revocation-guard-invariant.test.ts` fails CI when a route
@@ -1645,6 +1650,50 @@ itself writes
 privilege-ordering guard (§8.1) writes `admin.user.action_denied` with
 `reason: "target_outranks_actor"` and the attempted `action` in metadata.
 
+**Authorization refusals are audited (F-58).** Every 403 an administrator route
+handler builds for an authenticated caller writes a `denied` row first. The
+privilege guards inside the handlers used to return a bare 403, so an org admin
+trying to add themselves to a group conferring `superuser`, or to ban a user
+shared with another tenant, left no row for the explorer's `denied` filter to
+find. Each now returns one of three helpers in
+`src/lib/admin/refusals.server.ts`, which writes the row (with the route's
+request, so an impersonated session's refusal names the human) and returns the
+same 403 `forbidden`:
+
+| Refusal | Helper | `event_type` / `reason` | Organization |
+| --- | --- | --- | --- |
+| AUTHZ-3 / REVOKE-1: a grant or revocation carrying a permission the actor cannot confer (a user's role, a group's roles or members from either side, a role's permissions, a role duplicate, an invitation's role) | `refuseUnconferrable` | `admin.permission.conferral_denied` / `unheld_permissions`; `metadata.action` and `metadata.unheldPermissions` (catalog keys only: `roles/[id]/permissions` counts the other strings its body named in `metadata.unknownPermissionKeyCount`) | the resource's |
+| AUTHZ-2: an account-global action on a user shared with another org (password set, ban, unban, soft-delete, restore, profile edit, session revokes; per row in `POST /users/bulk`) | `refuseSharedTarget` | `admin.user.action_denied` / `shared_target_requires_superadmin`; `metadata.action` | the actor's |
+| A superadmin-only action refused to a caller without cross-org reach (the permission catalog, creating, updating or deleting a tenant, the global email templates and sign-up defaults, a global role or app, moving an app between tenants, the Better Auth `admin` role on `POST /users` and `POST /users/[id]/role`) | `refuseWithoutCrossOrgReach` | `administrator.access.denied` / `cross_org_reach_required`; `metadata.action` | the actor's |
+
+A refusal row records what the caller sent within bounds, because the caller
+chooses it and the table is append-only (F-15): a list of ids the body named
+(the group routes' `requestedAppUserIds` and `requestedRoleIds`) keeps its
+first 20 distinct entries beside the distinct count (`requestedAppUserCount`,
+`requestedRoleCount`), and a permission key the catalog does not know is
+counted, never stored. The `role: "admin"` refusal on `POST /users` also records
+the requested address in `email`, like that route's `admin.user.create_denied`
+rows. `POST /api/v1/users` with `role: "admin"` writes the v1 guard's event,
+`api.access.denied`, with the same reason and address. The group delete (F-11) and the
+membership deletes (F-12) keep the events they were given first, and the
+impersonation refusals keep `admin.user.impersonation_failed`, now with outcome
+`denied` for every refusal (the escalation refusals used to be `failure`, which
+the `denied` filter missed and the error log reported as an incident).
+`tests/security/authenticated-refusals-audited.test.ts` walks every route handler
+under `src/app/api/administrator` and fails on a 403 the handler builds without
+a `denied` row (or, for a pre-authentication refusal, a `logPreAuthRefusal`
+line) written before it in the same block. A defence-in-depth branch no
+admitted caller can reach (a context with no org, an actor with no `app_users`
+row) is named there with its reason.
+
+The pipeline's status gate (§4, step 4) is the exception: a signed-in caller
+whose app status or membership in the org it acts in is not `active` gets
+`requireAdminPermission`'s 403 `forbidden` with no row, as from the `/api/v1`
+guard. The scan cannot see that 403, since the handler only returns
+`guard.response`. The RSC gate audits the same decision
+(`administrator.access.denied`, `surface: "rsc"`), so a probe of the console's
+pages leaves a row and a probe of its API does not.
+
 ### 12.1 Audit posture (append-only + retention)
 
 The audit log is a tamper-evident compliance record. A row-level
@@ -1719,7 +1768,9 @@ restore`, and `ids` is either an explicit UUID array **or** the literal `"*"`
   (`bulk: true`, `requestId` = the batch call's `x-request-id`), so neither the
   batch endpoint nor the machine API (`POST /api/v1/users/[id]/status`, which
   carries the same guard) can be used to bypass the `[id]` route guard. The
-  AUTHZ-2 `forbidden_shared_target` refusal follows it.
+  AUTHZ-2 `forbidden_shared_target` refusal follows it and audits the same
+  event per row (reason `shared_target_requires_superadmin`, `bulk: true`,
+  F-58); the batch's `admin.users.bulk_action` summary names neither.
 - **Soft-deleted rows (F-57).** Every action except `soft_delete` and `restore`
   refuses a soft-deleted user per row with `use_restore`, and `restore` refuses
   any other user with `not_deactivated`, as the single-row routes do with 409
@@ -1755,7 +1806,7 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   target's session. A **non-superadmin** actor may not assume a session carrying
   any permission they do not already hold (an org admin cannot impersonate a
   superadmin or a more-privileged peer); a mismatch audits
-  `admin.user.impersonation_failed` and returns 403. A superadmin already holds
+  `admin.user.impersonation_failed` (outcome `denied`) and returns 403. A superadmin already holds
   every power, so the check is skipped for them. The same subset test guards
   the other account-level actions via `targetOutranksActor` (§6, §8.1).
 
@@ -1779,7 +1830,7 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   organization **both** parties are active members of, that the target hold
   nothing there the actor does not also hold **there**
   (`permissionKeysByActiveOrg`). A mismatch audits
-  `admin.user.impersonation_failed` with reason
+  `admin.user.impersonation_failed` (outcome `denied`) with reason
   `privilege_escalation_in_shared_org` and returns 403. That row is filed under
   the actor's org (§12, Organization stamp) and records only
   `metadata.outrankedOrgCount`, not the org ids: an outranked org is never the

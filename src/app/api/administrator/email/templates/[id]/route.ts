@@ -9,6 +9,7 @@ import { updateEmailTemplateSchema } from "@/lib/validation/email-templates";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -77,7 +78,7 @@ export const PUT = withAdminRoute(async function PUT(request: NextRequest, ctx: 
   // credential never takes the SUPERADMIN bypass on a platform-wide action,
   // even when its owner is a global superuser.
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseWithoutCrossOrgReach(guard, request, "email_template_update");
   }
 
   const limited = enforceRateLimit(

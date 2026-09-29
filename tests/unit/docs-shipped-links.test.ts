@@ -37,7 +37,8 @@ function walk(dir: string): string[] {
 
 const attrValues = (html: string, name: string) =>
   [...html.matchAll(new RegExp(`\\s${name}="([^"]*)"`, "g"))].map((m) =>
-    m[1]!.replace(/&#x26;/g, "&").replace(/&amp;/g, "&"),
+    // One pass: unescaping `&#x26;` and then `&amp;` would turn `&#x26;amp;` into `&`.
+    m[1]!.replace(/&(?:#x26|amp);/g, "&"),
   );
 
 const rendered = new Map<string, Rendered>();

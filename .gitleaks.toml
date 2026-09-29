@@ -168,6 +168,18 @@ targetRules = ["generic-api-key"]
 regexTarget = "match"
 regexes = ['''\d{4}-[a-z0-9-]*secret[a-z0-9-]*\.sql''']
 
+# drk-deploy's .env-parser test (F-144) needs a secret-looking value to show
+# that an inline comment is stripped from it; it uses the hex digits 0-9a-f
+# twice. The bundled generic-api-key rule flags it on the adjacent `SECRET`
+# keyword. Fenced to that rule, that one test file and that exact literal, so
+# a real credential in the same file still fails the gate.
+[[allowlists]]
+description = "drk-deploy .env-parser fixture: the hex digits 0-9a-f twice, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)vercel-cli/test/unit\.test\.ts$''']
+regexes = ['''^0123456789abcdef0123456789abcdef$''']
+
 [[allowlists]]
 description = "Documented CI-only / test-only dummy literals (self-describing, not credential shapes)"
 regexes = [

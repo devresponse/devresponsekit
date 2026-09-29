@@ -88,6 +88,16 @@ const apiNoStore = {
  * can never drop it. `scripts/check-docs-trace.mjs` (CI, after `next build`)
  * proves both halves on the real build output.
  *
+ * Literal roots are not enough on their own: Turbopack still approximates the
+ * docs code's dynamic `fs` calls (readdir/readFile/realpath on computed
+ * paths), and on this Next release that pulls the whole `src/lib/docs` source
+ * tree into all six functions. `turbopackIgnore` does not help there: the
+ * magic comment applies only to `import()`, `require()`, `require.resolve()`
+ * and `new Worker()` (node_modules/next/dist/docs, "Magic Comments"), never to
+ * an `fs` call. So the excludes below also drop what no function ever reads at
+ * runtime (source, tests, scripts and the deploy CLI; the compiled code ships
+ * as `.next` chunks), which is the documented remedy for over-included files.
+ *
  * The route keys match every form a bundler may name a route by
  * (`/[locale]/app/docs/[...slug]`, `…/(secure)/app/docs/[...slug]/page`)
  * without spelling `[locale]`, which a route glob reads as a character class.
@@ -114,8 +124,17 @@ const LOCAL_ARTIFACTS = [
   "playwright-report/**",
   ".stryker-tmp/**",
 ];
+/**
+ * Files no docs or help function reads at runtime, which Turbopack's
+ * approximation of the docs code's dynamic `fs` calls still traces (see
+ * above). The same set `scripts/check-docs-trace.mjs` rejects as foreign.
+ */
+const NEVER_READ_AT_RUNTIME = ["src/**", "tests/**", "scripts/**", "vercel-cli/**"];
 const docsTracingExcludes = Object.fromEntries(
-  Object.keys(docsTracingIncludes).map((route) => [route, LOCAL_ARTIFACTS]),
+  Object.keys(docsTracingIncludes).map((route) => [
+    route,
+    [...LOCAL_ARTIFACTS, ...NEVER_READ_AT_RUNTIME],
+  ]),
 );
 
 /** @type {import('next').NextConfig} */

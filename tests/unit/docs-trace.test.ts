@@ -133,6 +133,18 @@ describe("next.config.mjs tracing (F-88)", () => {
       expect(excludes[key]).toEqual(expect.arrayContaining([".vercel/**", "coverage/**"]));
     }
   });
+
+  it("drops what Turbopack over-traces but no function reads at runtime", () => {
+    // Turbopack approximates the docs code's dynamic fs calls by tracing the
+    // src/lib/docs tree; the CI trace check (scripts/check-docs-trace.mjs)
+    // rejects src/, tests/, scripts/ and vercel-cli/ in these functions.
+    const excludes = config.default.outputFileTracingExcludes;
+    for (const key of Object.keys(config.default.outputFileTracingIncludes)) {
+      expect(excludes[key]).toEqual(
+        expect.arrayContaining(["src/**", "tests/**", "scripts/**", "vercel-cli/**"]),
+      );
+    }
+  });
 });
 
 describe("getDocsRoot's default roots (F-88)", () => {
@@ -148,10 +160,11 @@ describe("getDocsRoot's default roots (F-88)", () => {
       m[1]!.trim(),
     );
     expect(joins.sort()).toEqual(['"docs"', '"help"']);
-    // A configured root is a runtime value, so its call is kept out of the trace.
-    expect(source).toMatch(
-      /fs\.realpath\(\s*\/\* turbopackIgnore: true \*\/\s*path\.resolve\(configured\)/,
-    );
+    // `turbopackIgnore` applies to import()/require(), never to an fs call, so
+    // it must not be relied on here: next.config.mjs excludes what the trace
+    // over-includes instead.
+    expect(source).not.toContain("turbopackIgnore");
+    expect(source).toMatch(/fs\.realpath\(\s*path\.resolve\(configured\)\s*\)/);
   });
 });
 

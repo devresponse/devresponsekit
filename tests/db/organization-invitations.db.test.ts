@@ -10,7 +10,7 @@ import {
 import { provisionUserFromAuth } from "@/lib/user-provisioning.server";
 
 /**
- * DB-BACKED integration tests for migration 0008
+ * DB-BACKED integration tests for org invitations
  * (`app_organization_invitations` + the `invite_only` approval mode).
  *
  * Proves what the mocked unit tests can't:
@@ -205,7 +205,7 @@ afterAll(async () => {
   await pgPool.end();
 });
 
-describe("app_organization_invitations (DB-backed, 0008)", () => {
+describe("app_organization_invitations (DB-backed)", () => {
   it("allows one PENDING invitation per (org, email) and frees the slot after revoke", async () => {
     const orgId = await newOrg("uniq");
     await createInvitation({ organizationId: orgId, email: EMAIL });
@@ -239,7 +239,7 @@ describe("app_organization_invitations (DB-backed, 0008)", () => {
         .execute(),
     ).rejects.toThrow(/check constraint/i);
 
-    // 0008 extends the 0007 mode CHECK: invite_only is now storable...
+    // Invitations extend the sign-up policy's mode CHECK: invite_only is storable...
     await db
       .insertInto("app_organization_auth_settings")
       .values({

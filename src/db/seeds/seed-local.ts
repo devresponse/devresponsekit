@@ -91,7 +91,7 @@ async function main() {
       );
     }
 
-    // Platform sign-up defaults (0007): a new member is ACTIVE once they VERIFY
+    // Platform sign-up defaults: a new member is ACTIVE once they VERIFY
     // their email — NO explicit administrator-approval step. This relaxes the
     // migration's fail-closed baseline (verification + admin approval) to the
     // friction-free "verify → active" flow this deployment ships as its default.

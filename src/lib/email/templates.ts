@@ -356,7 +356,7 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
       "{{inviterName}} has invited you to join {{organizationName}}.\n\n" +
       "Accept the invitation:\n{{acceptUrl}}\n\n" +
       "This invitation expires in 7 days. If you were not expecting it, you can safely ignore this email.",
-    description: "Sent when an administrator invites someone to an organization (0008).",
+    description: "Sent when an administrator invites someone to an organization.",
     variables: ["inviterName", "organizationName", "acceptUrl"],
     translations: {
       fr: {

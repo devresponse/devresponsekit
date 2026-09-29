@@ -5,7 +5,8 @@ import { db, pgPool } from "@/db/database";
 /**
  * DB-BACKED integration tests for DB-1 (org DELETE foreign-key handling).
  *
- * These run the real ON DELETE behavior from migration 0005 against Postgres,
+ * These run the real ON DELETE behavior (the initial schema's "Organization
+ * deletion: audit-tombstone FK" section) against Postgres,
  * proving the subtle interaction the unit/integration mocks can't reach:
  *
  *   1. Deleting an org that has audit history SUCCEEDS — the audit row survives

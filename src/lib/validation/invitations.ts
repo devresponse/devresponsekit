@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Shared validation for organization invitations (0008). Imported by BOTH
+ * Shared validation for organization invitations. Imported by BOTH
  * the API routes and the client forms so the two enforce identical rules.
  * Error messages are stable `validation.*` i18n keys.
  */

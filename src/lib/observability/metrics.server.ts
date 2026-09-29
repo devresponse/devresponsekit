@@ -26,9 +26,12 @@ import { Counter, Registry, collectDefaultMetrics } from "prom-client";
  * by route, DB latency and the auth failures other than a failed email/password
  * sign-in (which F-55 counts under `…_pre_auth_refusals_total`).
  *
- * Per-instance, like the limiter: each process keeps its own counters, scraped
- * independently. That matches the single-instance 1.0 topology; a multi-instance
- * setup aggregates across scrape targets at the Prometheus layer.
+ * Per-instance, like the per-actor limiter: each process keeps its own
+ * counters, scraped independently. A long-running multi-instance setup
+ * aggregates across scrape targets at the Prometheus layer; on serverless a
+ * scrape sees one function instance, so the structured log lines are the
+ * reliable signal there (F-107; docs/observability.md §5, and
+ * docs/deployment.md §5 for the supported topology).
  */
 export const registry = new Registry();
 

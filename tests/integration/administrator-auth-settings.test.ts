@@ -5,7 +5,7 @@ import type * as OrgAuthSettingsRoute from "@/app/api/administrator/organization
 import type * as DefaultsRoute from "@/app/api/administrator/auth-settings/defaults/route";
 
 /**
- * Integration tests for the signup-policy endpoints (0007):
+ * Integration tests for the signup-policy endpoints:
  *
  *   /api/administrator/organizations/:id/auth-settings   (GET/PATCH/DELETE)
  *   /api/administrator/auth-settings/defaults            (GET/PATCH)
@@ -229,7 +229,7 @@ describe("PATCH /api/administrator/organizations/:id/auth-settings", () => {
     expect(badDomain.status).toBe(400);
   });
 
-  it("accepts the invite_only approval mode (0008)", async () => {
+  it("accepts the invite_only approval mode", async () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
     const res = await orgPATCH(
       jsonReq(ORG_ENDPOINT, { ...VALID_BODY, signupApprovalMode: "invite_only" }),

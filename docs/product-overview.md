@@ -13,25 +13,25 @@ _Audience: marketing, sales, product, and business stakeholders. No engineering 
 
 ## What it is
 
-**DevResponseKit** is a production-grade, security-first **enterprise application shell** — the assembled, tested foundation that B2B software teams build their product on top of. Instead of spending the first months of a project rebuilding the same "boring but critical" plumbing (sign-in, organizations, roles and permissions, an admin console, single sign-on, an API for integrations, audit logs, multi-language support), teams start with all of it already in place and focus on the features that make their product unique.
+**DevResponseKit** is a production-grade, security-first **enterprise application shell** — the assembled, tested foundation that B2B software teams build their product on top of. Instead of spending the first months of a project rebuilding the same "boring but critical" plumbing (sign-in, organizations, roles and permissions, an admin console, single sign-on between your own applications, an API for integrations, audit logs, multi-language support), teams start with all of it already in place and focus on the features that make their product unique.
 
 The running application presents itself as the **"DevResponse Enterprise Platform"** — a secure, multi-tenant workspace with a polished administrator console, built on Next.js 16, Better Auth, and PostgreSQL.
 
 ## The core value proposition
 
-> **Clerk/WorkOS-class identity — organizations, role-based access control, SSO, API keys, and audit — that you own and self-host, wrapped in a tested admin console and multi-app shell.**
+> **Clerk/WorkOS-class identity — organizations, role-based access control, cross-app SSO, API keys, and audit — that you own and self-host, wrapped in a tested admin console and multi-app shell.**
 
 Three ideas drive the product:
 
 1. **Own your identity layer.** Authentication and access control run on self-hosted open-source foundations, so there is no per-user pricing meter and no vendor lock-in on the most sensitive part of your stack.
 2. **Multi-tenant isolation that is enforced, not assumed.** Every tenant's data is walled off by a single, central access model — and that model is checked automatically by the test suite, so isolation cannot silently erode as the codebase grows.
-3. **Enterprise expectations, day one.** The things enterprise buyers ask for in security reviews — audit trails, SSO, granular permissions, session controls, an admin console — are present from the first commit, not bolted on later.
+3. **Enterprise expectations, day one.** Much of what enterprise buyers ask for in security reviews — audit trails, granular permissions, session controls, an admin console — is present from the first commit, not bolted on later. Two things those reviews also ask for, sign-in through the customer's own identity provider (SAML/OIDC) and multi-factor authentication, are on the [roadmap](#roadmap--not-yet-in-the-product), not in the product yet.
 
 ## Who it's for
 
 | Audience | Why it fits |
 | --- | --- |
-| **Enterprise platform teams** | Need RBAC, audit, SSO, and an admin console for internal or customer-facing platforms, often under compliance pressure. |
+| **Enterprise platform teams** | Need RBAC, audit, cross-app SSO, and an admin console for internal or customer-facing platforms, often under compliance pressure. |
 | **Security- & compliance-sensitive teams** | Must be able to *demonstrate* tenant isolation and access control, not just claim it. |
 | **B2B SaaS founders** | Want organizations, roles, and an admin console without paying per-seat identity-vendor pricing. |
 | **Agencies & system integrators** | Need an ownable, extensible foundation they can tailor per client. |
@@ -39,7 +39,7 @@ Three ideas drive the product:
 
 ### Use cases
 
-- **Internal enterprise platform** — a company-wide tool suite where employees in different departments need different access, with SSO between the tools and a full audit trail.
+- **Internal enterprise platform** — a company-wide tool suite where employees in different departments need different access, with cross-app SSO between the tools (each built on the kit) and a full audit trail.
 - **B2B SaaS product** — customers are organizations; each has its own admins, members, roles, and isolated data.
 - **Compliance-driven deployment** — regulated environments that require audit logging, controlled access, and the ability to demonstrate isolation.
 - **Multi-app portfolio** — a hub plus several satellite applications that share one identity and let users move between them seamlessly.
@@ -74,7 +74,7 @@ mindmap
       Email
       Audit log
     Platform
-      Single Sign-On
+      Cross-app SSO
       Machine API
       Internationalization
       Observability
@@ -111,7 +111,7 @@ The administrator workspace is organized into navigation groups. Every screen an
 | **Access** | Groups | Create groups, bundle roles into them, and manage members |
 | **Tenancy** | Organizations | Create and manage organizations, members, invitations, provider bindings, and the per-organization sign-up/authentication policy |
 | **Tenancy** | Memberships | Browse user↔organization memberships and their roles |
-| **Apps** | Enterprise Apps | Register and manage applications that participate in SSO |
+| **Apps** | Enterprise Apps | Register and manage applications that participate in cross-app SSO |
 | **APIs** | API Keys | Issue, rotate, and revoke API keys on behalf of users |
 | **Communication** | Email (Outbox & Templates) | View sent/queued email; edit templates; send a test |
 | **Activity** | Audit Log | Search and filter the audit trail |
@@ -131,6 +131,8 @@ Common console affordances include server-side **pagination**, **search**, per-f
 ### Single Sign-On (cross-subdomain)
 
 Connected applications on different subdomains can share one sign-in. After signing in to the hub, a user is handed a **short-lived, single-use token** (valid for at most ~60 seconds and only once) that the destination application exchanges for its own session — no shared cookies. The system verifies the user's access to the target application before issuing the token, and the destination validates it before establishing the session. Administrators register participating applications under **Apps → Enterprise Apps**, including the allowed destination origin. See [Architecture → Single Sign-On handoff](./architecture.md#single-sign-on-handoff).
+
+This is **cross-app SSO**: a handoff between the hub and applications built on the kit. It is not identity-provider federation. An organization cannot yet connect its own identity provider over SAML or OIDC (Okta, for example) and have its people sign in through it; the Google, Microsoft and GitHub buttons are social sign-in configured once for the whole platform (the Microsoft one accepts any Entra work or school account). Federation is on the [roadmap](#roadmap--not-yet-in-the-product).
 
 ### Machine API
 
@@ -175,7 +177,7 @@ flowchart TB
     User["👤 A person signs in once"]
     Org["🏢 They belong to one or more organizations"]
     Role["🎭 Their roles & groups decide what they can do"]
-    Apps["🧩 They move between connected apps via SSO"]
+    Apps["🧩 They move between connected apps via cross-app SSO"]
     Admin["🛡️ Admins manage people & access in one console"]
     Audit["📜 Every important action is recorded"]
 
@@ -211,11 +213,20 @@ What that means for the business:
 | --- | --- |
 | **Faster time-to-market** | The undifferentiated foundation is already built and tested — teams ship product features sooner. |
 | **Lower identity cost at scale** | Self-hosted authentication avoids per-seat/per-MAU vendor fees that grow with success. |
-| **Smoother enterprise sales** | Audit logs, SSO, and granular permissions answer security-review questions that otherwise stall deals. |
+| **Smoother enterprise sales** | Audit logs, granular permissions, and session controls answer security-review questions that otherwise stall deals (identity-provider federation and MFA, which reviews also ask about, are on the [roadmap](#roadmap--not-yet-in-the-product)). |
 | **Reduced risk** | Tenant isolation is centrally enforced and continuously tested, lowering the chance of a cross-tenant data incident. |
 | **Full ownership** | You control the code, the data, and the deployment — no lock-in on the identity layer. |
 
 > The positioning above intentionally names no specific competitors or benchmarks beyond the product class. The public landing page (`src/app/[locale]/(public)/page.tsx`) leans on these same value propositions — keep the two aligned.
+
+---
+
+## Roadmap — not yet in the product
+
+Planned, not shipped. Keep them out of sales material, or mark them as roadmap, until they land:
+
+- **Identity-provider federation (enterprise SSO).** Letting an organization sign its people in through its own identity provider over **SAML 2.0** or **OIDC** (Okta, Microsoft Entra ID, Google Workspace and similar), configured per organization. Today "SSO" in this product means the cross-app handoff between the kit's own applications, and social sign-in uses the platform-wide Google, Microsoft and GitHub providers.
+- **Multi-factor authentication (MFA).** A second factor at sign-in, such as an authenticator-app code, and an organization policy that requires it. Today an account signs in with a password or a social provider, with no second factor.
 
 ---
 
@@ -225,10 +236,10 @@ What that means for the business:
 > Ship your B2B platform on a foundation that already handles identity, access, and administration — self-hosted, multi-tenant, and enterprise-ready from day one.
 
 **Short paragraph**
-> DevResponseKit gives your team the enterprise plumbing that usually takes months to build: multi-tenant organizations, role-based access control, an administrator console, single sign-on, a secure integration API, and audit logging — assembled, tested, and documented. Own your identity layer, isolate every tenant by design, and spend your engineering time on the product, not the plumbing.
+> DevResponseKit gives your team the enterprise plumbing that usually takes months to build: multi-tenant organizations, role-based access control, an administrator console, single sign-on across your own apps, a secure integration API, and audit logging — assembled, tested, and documented. Own your identity layer, isolate every tenant by design, and spend your engineering time on the product, not the plumbing.
 
 **Three-bullet pitch**
-> - **Enterprise-ready foundation** — organizations, RBAC, admin console, SSO, API, and audit out of the box.
+> - **Enterprise-ready foundation** — organizations, RBAC, admin console, cross-app SSO, API, and audit out of the box.
 > - **Tenant isolation you can prove** — access rules are centralized and continuously tested.
 > - **Yours to own** — self-hosted authentication with no per-seat pricing and no lock-in.
 
@@ -238,7 +249,7 @@ What that means for the business:
 > The enterprise foundation for multi-tenant B2B platforms.
 
 **Hero sub-headline**
-> Organizations, roles & permissions, SSO, a versioned API, audit logs, and a full admin console — assembled, tested, and yours to self-host.
+> Organizations, roles & permissions, cross-app SSO, a versioned API, audit logs, and a full admin console — assembled, tested, and yours to self-host.
 
 **Section: "Stop rebuilding the boring parts"**
 > Every B2B product needs the same identity and administration layer. DevResponseKit ships it for you — so your first sprint is about your product, not your plumbing.

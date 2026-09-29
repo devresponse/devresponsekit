@@ -40,7 +40,7 @@ export interface ProvisionUserInput {
   preferredLocale?: string;
   isSeed?: boolean;
   /**
-   * Single-use invitation secret that rode the sign-up request body (0008).
+   * Single-use invitation secret that rode the sign-up request body.
    * When it resolves to a live invitation whose email matches, the sign-up
    * lands in the INVITING organization as an active member and the
    * invitation is consumed.
@@ -71,8 +71,8 @@ export interface ProvisionUserResult {
  * Responsibilities:
  *   1. Create or update `app_users`.
  *   2. Resolve the target organization: a live email-matching invitation
- *      (0008) overrides everything; otherwise the organization-scoped hint,
- *      then the admin-curated email-domain mapping (0007; email/password
+ *      overrides everything; otherwise the organization-scoped hint,
+ *      then the admin-curated email-domain mapping (email/password
  *      sign-ups and verified GitHub addresses, F-52), then THE default org —
  *      the one flagged `is_default`, whatever its slug (F-40). It never
  *      creates an organization (F-52): with no default org the call throws
@@ -81,9 +81,9 @@ export interface ProvisionUserResult {
  *      transaction as step 1, so neither row exists without the other
  *      (F-95).
  *   4. Initial statuses follow the organization's runtime-configurable
- *      signup policy (`app_organization_auth_settings`, 0007):
+ *      signup policy (`app_organization_auth_settings`):
  *      `admin_approval` parks new accounts in `pending_approval` (the
- *      fail-closed default = pre-0007 behavior); a valid invitation,
+ *      fail-closed default = the pre-policy behavior); a valid invitation,
  *      `auto_active`, and verified auto-approve-domain matches activate
  *      immediately; `invite_only` parks uninvited sign-ups. Existing rows
  *      ALWAYS keep their status — the only upgrade paths are the explicit
@@ -115,7 +115,7 @@ export async function provisionUserFromAuth(
     emailVerified: input.emailVerified,
   });
 
-  // 0. Resolve an invitation riding the sign-up (0008). Only honored when
+  // 0. Resolve an invitation riding the sign-up. Only honored when
   // the token is LIVE and its email equals the authenticating email — a
   // forwarded link can never move the seat to another mailbox. Any failure
   // degrades to the uninvited path (fail closed), never blocks the sign-up.
@@ -153,7 +153,7 @@ export async function provisionUserFromAuth(
   // resolution — the sign-up lands in the INVITING org (that is the
   // invitation's whole point). Otherwise: the organization-scoped hint, then
   // the admin-curated email-domain mapping (`app_provider_organizations` with
-  // provider = 'email', 0007), then the default org (`is_default`, F-40).
+  // provider = 'email'), then the default org (`is_default`, F-40).
   let organizationId: string | undefined;
   let membershipOrgKey: string | null = resolution.providerOrganizationKey;
   let emailDomainRouted = false;
@@ -207,7 +207,7 @@ export async function provisionUserFromAuth(
     organizationId = (await requireDefaultOrganization()).id;
   }
 
-  // 2. Decide initial statuses from the org's signup policy (0007). Seeds
+  // 2. Decide initial statuses from the org's signup policy. Seeds
   // are trusted fixtures and bypass policy; everything else resolves the
   // effective policy (org row → platform default → fail-closed strict).
   let decision: { status: SignupStatusDecision["status"]; reason: SignupDecisionReason | "seed" };
@@ -385,7 +385,7 @@ export async function provisionUserFromAuth(
 
 /**
  * Re-evaluates a still-pending account against the CURRENT signup policy at
- * sign-in time (0007). This is the ONLY path that upgrades an existing row;
+ * sign-in time. This is the ONLY path that upgrades an existing row;
  * `provisionUserFromAuth` never elevates.
  *
  * Activation triggers, per pending membership's organization:

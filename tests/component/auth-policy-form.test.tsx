@@ -6,7 +6,7 @@ import { AuthPolicyForm } from "@/components/admin/auth-policy-form";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
- * Component tests for the signup-policy editor (0007). Pins the two-mode
+ * Component tests for the signup-policy editor. Pins the two-mode
  * behavior (inherit summary ⇄ override form), the form→API body
  * conversion, and the reset (DELETE) flow.
  */
@@ -264,7 +264,7 @@ describe("AuthPolicyForm", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("labels an inherited invite_only policy correctly in the summary (0008)", () => {
+  it("labels an inherited invite_only policy correctly in the summary", () => {
     renderWithIntl(
       <AuthPolicyForm
         endpoint={ENDPOINT}

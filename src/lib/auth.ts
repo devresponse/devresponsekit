@@ -153,7 +153,7 @@ export const auth = betterAuth({
     // block below); OAuth identities carry the provider's own emailVerified
     // assertion and are unaffected. Seed fixtures are marked verified by the
     // seed script.
-    // Per-org signup policy (0007): this global flag stays ON as the fail-closed
+    // Per-org signup policy: this global flag stays ON as the fail-closed
     // baseline; an org that waives verification gets its sign-ups pre-verified
     // by the `user.create.before` hook below, which satisfies this check.
     requireEmailVerification: true,
@@ -334,7 +334,7 @@ export const auth = betterAuth({
     // queued verification email, stated rather than left to the vendor default.
     expiresIn: EMAIL_VERIFICATION_TOKEN_TTL_MS / 1000,
     sendVerificationEmail: async ({ user, url }) => {
-      // Per-org signup policy (0007): the `user.create.before` hook below
+      // Per-org signup policy: the `user.create.before` hook below
       // pre-verifies sign-ups whose organization waives verification, but
       // `sendOnSignUp` fires unconditionally — skip the pointless (and
       // confusing) verification email for an already-verified address.
@@ -549,7 +549,7 @@ export const auth = betterAuth({
             .executeTakeFirst();
 
           if (existing) {
-            // Per-org signup policy (0007): a still-pending account may now
+            // Per-org signup policy: a still-pending account may now
             // qualify for activation — its org switched to `auto_active`, or
             // the address is now verified and matches an auto-approve domain
             // (a user who just confirmed their email re-signs-in here, since
@@ -669,7 +669,7 @@ export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSess
  * above adds to a new user, on top of its bounded name (F-21). Moved out of
  * the hook so no early return can skip the name bound.
  *
- * Per-org signup policy (0007): when the organization that will
+ * Per-org signup policy: when the organization that will
  * receive this sign-up waives email verification, pre-verify the
  * identity AT CREATION. The global `requireEmailVerification: true`
  * stays on (fail-closed) and passes naturally for these users; the
@@ -702,7 +702,7 @@ async function selfSignupVerification(
   if (!shouldProvisionSelfSignup(context)) {
     return undefined;
   }
-  // Invitation-backed sign-up (0008): presenting a live token for
+  // Invitation-backed sign-up: presenting a live token for
   // THIS email proves mailbox access — the token was delivered to
   // that mailbox — so it carries the same weight as clicking a
   // verification link. Pre-verify regardless of the org's
@@ -739,7 +739,7 @@ async function selfSignupVerification(
 }
 
 /**
- * Extracts the invitation secret riding a sign-up request body (0008). The
+ * Extracts the invitation secret riding a sign-up request body. The
  * extra field flows through better-auth's sign-up schema (which accepts a
  * record of additional fields) into `context.body`, same as `callbackURL`.
  */

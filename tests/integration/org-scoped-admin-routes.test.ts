@@ -219,7 +219,7 @@ describe("P0-7 GET /roles (list) — null-scope admin", () => {
   });
 });
 
-describe("0007 GET /organizations/[id]/auth-settings — org-b", () => {
+describe("sign-up policy: GET /organizations/[id]/auth-settings — org-b", () => {
   const ctx = { params: Promise.resolve({ id: ORG_B }) };
   const url = `http://test.local/api/administrator/organizations/${ORG_B}/auth-settings`;
   beforeEach(() => {
@@ -246,7 +246,7 @@ describe("0007 GET /organizations/[id]/auth-settings — org-b", () => {
   });
 });
 
-describe("0008 GET /organizations/[id]/invitations — org-b", () => {
+describe("invitations: GET /organizations/[id]/invitations — org-b", () => {
   const ctx = { params: Promise.resolve({ id: ORG_B }) };
   const url = `http://test.local/api/administrator/organizations/${ORG_B}/invitations`;
   beforeEach(() => dbFirst.mockResolvedValue({ id: ORG_B, slug: "org-b", name: "Org B" }));
@@ -262,7 +262,7 @@ describe("0008 GET /organizations/[id]/invitations — org-b", () => {
   });
 });
 
-describe("0007 /auth-settings/defaults — platform-global resource", () => {
+describe("sign-up policy: /auth-settings/defaults — platform-global resource", () => {
   const url = "http://test.local/api/administrator/auth-settings/defaults";
 
   it("ORG ADMIN cannot read the platform defaults (403, superadmin-only)", async () => {

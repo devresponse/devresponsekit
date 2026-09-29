@@ -15,7 +15,7 @@ import { withAdminRoute } from "@/lib/route-handler.server";
 export const dynamic = "force-dynamic";
 
 /**
- * The PLATFORM-DEFAULT signup policy (0007) — the row every organization
+ * The PLATFORM-DEFAULT signup policy — the row every organization
  * without its own override inherits (`organization_id IS NULL`). Editing it
  * changes the signup workflow of every non-overridden org at once, so both
  * verbs are SUPERADMIN-only: a platform-level resource is reachable by no

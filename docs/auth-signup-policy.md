@@ -35,7 +35,7 @@ Everything downstream (the `pending-approval` and `blocked` gates, `decideSecure
 
 | Verification | Approval | Resulting workflow |
 | --- | --- | --- |
-| required | admin approval | Registration → verify email → sign in → pending page → admin approves (the platform default; identical to the pre-0007 behavior) |
+| required | admin approval | Registration → verify email → sign in → pending page → admin approves (the platform default; identical to the workflow before per-organization policies existed) |
 | required | auto-active | Registration → verify email → immediately active |
 | waived | admin approval | Registration → signed in at once → pending page → admin approves |
 | waived | auto-active | Open signup: registration → immediately active (the editor shows a warning for this combination) |

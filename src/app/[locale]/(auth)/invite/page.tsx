@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/invite?token=…
  *
- * The invitation accept page (0008). All branching happens server-side:
+ * The invitation accept page. All branching happens server-side:
  *
  *   - token missing/unknown/expired/revoked/consumed → one generic invalid
  *     panel (no organization details leak to token guessers);

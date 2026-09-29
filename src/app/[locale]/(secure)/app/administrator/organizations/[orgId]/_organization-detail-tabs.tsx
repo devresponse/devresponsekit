@@ -12,7 +12,7 @@ import { OrganizationSettingsForm } from "./_organization-settings-form";
  * Client-side tab container for the organization detail (docs/admin-manager.md §8.2).
  *
  * Each tab owns its own data fetch; the Authentication tab receives its
- * initial policy rows from the server page (0007).
+ * initial policy rows from the server page.
  *
  * The Authentication and Settings forms stay mounted while another tab is open
  * (`useKeptTabs`, F-158): Radix used to unmount them, so a tab switch discarded

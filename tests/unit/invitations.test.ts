@@ -12,7 +12,7 @@ import {
 } from "@/lib/invitations.server";
 
 /**
- * Unit tests for `invitations.server.ts` (0008).
+ * Unit tests for `invitations.server.ts`.
  *
  * Pins the security contract: hash-at-rest tokens (plaintext never
  * persisted), the email-match rule, the guarded single-use consume, the

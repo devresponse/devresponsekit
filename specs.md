@@ -53,7 +53,7 @@ These decisions are final.
 | Google | Allow Google accounts; do not restrict to a Google Workspace domain. |
 | Microsoft | Allow Microsoft Entra ID multi-tenant work/school accounts. |
 | GitHub | Do not restrict by GitHub organization/team membership. |
-| New user status | New non-seed users start as `pending_approval` under the platform-default sign-up policy; each organization's runtime policy (0007) can instead auto-activate, require invitations (0008), or auto-approve verified email domains. |
+| New user status | New non-seed users start as `pending_approval` under the platform-default sign-up policy; each organization's runtime policy can instead auto-activate, require invitations, or auto-approve verified email domains. |
 | Admin approval | Required before secure app access under the default policy; invitations and policy-driven activation bypass the queue (docs/auth-signup-policy.md). |
 | Session duration | 8-hour rolling session, 15-minute update interval, no remember-me option. |
 | Route protection | Use both `proxy.ts` and `[locale]/(secure)/layout.tsx`. |
@@ -119,11 +119,11 @@ The secure application lives under the localized `/app` route:
 
 ### 3.4 Organization assignment
 
-On first sign-in/sign-up, assign the user to an organization in this order: a live invitation (0008) overrides everything; then provider organization data when available; then an admin-curated email-domain binding (`app_provider_organizations` with provider `email`); otherwise the `default` organization.
+On first sign-in/sign-up, assign the user to an organization in this order: a live invitation overrides everything; then provider organization data when available; then an admin-curated email-domain binding (`app_provider_organizations` with provider `email`); otherwise the `default` organization.
 
 ### 3.5 Admin approval
 
-Under the platform-default sign-up policy, new non-seed accounts authenticate successfully but cannot access secure routes until approved. An organization's runtime policy (0007) can instead activate them immediately (`auto_active`, a verified auto-approve domain, or an accepted invitation — see docs/auth-signup-policy.md). While pending, they are redirected to:
+Under the platform-default sign-up policy, new non-seed accounts authenticate successfully but cannot access secure routes until approved. An organization's runtime policy can instead activate them immediately (`auto_active`, a verified auto-approve domain, or an accepted invitation — see docs/auth-signup-policy.md). While pending, they are redirected to:
 
 ```text
 /[locale]/pending-approval
@@ -1381,7 +1381,7 @@ export interface ProviderOrganizationResolution {
  *
  * Provider data is inconsistent across identity providers. This function
  * produces a deterministic organization key; the initial access decision
- * is made downstream by the organization's runtime sign-up policy (0007).
+ * is made downstream by the organization's runtime sign-up policy.
  */
 export function resolveProviderOrganization(
   input: ProviderOrganizationInput,
@@ -1444,9 +1444,9 @@ Rules:
 1. Google accounts are allowed. If Google returns `hd`, use it; otherwise fallback to `default`.
 2. Microsoft uses tenant ID when available and supports multi-tenant work/school accounts.
 3. GitHub does not query or enforce organization/team membership.
-4. Email/password users start in `default`, unless an admin-curated email-domain binding (provider `email`) or a live invitation (0008) routes them to a specific organization.
+4. Email/password users start in `default`, unless an admin-curated email-domain binding (provider `email`) or a live invitation routes them to a specific organization.
 5. Account linking by email requires verified email.
-6. Initial statuses follow the organization's runtime sign-up policy (0007): the platform default parks unverified/uninvited accounts as `pending_approval` with no secure access, while `auto_active`, a verified auto-approve domain, or an accepted invitation activate immediately.
+6. Initial statuses follow the organization's runtime sign-up policy: the platform default parks unverified/uninvited accounts as `pending_approval` with no secure access, while `auto_active`, a verified auto-approve domain, or an accepted invitation activate immediately.
 
 ---
 
@@ -1459,7 +1459,7 @@ Responsibilities:
 1. Create or update `app_users`.
 2. Resolve organization (invitation → provider metadata → email-domain binding → `default`).
 3. Create organization membership.
-4. Set initial user and membership statuses from the organization's runtime sign-up policy (0007) for non-seed users — `pending_approval` under the platform default; active for `auto_active`, verified auto-approve domains, or a consumed invitation (0008).
+4. Set initial user and membership statuses from the organization's runtime sign-up policy for non-seed users — `pending_approval` under the platform default; active for `auto_active`, verified auto-approve domains, or a consumed invitation.
 5. Preserve blocked/suspended/deactivated statuses.
 6. Store preferred locale when available.
 7. Audit provisioning and account-linking events.
@@ -1666,8 +1666,8 @@ Sign-up must:
 1. Allow email/password registration.
 2. Allow social registration through Google, Microsoft, and GitHub.
 3. Provision app user and membership records.
-4. Assign the user to an organization: invitation (0008) → provider organization → email-domain binding → `default`.
-5. Apply the organization's runtime sign-up policy (0007) — admin approval is the platform default; `auto_active`, verified auto-approve domains, and invitations activate immediately.
+4. Assign the user to an organization: invitation → provider organization → email-domain binding → `default`.
+5. Apply the organization's runtime sign-up policy — admin approval is the platform default; `auto_active`, verified auto-approve domains, and invitations activate immediately.
 6. Redirect to localized `/pending-approval` when approval is required.
 
 ---
@@ -2940,7 +2940,7 @@ Seed data:
 7. Seed admin user from `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`.
 8. Seed translation files for English, French, Spanish, Ukrainian, Portuguese, Simplified Chinese, Hindi, and Japanese.
 
-Seed admin may be auto-approved. Other self-registered users start pending approval under the platform-default sign-up policy; an organization's runtime policy (0007) or an accepted invitation (0008) can activate them immediately.
+Seed admin may be auto-approved. Other self-registered users start pending approval under the platform-default sign-up policy; an organization's runtime policy or an accepted invitation can activate them immediately.
 
 ---
 
@@ -3507,7 +3507,7 @@ The implementation is complete only when all items are true:
 32. Microsoft multi-tenant work/school login is configured.
 33. GitHub login is configured without org/team restriction.
 34. Accounts link only by verified email.
-35. New non-seed users require admin approval under the platform-default sign-up policy; each organization's runtime policy (0007) or an accepted invitation (0008) may activate them immediately.
+35. New non-seed users require admin approval under the platform-default sign-up policy; each organization's runtime policy or an accepted invitation may activate them immediately.
 36. Pending users cannot access secure routes.
 37. Blocked/suspended/deactivated users cannot access secure routes.
 38. Roles live in app tables.
@@ -3740,7 +3740,7 @@ The initial schema `0001-initial-schema.sql` includes:
   or invisible formatting characters), refused with 400 `INVALID_NAME` on
   `/sign-up/email` and `/update-user`, and cleaned by the `user` database
   hooks on every other write.
-- Organization invitations (0008) send the `organization_invitation`
+- Organization invitations send the `organization_invitation`
   template from the administrator invite/resend actions
   (`/api/administrator/organizations/[id]/invitations` and `.../resend`);
   the emailed accept link lands on the public `/[locale]/invite` page.

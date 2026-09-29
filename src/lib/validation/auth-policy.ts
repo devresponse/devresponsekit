@@ -49,7 +49,7 @@ function isDomainVerificationComboValid(input: {
 
 /**
  * Wire contract for PATCH: a COMPLETE policy (no partial update — an org row
- * either exists in full or the org inherits the platform default; see 0007).
+ * either exists in full or the org inherits the platform default).
  * `null` array semantics: `allowedAuthMethods` null = every enabled method;
  * `autoApproveEmailDomains` null = no domain auto-approval. An EMPTY
  * `allowedAuthMethods` is legal and means "no new sign-ups auto-place here"

@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth-policy.server";
 
 /**
- * Unit tests for `auth-policy.server.ts` (0007).
+ * Unit tests for `auth-policy.server.ts`.
  *
  * Covers the two contracts the signup workflow hangs on:
  *   - resolution order org row → platform default → fail-closed, with every
@@ -164,7 +164,7 @@ describe("getAuthPolicyForOrg", () => {
     expect(policy.allowedAuthMethods).toEqual(["email"]);
   });
 
-  it("accepts the invite_only mode (0008) instead of failing closed", async () => {
+  it("accepts the invite_only mode instead of failing closed", async () => {
     stubs.policyRows = () => [
       { ...DEFAULT_ROW, organization_id: "org-1", signup_approval_mode: "invite_only" },
     ];
@@ -551,7 +551,7 @@ describe("decideInitialStatus", () => {
     ).toEqual({ status: "active", reason: "domain_auto_approved" });
   });
 
-  it("a valid invitation activates under every mode — the invitation IS the approval (0008)", () => {
+  it("a valid invitation activates under every mode — the invitation IS the approval", () => {
     for (const mode of ["admin_approval", "auto_active", "invite_only"] as const) {
       expect(
         decideInitialStatus(

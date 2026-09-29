@@ -47,7 +47,7 @@ export default async function AdministratorOrganizationsPage({
   const canCreate = reach && guard.access.permissions.includes("admin.orgs.create");
   const canDelete = reach && guard.access.permissions.includes("admin.orgs.delete");
 
-  // Platform sign-up defaults (0007): SUPERADMIN-only card — editing this row
+  // Platform sign-up defaults: SUPERADMIN-only card — editing this row
   // changes the signup workflow of every org without its own override.
   const superadmin = isSuperadmin(guard.access);
   const platformDefaults: AuthPolicySettingsJson | null = superadmin

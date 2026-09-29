@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import type { SupportedLocale } from "@/config/i18n-config";
 
 /**
- * Server-compatible panels for the localized `/invite` page (0008). Which
+ * Server-compatible panels for the localized `/invite` page. Which
  * panel renders is decided server-side by the page; none of them ever
  * reveals anything about an organization unless the presented token
  * resolved to a LIVE invitation.

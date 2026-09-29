@@ -46,9 +46,9 @@ export const dynamic = "force-dynamic";
  *
  * Tabs (rendered client-side):
  *   - Members        — paginated grid of memberships, with the pending
- *                      Invitations panel underneath (0008)
+ *                      Invitations panel underneath
  *   - Providers      — paginated grid of provider bindings
- *   - Authentication — per-org sign-up policy editor (0007); this page
+ *   - Authentication — per-org sign-up policy editor; this page
  *                      also loads the org's auth settings + platform defaults
  *   - Settings       — name/slug/status editor; SUPERADMIN-only writes (F-66)
  */
@@ -103,7 +103,7 @@ export default async function AdministratorOrganizationDetailPage({
   // Settings form lets an admin clear.
   const isResolvedDefault = org.is_default && (await getDefaultOrganization())?.id === org.id;
 
-  // Initial rows for the Authentication tab (0007): the org's override (null
+  // Initial rows for the Authentication tab: the org's override (null
   // = inheriting) and the platform default it would inherit. Loaded here —
   // AFTER the canAccessOrg gate above — so the client tab needs no fetch.
   //

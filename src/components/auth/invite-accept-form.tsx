@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 /**
  * InviteAcceptForm
  *
- * The signed-in acceptance action on the invite page (0008): posts the
+ * The signed-in acceptance action on the invite page: posts the
  * plaintext token to `POST /api/invitations/accept` and hard-navigates to
  * the app on success (the membership/status just changed, so a full load
  * re-evaluates the secure gates). A 403 mismatch is mapped to the

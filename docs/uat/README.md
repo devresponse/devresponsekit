@@ -51,3 +51,5 @@ Each area doc carries its own screen × persona coverage matrix and checklist. M
 ## How to run
 
 Pick a persona, sign in, open the relevant area doc, and follow each numbered step — recording **Pass / Fail** in the story's result row. Import `uat-stories.csv` into your test-management tool (Xray / TestRail / Zephyr / a spreadsheet) to assign runs and track results. When a screen changes, re-run the prompt in `GENERATION-PROMPT.md` for that area to refresh its stories.
+
+The `file:line` citations point at the current tree (last refreshed for I-16). When a change moves code that a story cites, update the citation in the same change. `tests/unit/uat-code-refs.test.ts` fails when a citation names a file that does not exist, whether the path is written in full or abbreviated to its last segments (only a path elided with `...` is exempt), and when it names a line past the end of the one file its path resolves to. It cannot tell whether a line inside the file is still the right one.

@@ -48,20 +48,20 @@ pnpm db:seed:dev                              # the multi-org fixture (dev-init.
 superuser, an org admin, and five members, plus three cross-org members and two
 groups in ORG A. Every account shares one password
 (`DEV_SEED_PASSWORD`, default `DevPassword123!`) and is pre-approved
-(`active`). See `src/db/seeds/dev-init.ts:52` (password) and `:84` (orgs).
+(`active`). See `src/db/seeds/dev-init.ts:62` (password) and `:94` (orgs).
 
 | Persona | Sign in as | Seed role | Access (validated) |
 | --- | --- | --- | --- |
 | **Visitor** | (signed out) | — | Public pages only; `/app/administrator/*` is unreachable. |
-| **Member** | `user1@orga.local` | `member` | `shell.view` only — **no** `admin.*`. Cannot open any admin screen. `dev-init.ts:169`. |
-| **Org Admin** | `orgadmin@orga.local` | `admin.platform` | The **full** `admin.*` catalog, scoped to ORG A only (no `superuser`). `dev-init.ts:252`. |
-| **Superadmin** | `superuser@orga.local` | `superuser` | The `superuser` marker → **every** org, every screen. `dev-init.ts:257`. |
+| **Member** | `user1@orga.local` | `member` | `shell.view` only — **no** `admin.*`. Cannot open any admin screen. `dev-init.ts:179`. |
+| **Org Admin** | `orgadmin@orga.local` | `admin.platform` | The **full** `admin.*` catalog, scoped to ORG A only (no `superuser`). `dev-init.ts:263`. |
+| **Superadmin** | `superuser@orga.local` | `superuser` | The `superuser` marker → **every** org, every screen. `dev-init.ts:268`. |
 | **Cross-tenant probe** | `orgadmin@orga.local` | `admin.platform` | Used to assert 404-not-403 against an `org-b`/`org-c` user id. |
 | **Impersonator** | Org Admin or Superadmin, then impersonate `user1@orga.local` | — | Acts as the target; "Stop impersonating" returns to the admin. |
 
 **Limited Admin (partial permissions):** the plain `admin` role holds only
 `shell.view`, `admin.users.read`, `admin.users.manage`, and `admin.audit.read`
-(`src/db/seeds/baseline-roles.ts:27-31`, `dev-init.ts:249`). This persona is the key
+(`src/db/seeds/baseline-roles.ts:27-31`, `dev-init.ts:260`). This persona is the key
 to the per-permission gating stories below (it can view users and change their
 status, but cannot create users, assign roles, manage groups, edit memberships,
 or manage sessions). **`TODO: verify`** — neither `seed-local.ts` nor
@@ -78,10 +78,10 @@ re-seeding.
 
 ### The access model (why 404, not 403)
 
-Three tiers (`docs/architecture.md`, ADR-0001; `src/lib/admin/access-scope.server.ts:6`):
+Three tiers (`docs/architecture.md`, ADR-0001; `src/lib/admin/access-scope.server.ts:12`):
 
 - **Superadmin** holds the `superuser` marker → all orgs; org scoping is
-  bypassed (`isSuperadmin`, `access-scope.server.ts:38`).
+  bypassed (`isSuperadmin`, `access-scope.server.ts:94`).
 - **Org Admin** holds `admin.*` but not the marker → exactly one org
   (`access.organizationId`); every tenant query is confined to it.
 - **User** holds no `admin.*` → self-service only.
@@ -90,11 +90,11 @@ Two guard entry points:
 
 - **RSC pages** call `checkAdminPermissionServer(<key>)`; on `"denied"` /
   `"unauthenticated"` they call `notFound()` — a **404**, indistinguishable
-  from a missing route (`permissions.server.ts:169`).
+  from a missing route (`permissions.server.ts:209`).
 - **API routes** call `requireAdminPermission(request, <key>)`; missing
   permission → **403** + a `denied` audit row; a cross-tenant `[id]` →
-  **404** via `resolveTargetUser` (`user-target.server.ts:64`,
-  `permissions.server.ts:82`).
+  **404** via `resolveTargetUser` (`user-target.server.ts:70`,
+  `permissions.server.ts:98`).
 
 So a member browsing to `/en/app/administrator/users` gets **Not Found**
 (page-level), and an org admin poking at another tenant's user id gets **Not
@@ -105,14 +105,14 @@ resource — that is the invariant every negative story below asserts.
 
 ## ADMIN-LAYOUT — Administrator console (layout guard)
 
-- Route: `/app/administrator/*` (shell wrapper) · Example URL: `/en/app/administrator` · Code: `src/app/[locale]/(secure)/app/administrator/layout.tsx:40`
+- Route: `/app/administrator/*` (shell wrapper) · Example URL: `/en/app/administrator` · Code: `src/app/[locale]/(secure)/app/administrator/layout.tsx:41`
 - Purpose: Wraps every administrator screen in the console shell (sidebar + header) and re-validates, defense-in-depth, that the caller holds *some* `admin.*` permission before any child page renders.
-- Guard / who can access: caller must hold at least one key in `ANY_ADMIN_PERMISSION` (the full `admin.*` catalog) via `checkAdminPermissionServer([...ANY_ADMIN_PERMISSION])`; otherwise `notFound()` (`layout.tsx:48`). The catalog is defined at `src/lib/admin/permissions.ts:23` / `:65`.
+- Guard / who can access: caller must hold at least one key in `ANY_ADMIN_PERMISSION` (the full `admin.*` catalog) via `checkAdminPermissionServer([...ANY_ADMIN_PERMISSION])`; otherwise `notFound()` (`layout.tsx:49`). The catalog is defined at `src/lib/admin/permissions.ts:23` / `:65`.
 - Access matrix:
   - Visitor / Pending / Blocked → redirected by the parent secure layout (not an admin at all).
   - Member → **404** (holds `shell.view` only; no `admin.*`).
   - Limited Admin / Org Admin / Superadmin → shell renders; the sidebar shows only the groups the caller can use (`administrator-sidebar.tsx:47`).
-- Preconditions & test data: the seeded personas above. The sidebar is filtered by `getVisibleAdministratorNavigationGroups(permissions)` (`administrator-navigation.ts:227`).
+- Preconditions & test data: the seeded personas above. The sidebar is filtered by `getVisibleAdministratorNavigationGroups(permissions)` (`administrator-navigation.ts:238`).
 
 User stories
 
@@ -139,10 +139,10 @@ User stories
 
 Negative & edge cases
 1. Out-of-scope access → the layout returns 404 for a non-admin; it never leaks that `/administrator/*` exists.
-2. The sidebar gate must match each page guard: the Users link requires `admin.users.read` (`administrator-navigation.ts:66`), which is exactly the Users page guard (`users/page.tsx:29`). Confirm no visible link 404s (the historical bug class).
+2. The sidebar gate must match each page guard: the Users link requires `admin.users.read` (`administrator-navigation.ts:69`), which is exactly the Users page guard (`users/page.tsx:29`). Confirm no visible link 404s (the historical bug class).
 3. Not-found status: open `/en/app/administrator/users/<well-formed unknown UUID>` with the browser devtools Network tab open — the document response is an HTTP **404** (not a 200 that merely renders "Page not found"). The administrator tree deliberately has no `loading.tsx` streaming boundary: a boundary above the pages would flush the shell before the page's `notFound()` runs, turning every admin `[id]` 404 into a 200 (review #29, `tests/e2e/admin-cross-org-404.spec.ts`).
 
-Accessibility: the sidebar is keyboard-navigable; the active item is derived from the path (`administrator-sidebar.tsx:47`) and announced to screen readers as `aria-current="page"` (F-120); group labels auto-hide when the rail is collapsed. Its collapse toggle is independent of the root shell (own cookie, no Ctrl/Cmd+B — `layout.tsx:38`).
+Accessibility: the sidebar is keyboard-navigable; the active item is derived from the path (`administrator-sidebar.tsx:47`) and announced to screen readers as `aria-current="page"` (F-120); group labels auto-hide when the rail is collapsed. Its collapse toggle is independent of the root shell (own cookie, no Ctrl/Cmd+B — `layout.tsx:39`).
 i18n: run `en` + `uk`; sidebar group and item labels come from the `administrator.nav` catalog — no raw keys.
 
 ---
@@ -151,13 +151,13 @@ i18n: run `en` + `uk`; sidebar group and item labels come from the `administrato
 
 - Route: `/app/administrator` · Example URL: `/en/app/administrator` · Code: `src/app/[locale]/(secure)/app/administrator/page.tsx:73`
 - Purpose: The console landing dashboard — metric cards (Users, Organizations, Roles, Permissions, Enterprise Apps), trend charts, and recent-activity lists. Each card/list is gated by its own read permission and its query only runs when the caller can see it.
-- Guard / who can access: reachable by any admin (enforced by the layout). Per-card gating: each metric descriptor names a read permission — Users card = `admin.users.read`, Organizations = `admin.orgs.read`, Roles/Permissions = `admin.roles.read`, Enterprise Apps = `admin.apps.read` (`page.tsx:37`–`:68`). Cards the caller cannot read are hidden and their queries never run (`page.tsx:92`). The recent-sessions list is gated on `admin.users.sessions` and audit activity on `admin.audit.read` (`page.tsx:119`–`:123`).
+- Guard / who can access: reachable by any admin (enforced by the layout). Per-card gating: each metric descriptor names a read permission — Users card = `admin.users.read`, Organizations = `admin.orgs.read`, Roles/Permissions = `admin.roles.read`, Enterprise Apps = `admin.apps.read` (`page.tsx:38`–`:69`). Cards the caller cannot read are hidden and their queries never run (`page.tsx:93`). The recent-sessions list is gated on `admin.users.sessions` and audit activity on `admin.audit.read` (`page.tsx:120`–`:124`).
 - Access matrix:
   - Member → **404** (layout).
   - Limited Admin → sees the **Users** card + registrations and audit lists (holds `admin.users.read`, `admin.audit.read`); no Organizations/Roles/Apps cards; no sessions list.
-  - Org Admin → all cards, scoped to ORG A only; org-scoped charts (own-org registrations/logins), no cross-org "most active orgs", no system audit-volume chart (`page.tsx:232`, `:267`).
+  - Org Admin → all cards, scoped to ORG A only; org-scoped charts (own-org registrations/logins), no cross-org "most active orgs", no system audit-volume chart (`page.tsx:233`, `:268`).
   - Superadmin → system-wide cards and charts, including "most active orgs" and audit-event volume.
-- Preconditions & test data: run `pnpm db:seed:dev` so registrations, logins, and audit rows are spread across the 7-day window (`dev-init.ts:185`, `:547`).
+- Preconditions & test data: run `pnpm db:seed:dev` so registrations, logins, and audit rows are spread across the 7-day window (`dev-init.ts:196`, `:566`).
 
 User stories
 
@@ -196,11 +196,11 @@ User stories
 
 Negative & edge cases
 1. Out-of-scope access → a Member visiting `/en/app/administrator` gets 404 (layout), not 403.
-2. Empty state → with no visible metrics the page shows the "no metrics" message (`page.tsx:154`); with no activity the lists are simply absent.
+2. Empty state → with no visible metrics the page shows the "no metrics" message (`page.tsx:155`); with no activity the lists are simply absent.
 3. No card advertises an area the caller cannot open — clicking any visible card lands on a screen that renders (never a 404).
 
-Accessibility: cards and list tables are semantic; the Insights section is `aria-labelledby` its heading (`page.tsx:158`). No axe violations.
-i18n: run `en` + `uk`; card labels, chart captions, and dates localize; no raw message keys. Dates and counts go through the app formatter, so they follow the viewer's saved time zone, date format and number format (activity times `page.tsx:295`, chart day labels `:225`, counts `:413`), and the daily charts count calendar days in the saved zone (`page.tsx:130`), so a bar and the activity times beside it agree about which day it is.
+Accessibility: cards and list tables are semantic; the Insights section is `aria-labelledby` its heading (`page.tsx:159`). No axe violations.
+i18n: run `en` + `uk`; card labels, chart captions, and dates localize; no raw message keys. Dates and counts go through the app formatter, so they follow the viewer's saved time zone, date format and number format (activity times `page.tsx:296`, chart day labels `:226`, counts `:414`), and the daily charts count calendar days in the saved zone (`page.tsx:131`), so a bar and the activity times beside it agree about which day it is.
 
 ---
 
@@ -208,11 +208,11 @@ i18n: run `en` + `uk`; card labels, chart captions, and dates localize; no raw m
 
 - Route: `/app/administrator/users` · Example URL: `/en/app/administrator/users` · Code: `src/app/[locale]/(secure)/app/administrator/users/page.tsx:23`
 - Purpose: The paginated directory of application users and the entry point to every per-user action. Columns: email (links to detail), display name, organization(s), status badge, created date. Supports search, a status filter, sort, pagination, bulk actions, and CSV export.
-- Guard / who can access: page guard `admin.users.read` → `notFound()` on denial (`users/page.tsx:29`); the list API `GET /api/administrator/users` requires the same (`api/administrator/users/route.ts:53`). The "New user" CTA renders only when the caller also holds `admin.users.create` (`users/page.tsx:33`). Bulk actions each require the action's own permission (below).
+- Guard / who can access: page guard `admin.users.read` → `notFound()` on denial (`users/page.tsx:29`); the list API `GET /api/administrator/users` requires the same (`api/administrator/users/route.ts:66`). The "New user" CTA renders only when the caller also holds `admin.users.create` (`users/page.tsx:33`). Bulk actions each require the action's own permission (below).
 - Access matrix:
   - Member → **404**.
   - Limited Admin → sees the list; "New user" button **hidden** (no `admin.users.create`); can run **approve/block** bulk actions (`admin.users.manage`) but not **ban** (`admin.users.ban`) or **soft-delete** (`admin.users.delete`) — those return 403 from the bulk API.
-  - Org Admin → full list scoped to ORG A; all bulk actions available; sees only ORG A org name(s) per row (`api/.../users/route.ts:109`).
+  - Org Admin → full list scoped to ORG A; all bulk actions available; sees only ORG A org name(s) per row (`api/.../users/route.ts:122`).
   - Superadmin → all users across all orgs; the organization column shows every org a user belongs to.
 - Preconditions & test data: `pnpm db:seed:dev` gives ~21 single-org users + 3 cross-org members. Bulk "select all matching" re-applies the same allow-listed `status`/`q` filters server-side (`api/.../users/bulk/route.ts:173`).
 
@@ -257,12 +257,12 @@ User stories
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Apply a status filter. | Grid narrows. |
-    | 2 | Click **Export CSV** (`exportResource="users"`, `_users-grid.tsx:313`). | A CSV file downloads containing the filtered rows. |
+    | 2 | Click **Export CSV** (`exportResource="users"`, `_users-grid.tsx:311`). | A CSV file downloads containing the filtered rows. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Cross-tenant scoping → as `orgadmin@orga.local`, no `org-b`/`org-c` users ever appear, and the organization column shows only ORG A (revealing a shared user's other orgs would itself be a leak — `api/.../users/route.ts:109`).
-2. Rate limit → rapid bulk actions hit the bulk budget; the server responds 429 and the UI shows the "rate limited" toast (`_users-grid.tsx:179`, `api/.../users/bulk/route.ts:138`).
+1. Cross-tenant scoping → as `orgadmin@orga.local`, no `org-b`/`org-c` users ever appear, and the organization column shows only ORG A (revealing a shared user's other orgs would itself be a leak — `api/.../users/route.ts:122`).
+2. Rate limit → rapid bulk actions hit the bulk budget; the server responds 429 and the UI shows the "rate limited" toast (`_users-grid.tsx:171`, `api/.../users/bulk/route.ts:138`).
 3. Bulk "select all matching" cannot pivot columns — only `status` and `q` are honored server-side; any other filter, a status outside the five, or an empty status list is refused with 400 `invalid_body` rather than dropped, which used to widen the batch to every status (F-114, `api/.../users/bulk/route.ts:184`).
 4. Empty state → a filter with no matches shows the grid's empty state; a fetch failure shows the grid's inline error.
 5. Soft-delete and restore (F-57, I-19) → as `superuser@orga.local`, give `user4@orga.local` an API key (sign in as them, **Account → API keys**, tick `account.read`), then ban them with `POST /api/administrator/users/{id}/ban` (`{"reason":"abuse"}`) and soft-delete them from the list's bulk **Delete selected (soft)**. Administrator → **API keys** lists the key as revoked with reason `owner_deleted`. Tick `user4` and run **Approve selected**: the toast reports 1 failed, and `POST …/users/{id}/status` (`{"action":"approve"}`), `POST …/unban` and `POST …/ban` each answer **409** `use_restore`. `POST …/users/{id}/restore` answers 200 `pending_approval`; approve `user4` and try to sign in as them: still refused, because the abuse ban is back (`admin.user.restored` shows `banReinstated: true`), and the old key still answers 401. Unban `user4` afterwards (`POST …/unban`).
@@ -277,14 +277,14 @@ i18n: run `en` + `uk`; column headers, status badges, filter labels, and toasts 
 
 ## ADMIN-USERS-NEW — Create user
 
-- Route: `/app/administrator/users/new` · Example URL: `/en/app/administrator/users/new` · Code: `src/app/[locale]/(secure)/app/administrator/users/new/page.tsx:16`
+- Route: `/app/administrator/users/new` · Example URL: `/en/app/administrator/users/new` · Code: `src/app/[locale]/(secure)/app/administrator/users/new/page.tsx:26`
 - Purpose: Create a new user. The form posts to `POST /api/administrator/users`, which creates the Better Auth identity, then, in one transaction, the `app_users` row and (for an Org Admin, not a Superadmin) a membership in the org the admin acts in. New users default to `pending_approval` so an admin still approves them: the org's sign-up policy does not activate them at sign-in, even when it is `auto_active` (F-480). For an Org Admin the enrolment also takes `admin.users.update` or `admin.orgs.update`, and an Active user `admin.users.manage` (F-480, edge case 7).
-- Guard / who can access: page guard `admin.users.create` → `notFound()` (`users/new/page.tsx:23`); the API requires `admin.users.create` (`api/.../users/route.ts:170`). Validated by the shared `createUserSchema` on both client and server (`_new-user-form.tsx:18`).
+- Guard / who can access: page guard `admin.users.create` → `notFound()` (`users/new/page.tsx:33`); the API requires `admin.users.create` (`api/.../users/route.ts:199`). Validated by the shared `createUserSchema` on both client and server (`_new-user-form.tsx:18`).
 - Access matrix:
   - Member / Limited Admin → **404** at the page (the `admin` role lacks `admin.users.create`). Because the CTA is hidden on the list, they reach this only by typing the URL.
   - Org Admin / Superadmin → form renders.
   - A role holding `admin.users.create` but neither `admin.users.update` nor `admin.orgs.update` (a custom role in one org) → the page renders, but shows a notice naming those two permissions in place of the form: its create would enrol the user in the org, and the API refuses every one it could submit (F-480, edge case 7). The nav link and the list's **New user** button still show, as both are gated on the page's own key.
-- Preconditions & test data: fields — email (required), display name (optional; max 200, and a line break, tab or invisible formatting character is refused with `validation.nameCharacters`, F-21), password (required; hint shown), Better Auth role (`user`; `admin` is offered to a Superadmin only, F-13), initial app status (`pending_approval`/`active`; **Active** is offered only to a Superadmin or a caller holding `admin.users.manage` as well as a membership permission, F-480), preferred locale (`en`/`es`/`fr`/`uk`). Required markers derive from the schema (`RequiredLegend`, `_new-user-form.tsx:104`).
+- Preconditions & test data: fields — email (required), display name (optional; max 200, and a line break, tab or invisible formatting character is refused with `validation.nameCharacters`, F-21), password (required; hint shown), Better Auth role (`user`; `admin` is offered to a Superadmin only, F-13), initial app status (`pending_approval`/`active`; **Active** is offered only to a Superadmin or a caller holding `admin.users.manage` as well as a membership permission, F-480), preferred locale (any of the eight app locales). Required markers derive from the schema (`RequiredLegend`, `_new-user-form.tsx:122`).
 
 User stories
 
@@ -307,7 +307,7 @@ User stories
     |---|---|---|
     | 1 | On the form, type `not-an-email` in Email and click elsewhere. | The email field shows an error border and a localized validation message. |
     | 2 | Submit with the password blank. | The password field shows a required-field error; the form does not submit. |
-    | 3 | Enter the email of an existing user and a valid password; submit. | The **email** field shows "email already taken" (server 409 mapped to the field, `_new-user-form.tsx:81`). |
+    | 3 | Enter the email of an existing user and a valid password; submit. | The **email** field shows "email already taken" (server 409 mapped to the field, `_new-user-form.tsx:99`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - ADMIN-USERS-NEW-S3 — As a Limited Admin, I want this page to be closed to me, so that I cannot create users I have no permission to create.
@@ -321,23 +321,23 @@ User stories
 
 Negative & edge cases
 1. Required-field markers → the `*` appears on required fields (email, password) from the schema; submitting empty shows localized messages.
-2. 400 (malformed body) → a form-level banner ("invalid body", `_new-user-form.tsx:85`); 403 → a "forbidden" banner (defensive — the page already 404s non-creators).
-3. Rate limit → repeated creates hit the mutation budget; the server returns 429 (`api/.../users/route.ts:173`) and the form shows the generic error toast.
+2. 400 (malformed body) → a form-level banner ("invalid body", `_new-user-form.tsx:103`); 403 → a "forbidden" banner (defensive — the page already 404s non-creators).
+3. Rate limit → repeated creates hit the mutation budget; the server returns 429 (`api/.../users/route.ts:202`) and the form shows the generic error toast.
 4. Concurrency → two creates racing on the same email: the loser gets the same 409 `email_taken`. There is no unique index on the `app_users` email; Better Auth's unique email refuses the loser inside the create call, and the route maps that refusal to 409 (F-30, `src/lib/admin/auth-email-taken.ts`). The loser also leaves one `admin.user.create_failed` row (reason `auth_user_exists`) in the Audit log, with an empty Target and the address in the Email field of the row's detail pane (**View**). An address Better Auth holds with no user row at all (for example a self-sign-up whose provisioning failed) gets the same 409 and the same row, never a 500.
 5. The platform role is Superadmin-only (F-13) → as `orgadmin@orga.local`, the **Better Auth role** select offers only `user`. A hand-made `POST /api/administrator/users` (or `POST /api/v1/users`) with `"role":"admin"` answers **403** `forbidden` and creates nobody, the same rule as `POST /users/[id]/role`; the audit explorer shows `administrator.access.denied` (`api.access.denied` for the v1 call) with reason `cross_org_reach_required` (F-58). As `superuser@orga.local` the select also offers `admin`, and the create succeeds.
 6. Machine callers can do what the console does (F-13) → with `API_KEYS_ENABLED` on, sign in as `superuser@orga.local`, create a key on **Account → API keys** with the `admin.users.create`, `admin.users.read`, `admin.users.update`, `admin.users.manage`, `admin.users.ban` and `admin.users.sessions` scopes ticked (`admin.users.update` because the create enrols the user in the key's org, and `admin.users.manage` because an Active user is an approval: case 7), and call with `Authorization: Bearer drk_…`: `POST /api/v1/users` with `"initialAppStatus":"active"` answers **201** and the new user can sign in with the password you sent. The key is bound to one org, and the create enrols the user there with an **active** membership (the default `pending_approval` gives a pending one, which `POST /api/v1/users/{id}/status` with `{"action":"approve"}` activates along with the user). So the key reaches the user it created with no Superadmin step between: `GET /api/v1/users/{id}` answers **200** and `GET /api/administrator/users/{id}/memberships` lists that one org; `POST /api/administrator/users/{id}/ban` (`{"reason":"…"}`) answers **200** and signs that user out; `GET /api/administrator/users/{id}/sessions` lists their sessions. Before F-13 the create, ban and session calls answered **502** after passing the permission checks (the MCP `createUser` tool too), and until the create enrolled the user, every call on `/users/{id}` answered **404** to the key. Banning the key's own owner is refused (502 `auth_ban_failed`), as it is from the console. The platform role is the exception: the same `POST /api/v1/users` with `"role":"admin"` answers **403** `forbidden` although the key's owner is a Superadmin, because every key is bound to one org (MACHINE-2); only a Superadmin's cookie session mints that role (case 5).
 7. A confined create grants no more than the explicit paths would (F-480) → with a key like case 6's but scoped to `admin.users.create` and `admin.users.read` only, `POST /api/v1/users` answers **403** `forbidden` whatever `initialAppStatus` says, with a `detail` naming `admin.users.update or admin.orgs.update`, and nobody is created (as the Superadmin, the **Users** list has no such address). Add `admin.users.update` to the scopes: the default create answers **201** with a pending membership, while `"initialAppStatus":"active"` answers **403** naming `admin.users.manage`. The **Audit** log shows each refusal as `admin.user.create_denied` (`denied`) with an empty Target, the address in the Email field, and reason `enrolment_not_permitted` or `activation_not_permitted`. The same key (with `admin.users.update`) creating an address on a domain a Superadmin bound to another org (Organizations → *org* → **Providers**, provider `email`) gets **403** with reason `email_domain_claimed`: invite that address instead. Sign in as the pending user in an org whose sign-up policy is `auto_active` (the seeded platform default): it lands on the pending-approval page, and stays pending until `POST /api/v1/users/{id}/status` `approve`. A follow-up `POST /api/administrator/users/{id}/memberships` for the key's own org answers **409** `membership_exists`: the create already enrolled the user there.
 
 Accessibility: labelled fields, `noValidate` form with RHF messages, keyboard submit, visible focus. No axe violations.
-i18n: run `en` + `uk`; labels, the password hint, status options, and error messages localize. The locale dropdown offers `en`/`es`/`fr`/`uk` only (`_new-user-form.tsx:30`) — **`TODO: verify`** whether that narrower set (vs. the app's 8 locales) is intentional for admin-created users.
+i18n: run `en` + `uk`; labels, the password hint, status options, and error messages localize. The locale dropdown offers all eight app locales (`_new-user-form.tsx:210`).
 
 ---
 
 ## ADMIN-USERS-DETAIL — User detail (header + tabs container)
 
-- Route: `/app/administrator/users/[userId]` · Example URL: `/en/app/administrator/users/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:28`
+- Route: `/app/administrator/users/[userId]` · Example URL: `/en/app/administrator/users/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:34`
 - Purpose: The per-user workspace: a metadata header (name, email, status badge, optional Impersonate button) plus a tabbed container — Overview, Roles, Groups, Memberships, Sessions, and (permission-gated) Audit.
-- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:35`); the `userId` must be a UUID (`:40`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:69`, `access-scope.server.ts:96`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.users.impersonate` and an Active account (Impersonate button, F-148) — `[userId]/page.tsx:87`–`:103`. A tab whose API demands MORE than `admin.users.read` is rendered only for a caller who holds that key (review #76): **Groups** needs `admin.groups.read`, **Sessions** needs `admin.users.sessions`, **Audit** needs `admin.audit.read` (`_user-detail-tabs.tsx:82`,`:84`,`:85`). No tab in the bar leads to a 403.
+- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:41`); the `userId` must be a UUID (`:46`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:75`, `access-scope.server.ts:386`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.users.impersonate` and an Active account (Impersonate button, F-148) — `[userId]/page.tsx:90`–`:110`. A tab whose API demands MORE than `admin.users.read` is rendered only for a caller who holds that key (review #76): **Groups** needs `admin.groups.read`, **Sessions** needs `admin.users.sessions`, **Audit** needs `admin.audit.read` (`_user-detail-tabs.tsx:82`,`:84`,`:85`). No tab in the bar leads to a 403.
 - Access matrix:
   - Member → **404**.
   - Limited Admin → header + Overview/Roles/Memberships tabs, **plus** the Audit tab (holds `admin.audit.read`). The **Groups** and **Sessions** tabs are **absent** — the `admin` role holds neither `admin.groups.read` nor `admin.users.sessions` (review #76). Roles/Memberships show **no** mutate buttons; the Impersonate button is absent.
@@ -364,16 +364,16 @@ User stories
     | 1 | Sign in as `superuser@orga.local`; open an `org-b` user's detail; copy the UUID from the URL. | You have a valid `org-b` user id. |
     | 2 | Sign out; sign in as `orgadmin@orga.local`. | ORG A console. |
     | 3 | Paste `/en/app/administrator/users/<org-b-uuid>` into the address bar. | **Not Found** (404). Not "Forbidden". |
-    | 4 | Try a made-up UUID and a non-UUID string. | Both → **Not Found** (`[userId]/page.tsx:40`). |
+    | 4 | Try a made-up UUID and a non-UUID string. | Both → **Not Found** (`[userId]/page.tsx:46`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Non-UUID or unknown id → 404 (`page.tsx:40`, `:63`).
-2. Cross-tenant id → 404 via `canAccessUser` (`page.tsx:69`), not 403.
+1. Non-UUID or unknown id → 404 (`page.tsx:46`, `:69`).
+2. Cross-tenant id → 404 via `canAccessUser` (`page.tsx:75`), not 403.
 3. A soft-deleted (`deactivated`) user shows a warning panel on Overview with the deactivation timestamp/actor/reason (`_user-detail-tabs.tsx:107`).
 
 Accessibility: tabs follow the tablist pattern (arrow-key navigation, roving focus); the header actions are reachable by keyboard. No axe violations.
-i18n: run `en` + `uk`; tab labels, field labels, and dates localize; status uses the `status.*` catalog (unknown enum values render verbatim, `page.tsx:144`).
+i18n: run `en` + `uk`; tab labels, field labels, and dates localize; status uses the `status.*` catalog (unknown enum values render verbatim, `page.tsx:220`).
 
 ---
 
@@ -408,13 +408,13 @@ i18n: run `en` + `uk`; field labels and the created/updated line localize; the i
 
 ## ADMIN-USERS-DETAIL-ROLES — User detail: Roles tab
 
-- Route: `/app/administrator/users/[userId]` (Roles tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-roles-panel.tsx:41`
+- Route: `/app/administrator/users/[userId]` (Roles tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-roles-panel.tsx:48`
 - Purpose: Lists the application role assignments the user holds (role name, key, organization, assigned date). With the right permission, the operator can assign a role (dialog + picker) or remove one.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:39`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:75`, `_user-roles-panel.tsx:160`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:92`, `:191`). The **Assign** button also needs `admin.roles.read`, because its picker lists roles from `GET /api/administrator/roles`; Remove does not. The role name links to the role page only for a holder of `admin.roles.read`, and the organization to its page only for a holder of `admin.orgs.read`; otherwise both are plain text (F-67).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:40`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:90`, `_user-roles-panel.tsx:182`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:105`, `:242`). The **Assign** button also needs `admin.roles.read`, because its picker lists roles from `GET /api/administrator/roles`; Remove does not. The role name links to the role page only for a holder of `admin.roles.read`, and the organization to its page only for a holder of `admin.orgs.read`; otherwise both are plain text (F-67).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **sees the assignments list** (has `admin.users.read`) but **no** Assign button and **no** per-row Remove (lacks `admin.roles.assign`); role and organization names are plain text (lacks `admin.roles.read` and `admin.orgs.read`, F-67).
-  - Org Admin / Superadmin → list + Assign + Remove. An org admin may assign only roles in their own org, and (privilege-escalation guard) only roles whose conferred permissions are a subset of their own (`api/.../app-roles/route.ts:165`).
+  - Org Admin / Superadmin → list + Assign + Remove. An org admin may assign only roles in their own org, and (privilege-escalation guard) only roles whose conferred permissions are a subset of their own (`api/.../app-roles/route.ts:166`).
 - Preconditions & test data: a user in ORG A; at least one assignable ORG A role. The `dev-init` Engineering group confers the `admin` role, so ORG A has assignable roles.
 
 User stories
@@ -441,10 +441,10 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Privilege escalation blocked → an org admin assigning a role that confers a permission they lack gets 403 (`api/.../app-roles/route.ts:165`); the panel shows the assign error, and the user's **Audit** tab shows `admin.permission.conferral_denied` (`metadata.action: role_assign`, the refused keys in `metadata.unheldPermissions`; F-58).
-2. Cross-tenant role/org → assigning with a foreign org/role id → 404 (not 403), so a foreign org's existence is not confirmed (`api/.../app-roles/route.ts:138`, `:141`).
-3. Remove is idempotent → removing an already-removed assignment still returns success (`api/.../app-roles/route.ts:190`).
-4. Inline error → a failed remove surfaces `role="alert"` text above the grid (`_user-roles-panel.tsx:184`).
+1. Privilege escalation blocked → an org admin assigning a role that confers a permission they lack gets 403 (`api/.../app-roles/route.ts:166`); the panel shows the assign error, and the user's **Audit** tab shows `admin.permission.conferral_denied` (`metadata.action: role_assign`, the refused keys in `metadata.unheldPermissions`; F-58).
+2. Cross-tenant role/org → assigning with a foreign org/role id → 404 (not 403), so a foreign org's existence is not confirmed (`api/.../app-roles/route.ts:151`, `:154`).
+3. Remove is idempotent → removing an already-removed assignment still returns success (`api/.../app-roles/route.ts:238`).
+4. Inline error → a failed remove surfaces `role="alert"` text above the grid (`_user-roles-panel.tsx:210`).
 5. Superadmin, a user in several orgs → sign in as Superadmin, open that user's Roles tab, click **Assign**, and in the picker type one of the user's org names, then a role key. The picker lists the server's matches (role key, role name or the role's org name) among the user's active orgs only, offers only org-scoped roles, and shows "Showing N of M" while more match than are listed (F-41, F-154).
 6. A role holding `admin.users.read` + `admin.roles.assign` but not `admin.roles.read` (a custom role) → per-row **Remove** is offered, **Assign** is not, and the audit log records no `administrator.access.denied` for opening the tab (F-67).
 7. User not an active member → for a user whose only membership is pending approval, blocked or suspended, the picker shows "No roles found." and, below it, says the user is not an active member of any organization you manage; a hand-made `POST …/app-roles` in that org, or (as Superadmin) in an org the user never joined, → 404 `user_not_found` and nothing is assigned (F-154).
@@ -458,12 +458,12 @@ i18n: run `en` + `uk`; column headers, buttons, dialog text, and error messages 
 
 - Route: `/app/administrator/users/[userId]` (Groups tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-groups-panel.tsx:37`
 - Purpose: Lists the groups the user belongs to and, with permission, lets the operator add the user to a group (dialog + picker) or remove them. Group membership confers the union of the group's roles' permissions (ADR-0002).
-- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:35`), and the tab TRIGGER is gated on the same key so a caller without it never reaches the panel (`_user-detail-tabs.tsx:82`, review #76). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:76`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:82`, `:152`).
+- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:38`), and the tab TRIGGER is gated on the same key so a caller without it never reaches the panel (`_user-detail-tabs.tsx:82`, review #76). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:91`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:86`, `:180`).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Groups tab is **not rendered** at all: the `admin` role lacks `admin.groups.read`, which now gates the tab trigger (review #76). The API is still the boundary — a hand-made `GET …/groups` for that user answers 403.
-  - Org Admin / Superadmin → list + Add + Remove. An org admin sees only their org's groups; adding to a group whose conferred permissions exceed the admin's is blocked (`api/.../groups/route.ts:119`).
-- Preconditions & test data: ORG A has the `Engineering` and `Customer Support` groups (`dev-init.ts:135`). Use a user who is not yet a member so the picker has something to add.
+  - Org Admin / Superadmin → list + Add + Remove. An org admin sees only their org's groups; adding to a group whose conferred permissions exceed the admin's is blocked (`api/.../groups/route.ts:120`).
+- Preconditions & test data: ORG A has the `Engineering` and `Customer Support` groups (`dev-init.ts:145`). Use a user who is not yet a member so the picker has something to add.
 
 User stories
 
@@ -488,9 +488,9 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Privilege escalation blocked → adding a user to a more-authoritative group → 403 (`api/.../groups/route.ts:119`); panel shows the add error.
+1. Privilege escalation blocked → adding a user to a more-authoritative group → 403 (`api/.../groups/route.ts:120`); panel shows the add error.
 2. User must be an active member of the group's org → the picker offers only the groups of the user's active orgs (a user with no active membership in scope is offered none, and the picker says why); a hand-made `POST …/groups` naming a group in another org, or in an org where the user's membership is pending approval, blocked or suspended, → 404 `user_not_found`, the answer the group page's **Add member** gives (F-154).
-3. Cross-tenant group id → 404 (not 403) (`api/.../groups/route.ts:108`).
+3. Cross-tenant group id → 404 (not 403) (`api/.../groups/route.ts:112`).
 4. Empty state / loading skeleton / inline error are all handled by the panel (`_user-groups-panel.tsx:146`, `:152`).
 5. Superadmin, a user in two orgs that each hold a group with the same key and name → sign in as Superadmin, open that user's Groups tab and click **Add**. Each option names its org, and typing one org's name narrows the list to that org's groups (F-41).
 
@@ -501,9 +501,9 @@ i18n: run `en` + `uk`; title, buttons, dialog, empty and error text localize.
 
 ## ADMIN-USERS-DETAIL-MEMBERSHIPS — User detail: Memberships tab
 
-- Route: `/app/administrator/users/[userId]` (Memberships tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-memberships-panel.tsx:28`
+- Route: `/app/administrator/users/[userId]` (Memberships tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-memberships-panel.tsx:29`
 - Purpose: Lists the user's organization memberships (org slug/name, status, source provider, joined date). With permission, the operator can remove a membership.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:35`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:77`, `_user-memberships-panel.tsx:111`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:326`). The organization slug links to the organization page only for a holder of `admin.orgs.read`, that page's guard, and is plain text otherwise (F-67).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:66`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:92`, `_user-memberships-panel.tsx:120`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:431`). The organization slug links to the organization page only for a holder of `admin.orgs.read`, that page's guard, and is plain text otherwise (F-67).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → sees the memberships list (`admin.users.read`) but **no** Remove action (lacks `admin.users.update`), and org slugs are plain text (lacks `admin.orgs.read`, F-67).
@@ -535,7 +535,7 @@ User stories
 
 Negative & edge cases
 1. Cross-tenant scoping → an org admin sees only ORG A memberships of the user; a shared user's other-org memberships do not appear.
-2. Inline error → a failed remove shows `role="alert"` text (`_user-memberships-panel.tsx:135`).
+2. Inline error → a failed remove shows `role="alert"` text (`_user-memberships-panel.tsx:148`).
 3. Empty state → a user with no in-scope memberships shows the grid empty state.
 4. Grants the caller could not confer → a removal whose roles or groups in that org confer a permission the caller cannot confer is refused with **403** `forbidden` and an `admin.membership.revocation_denied` audit row, and nothing is removed (REVOKE-1, F-12). The panel shows the generic remove error.
 
@@ -548,11 +548,11 @@ i18n: run `en` + `uk`; column headers, the status badge, and the joined date loc
 
 - Route: `/app/administrator/users/[userId]` (Sessions tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-sessions-panel.tsx:35`
 - Purpose: Lists the user's active Better Auth sessions (expiry, IP, user agent) and lets the operator revoke one session or all of them (force sign-out everywhere).
-- Guard / who can access: both the list `GET` and the revoke `DELETE` (single + all) require `admin.users.sessions` (`api/.../users/[id]/sessions/route.ts:32`, `:70`; single-session `DELETE` at `api/.../users/[id]/sessions/[sessionId]/route.ts:27`). The tab TRIGGER is gated on the same key (`_user-detail-tabs.tsx:84`, review #76), so a caller without `admin.users.sessions` is never offered the tab; the API stays the boundary for anyone who calls it directly.
+- Guard / who can access: both the list `GET` and the revoke `DELETE` (single + all) require `admin.users.sessions` (`api/.../users/[id]/sessions/route.ts:43`, `:87`; single-session `DELETE` at `api/.../users/[id]/sessions/[sessionId]/route.ts:45`). The tab TRIGGER is gated on the same key (`_user-detail-tabs.tsx:84`, review #76), so a caller without `admin.users.sessions` is never offered the tab; the API stays the boundary for anyone who calls it directly.
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Sessions tab is **not rendered** (the `admin` role lacks `admin.users.sessions`, which gates the trigger); a direct call to the sessions API answers 403, so revoke is impossible either way.
-  - Org Admin / Superadmin → list + revoke. A session is not tied to an org, so both revokes ("Revoke all" and the per-row **Revoke**) are account-global: for a user shared across tenants they are Superadmin-only, and an org admin may revoke only the sessions of a user confined to their org (`api/.../sessions/route.ts:114`, `api/.../sessions/[sessionId]/route.ts:76`, F-60; `access-scope.server.ts:358`).
+  - Org Admin / Superadmin → list + revoke. A session is not tied to an org, so both revokes ("Revoke all" and the per-row **Revoke**) are account-global: for a user shared across tenants they are Superadmin-only, and an org admin may revoke only the sessions of a user confined to their org (`api/.../sessions/route.ts:114`, `api/.../sessions/[sessionId]/route.ts:76`, F-60; `access-scope.server.ts:429`).
 - Preconditions & test data: sign the target user in on a second browser/device first so there is a live session to list and revoke.
 
 User stories
@@ -593,12 +593,12 @@ i18n: run `en` + `uk`; expiry/IP/user-agent labels, the empty message and both c
 
 - Route: `/app/administrator/users/[userId]` (Audit tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-audit-panel.tsx:12`
 - Purpose: The user-scoped audit trail — `app_audit_events` rows about this user — rendered by the shared audit grid with its global filter toolbar hidden (the view is already scoped). Each row opens a detail sheet with full metadata.
-- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:79`, `_user-detail-tabs.tsx:85`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:38`).
+- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:103`, `_user-detail-tabs.tsx:94`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:39`).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **Audit tab present and working** (the `admin` role holds `admin.audit.read`), scoped to ORG A.
   - Org Admin → Audit tab present, ORG A only: every action ORG A's admins took on the user, and every membership or role change in ORG A whoever made it (F-32), except a superadmin membership change spanning several orgs in one request: its user-level row is a platform row, and ORG A sees its own `admin.organization.member_*` row in the audit log instead, not on this tab. A superadmin's other actions on the user are platform rows too. Superadmin → all orgs, including platform events with a null org for this user.
-- Preconditions & test data: `dev-init.ts` back-dates audit rows (`:552`); performing an admin action on the user (approve/assign/etc.) also generates fresh rows.
+- Preconditions & test data: `dev-init.ts` back-dates audit rows (`:571`); performing an admin action on the user (approve/assign/etc.) also generates fresh rows.
 
 User stories
 
@@ -623,7 +623,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Cross-tenant scoping → an org admin sees only ORG A events for the user; platform (null-org) events are Superadmin-only (`api/.../audit/route.ts:55`).
+1. Cross-tenant scoping → an org admin sees only ORG A events for the user; platform (null-org) events are Superadmin-only (`api/.../audit/route.ts:56`).
 2. Empty state → a user with no in-scope events shows the grid empty state.
 3. The metadata sheet renders JSON as text only — no value is executed (`_audit-grid.tsx:39`).
 
@@ -634,8 +634,8 @@ i18n: run `en` + `uk`; column headers, outcome badge, and the detail-sheet label
 
 ## Impersonation (cross-cutting journey rooted in the user detail)
 
-- Where: the Impersonate button in the detail header (`_impersonate-button.tsx:42`) + `POST`/`DELETE /api/administrator/users/[id]/impersonate` (`api/.../users/[id]/impersonate/route.ts:45`, `:140`).
-- Guard: the button renders only when the page passed `canImpersonate` = `admin.users.impersonate` **and the account is Active** (F-148, `[userId]/page.tsx`). Start requires `admin.users.impersonate`; you cannot impersonate yourself (400, `impersonate/route.ts:62`); a non-superadmin cannot impersonate a more-privileged target (403 privilege-escalation guard, `:71`); and the target must be one the secure shell would admit, resolved as the borrowed session will be (403 `forbidden` with `reason: "target_not_active"` otherwise, F-148). **Stop** is deliberately NOT gated on admin permission — the live session is the target (usually a plain member) — so stop authorizes from the session's `impersonatedBy` marker (`impersonate/route.ts:140` and its header comment).
+- Where: the Impersonate button in the detail header (`_impersonate-button.tsx:42`) + `POST`/`DELETE /api/administrator/users/[id]/impersonate` (`api/.../users/[id]/impersonate/route.ts:82`, `:453`).
+- Guard: the button renders only when the page passed `canImpersonate` = `admin.users.impersonate` **and the account is Active** (F-148, `[userId]/page.tsx`). Start requires `admin.users.impersonate`; you cannot impersonate yourself (400, `impersonate/route.ts:136`); a non-superadmin cannot impersonate a more-privileged target (403 privilege-escalation guard, `:213`); and the target must be one the secure shell would admit, resolved as the borrowed session will be (403 `forbidden` with `reason: "target_not_active"` otherwise, F-148). **Stop** is deliberately NOT gated on admin permission — the live session is the target (usually a plain member) — so stop authorizes from the session's `impersonatedBy` marker (`impersonate/route.ts:453` and its header comment).
 
 - ADMIN-USERS-IMPERSONATE-S1 — As an Org Admin, I want to act as a user to reproduce their problem, so that I can support them accurately; and I want a one-click way back.
   - Acceptance criteria: Given `admin.users.impersonate` and a lower-or-equal-privileged target, when I confirm impersonation, then I land in the secure shell as that user; when I click "Stop impersonating", then I return to my admin account (a full reload to `/app`).
@@ -662,8 +662,8 @@ i18n: run `en` + `uk`; column headers, outcome badge, and the detail-sheet label
 Negative & edge cases
 1. Self-impersonation → button disabled client-side; the API also rejects with 400.
 2. Missing permission → the button is absent for a persona without `admin.users.impersonate` (Limited Admin, Member).
-3. Rate limit → repeated start calls hit the mutation budget (429, `impersonate/route.ts:49`).
-4. Stop always works → even if the admin's impersonate permission was revoked mid-session, "Stop" still returns them to their own account (`impersonate/route.ts:140` comment).
+3. Rate limit → repeated start calls hit the mutation budget (429, `impersonate/route.ts:86`).
+4. Stop always works → even if the admin's impersonate permission was revoked mid-session, "Stop" still returns them to their own account (`impersonate/route.ts:453` comment).
 5. The target's credentials stay out of reach → while impersonating, Better Auth lets the session do only two things, read itself and sign out; everything else fails in one of two ways (IMP-3 / F-06, `src/lib/auth-admin-surface.ts`):
    - **403, audited.** The target's **Security** page cannot list or revoke sessions or change the password: `/list-sessions`, `/revoke-session`, `/revoke-other-sessions` and `/change-password` answer 403, as does every other endpoint outside that pair except those in the next bullet. Each refusal is audited as `account.impersonated_access.denied` with the **admin** as the actor.
    - **404, not audited.** Provider tokens, linked logins and password checks (`/list-accounts`, `/get-access-token`, `/unlink-account`, `/verify-password` and the rest of `AUTH_DISABLED_PATHS`) are not mounted at all, and the raw admin plugin (`/api/auth/admin/*`) is closed. Both answer 404 to every caller, impersonating or not, before any check of the session, so they write no audit row. Do not look for one.
@@ -711,7 +711,7 @@ Legend: **view** = can open/read the screen; **act** = can perform the screen's 
 
 ## `TODO: verify` items
 
-1. **Limited Admin fixture** — no seed creates a user whose only role is `admin`; a tester must assign it manually (or add an `admin`-only fixture) to run the partial-permission stories. (`baseline-roles.ts:27-31`, `dev-init.ts:249`.)
+1. **Limited Admin fixture** — no seed creates a user whose only role is `admin`; a tester must assign it manually (or add an `admin`-only fixture) to run the partial-permission stories. (`baseline-roles.ts:27-31`, `dev-init.ts:260`.)
 2. **"No audit" persona** — every seeded admin role includes `admin.audit.read`, so ADMIN-USERS-DETAIL-AUDIT-S2 needs a hand-built role that omits it.
-3. **New-user locale set** — the create form offers only `en`/`es`/`fr`/`uk` (`_new-user-form.tsx:30`) vs. the app's 8 locales; confirm the narrower admin set is intentional.
+3. **New-user locale set** — resolved: the create form now offers all eight app locales (`_new-user-form.tsx:210`).
 4. **Impersonation escalation target in scope** — ADMIN-USERS-IMPERSONATE-S2 step 2 assumes `superuser@orga.local` is resolvable by `orgadmin@orga.local` (same ORG A). Confirm the superuser holds an ORG A membership so the 403 path (not a 404) is what a tester observes. (If the superuser is out of the org admin's scope, the observed result is 404, not the 403 escalation refusal.)

@@ -3,7 +3,7 @@ import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
 import { readOutboxDeliveryLink } from "./helpers/outbox-db";
 
 /**
- * End-to-end proof of the invitation flow (0008):
+ * End-to-end proof of the invitation flow:
  *
  *   admin invites an address → the accept link lands in the outbox →
  *   a NEW user opens it, creates an account with the locked invited email →

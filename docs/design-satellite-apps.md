@@ -180,9 +180,13 @@ satellite to the primary's `auth` schema shape + Better Auth version, and shares
 one failure/resource domain. In exchange you get the least code, the best UX, one
 identity source, and **instant central revocation**. Note rolling-session refresh
 *writes* to `session`, so a strictly read-only DB role breaks refresh — scope the
-grant deliberately. (Two facts apply to A, B, and C alike: the Better Auth `user`
-id is the IdP's `sub`, and the handoff token carries `email`/`locale`/`org`/`roles`
-but **no display name**, so `name` is derived.)
+grant deliberately. (Two more facts: in every option the Better Auth `user` id is
+the IdP's `sub`; and the handoff token that A and B consume (C2 has none) carries
+only `sub`, `email`, `locale`, `targetApplicationId` and `jti` — **no
+organization, no roles and no display name** — so `name` is derived and a
+satellite takes membership and roles from its own store or the machine API
+(I-05; see
+[Integration §2](./integration-satellite-apps.md#2-how-the-sso-handoff-works-options-a--b)).)
 
 ### 3.1 How to choose
 

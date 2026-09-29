@@ -82,6 +82,14 @@ function normalize(values: AuthPolicySettingsInput): AuthPolicySettingsInput {
  * Creates or replaces the policy row for `organizationId` (or the platform
  * default when null). The row is a COMPLETE policy, so upsert semantics are
  * exact — no partial merge.
+ *
+ * One `INSERT … ON CONFLICT DO UPDATE` statement (F-97). It used to SELECT the
+ * row and then UPDATE or INSERT, so a double-submit of an org's FIRST save
+ * sent both requests down the insert branch and the loser failed on the
+ * `organization_id` unique constraint with a 500. The conflict target is that
+ * constraint for an org row, and for the platform-default row (NULL, which a
+ * plain unique constraint never matches) 0001's partial unique index on
+ * `((true)) WHERE organization_id IS NULL`.
  */
 export async function upsertOrgAuthSettings(
   organizationId: string | null,
@@ -89,42 +97,22 @@ export async function upsertOrgAuthSettings(
   updatedBy: string,
 ): Promise<void> {
   const v = normalize(values);
-  const existing = await db
-    .selectFrom("app_organization_auth_settings")
-    .select(["id"])
-    .where((eb) =>
-      organizationId
-        ? eb("organization_id", "=", organizationId)
-        : eb("organization_id", "is", null),
-    )
-    .executeTakeFirst();
-
-  if (existing) {
-    await db
-      .updateTable("app_organization_auth_settings")
-      .set({
-        require_email_verification: v.requireEmailVerification,
-        signup_approval_mode: v.signupApprovalMode,
-        allowed_auth_methods: v.allowedAuthMethods,
-        auto_approve_email_domains: v.autoApproveEmailDomains,
-        updated_by: updatedBy,
-        updated_at: sql`now()`,
-      })
-      .where("id", "=", existing.id)
-      .execute();
-    return;
-  }
-
+  const policy = {
+    require_email_verification: v.requireEmailVerification,
+    signup_approval_mode: v.signupApprovalMode,
+    allowed_auth_methods: v.allowedAuthMethods,
+    auto_approve_email_domains: v.autoApproveEmailDomains,
+    updated_by: updatedBy,
+  };
   await db
     .insertInto("app_organization_auth_settings")
-    .values({
-      organization_id: organizationId,
-      require_email_verification: v.requireEmailVerification,
-      signup_approval_mode: v.signupApprovalMode,
-      allowed_auth_methods: v.allowedAuthMethods,
-      auto_approve_email_domains: v.autoApproveEmailDomains,
-      updated_by: updatedBy,
-    })
+    .values({ organization_id: organizationId, ...policy })
+    .onConflict((oc) =>
+      (organizationId === null
+        ? oc.expression(sql`(true)`).where("organization_id", "is", null)
+        : oc.column("organization_id")
+      ).doUpdateSet({ ...policy, updated_at: sql`now()` }),
+    )
     .execute();
 }
 

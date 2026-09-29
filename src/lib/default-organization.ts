@@ -24,11 +24,16 @@
  * every default committed before it. Two-int4 form, like the MCP registration
  * lock, so it cannot collide with a lock keyed on a bare hash.
  *
- * No partial unique index backs this (`on app_organizations ((true)) where
- * is_default` would need a core migration); a legacy database that already
- * holds two defaults is resolved deterministically to the OLDEST one (see
- * `getDefaultOrganization`), which is always the original, since the old seed
- * re-run only ever added newer rows.
+ * Since migration 0007 (M-02) a partial unique index
+ * (`idx_app_organizations_single_default`, `(is_default) where is_default`)
+ * also refuses a second default, so a direct database edit cannot create one
+ * either. It does not replace this lock: an index rejects the second writer's
+ * row with an error, where the lock makes that writer wait and then clear the
+ * first one's flag. A database migrated before 0007 that already held two
+ * defaults (a pre-F-40 seed re-run after a rename) resolves deterministically
+ * to the OLDEST one (see `getDefaultOrganization`), which is always the
+ * original, since the old seed re-run only ever added newer rows; 0007's
+ * preflight refuses to apply until the extra flag is cleared.
  */
 export const DEFAULT_ORGANIZATION_LOCK_SQL =
   "select pg_advisory_xact_lock(hashtext('app_organizations'), hashtext('is_default'))";

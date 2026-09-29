@@ -8,7 +8,11 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
-import { AdminError, assertPermissionNotInUse } from "@/lib/admin/roles.server";
+import {
+  AdminError,
+  assertPermissionNotInUse,
+  isForeignKeyViolation,
+} from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -98,6 +102,10 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
  * Refuses with `permission_in_use` (HTTP 409) when the row is still
  * referenced by `app_role_permissions`. Caller MUST hold
  * `admin.permissions.manage`.
+ *
+ * F-97: the check and the delete share one transaction, with the permission
+ * row locked first (`assertPermissionNotInUse`), so a permission attached to
+ * a role while the request is in flight is refused with the 409, not a 500.
  */
 export const DELETE = withAdminRoute(async function DELETE(
   request: NextRequest,
@@ -138,9 +146,16 @@ export const DELETE = withAdminRoute(async function DELETE(
   }
 
   try {
-    await assertPermissionNotInUse(id);
+    await db.transaction().execute(async (trx) => {
+      await assertPermissionNotInUse(trx, id);
+      await trx.deleteFrom("app_permissions").where("id", "=", id).execute();
+    });
   } catch (err) {
-    if (err instanceof AdminError && err.code === "permission_in_use") {
+    // A 23503 is the backstop for a reference the guard does not count.
+    if (
+      (err instanceof AdminError && err.code === "permission_in_use") ||
+      isForeignKeyViolation(err)
+    ) {
       await auditRoleAction("admin.permission.delete_blocked", "denied", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
@@ -150,10 +165,12 @@ export const DELETE = withAdminRoute(async function DELETE(
       });
       return adminErrorResponse("permission_in_use", 409, request);
     }
+    // Deleted by a concurrent request after the read above.
+    if (err instanceof AdminError && err.code === "permission_not_found") {
+      return adminErrorResponse("not_found", 404, request);
+    }
     throw err;
   }
-
-  await db.deleteFrom("app_permissions").where("id", "=", id).execute();
 
   await auditRoleAction("admin.permission.deleted", "success", {
     request,

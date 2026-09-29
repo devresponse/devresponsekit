@@ -107,7 +107,7 @@ Google, Microsoft (Entra ID), and GitHub sign-in. Each provider is independent: 
 
 #### Microsoft (Entra ID) — [Microsoft Entra admin center](https://entra.microsoft.com/) → App registrations
 
-Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school account can sign in; personal Microsoft accounts are excluded.
+Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school account can sign in; personal Microsoft accounts are excluded. It asks for `openid profile email` only (F-150): not `offline_access`, so Entra issues no refresh token, and not Microsoft Graph `User.Read`, so the registration needs no API permission beyond those and no profile photo is fetched.
 
 1. **New registration.** Under **Supported account types** choose _Accounts in any organizational directory (multitenant)_.
 2. Add a **Redirect URI** of platform **Web** = `<BETTER_AUTH_URL>/api/auth/callback/microsoft` (during registration or later under **Authentication**).
@@ -120,6 +120,8 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 2. **Homepage URL** = your `BETTER_AUTH_URL`; **Authorization callback URL** = `<BETTER_AUTH_URL>/api/auth/callback/github`.
 3. Copy **Client ID** → `GITHUB_CLIENT_ID`.
 4. **Generate a new client secret** → copy it immediately → `GITHUB_CLIENT_SECRET`. A GitHub OAuth App allows only **one** callback URL — use a separate app per environment.
+
+> **Identity only: no provider token is kept (F-150).** Social sign-in is used to identify the person, nothing more, so the access, refresh and ID tokens a provider issues are never stored (`databaseHooks.account`, `src/lib/auth-provider-tokens.ts`); Better Auth's endpoints that would hand them out are not mounted either. Migration 0007 cleared the ones earlier builds stored ([Deployment, Migration 0007](./deployment.md#migration-0007)). A feature that needs to call a provider API on the user's behalf would have to opt back in deliberately (and should then set Better Auth's `encryptOAuthTokens`).
 
 > **After sign-in.** A social sign-up still runs through the organization's signup policy — approval mode and allowed methods — exactly like an email sign-up. Only a GitHub sign-up whose address GitHub reports verified is also placed by an email-domain binding; a Google or Microsoft one is not. See [`auth-signup-policy.md` §4](auth-signup-policy.md#4-which-organization-governs-a-sign-up).
 

@@ -161,7 +161,7 @@ Apply any new migration to production first (§1.1), then push to `main` and let
 - [ ] Sign in with the seed admin from §2; the session persists.
 - [ ] `GET https://<domain>/api/internal/outbox-drain` and `/api/internal/mcp-registration-reap` **without** the bearer header → **401** (confirms both cron endpoints are fail-closed).
 - [ ] One real drain and retention tick answers **200** `{"ok":true,…,"retention":{…}}`. It is the same work the daily cron does, so it confirms that `CRON_SECRET` is set and that retention runs on this deployment. If you hold the secret (you set it yourself, or gave it to `drk-deploy env:sync` with `--from-env`), call `GET https://<domain>/api/internal/outbox-drain` with `Authorization: Bearer <CRON_SECRET>`. If `env:sync` generated it, nobody can read it back, because it is stored `sensitive` ([F-138](../vercel-cli/README.md#f-138-secrets-are-stored-sensitive-and-kept-off-development)). Have Vercel send it instead: run the job from the production deployment's summary, or with `vercel crons run /api/internal/outbox-drain`. Then open **View Logs** for it under Settings → Cron Jobs and confirm the invocation answered 200 and logged a `kind: "retention"` line, not `retention prune tick failed`. Otherwise read the log of the next daily tick the same way.
-- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `000N-*.sql` files (`0001-initial-schema.sql`, `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql`, `0005-integrity-constraints.sql`, `0006-rate-limit-buckets.sql`, …), the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
+- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `000N-*.sql` files (`0001-initial-schema.sql`, `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql`, `0005-integrity-constraints.sql`, `0006-rate-limit-buckets.sql`, `0007-uniqueness-search-indexes-token-scrub.sql`, …), the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
 - [ ] If Sentry is configured, trigger a test error and confirm it lands ([Observability](./observability.md)).
 - [ ] If `METRICS_TOKEN` is set, `GET /api/metrics` with `Authorization: Bearer <token>` returns Prometheus text.
 
@@ -208,6 +208,62 @@ On the live path **you** apply them, against production, **before** the PR merge
 **Rollback.** Roll the app back by **promoting a previous deployment** in Vercel (dashboard → previous deployment → "Promote to Production", or `vercel promote <deployment>`). Prefer promoting to `vercel rollback`: after an Instant Rollback Vercel stops assigning production domains to new deployments until one is promoted, so on the live path (§1.1) the next merge is built and never goes live. Migrations are **forward-only** — additive, with **no down-migrations** — so the older build runs safely against the newer schema (forward-compatible by design). Migrations always land _before_ the build that needs them — by hand on the live path (§1.1), by the pipeline on the tooling paths — so a rollback needs no DB change. A migration that genuinely must be reverted is authored as a **new forward migration**. To recover lost _data_ (not a bad deploy), use your provider's PITR/snapshot, not a schema revert.
 
 See [Troubleshooting](./troubleshooting.md) for operational issues.
+
+### Migration 0007
+
+`0007-uniqueness-search-indexes-token-scrub.sql` (2026-09 review, F-97, M-02, F-93, F-150) adds a unique index on the **global** role keys (`idx_app_roles_global_key`), a unique index on the default-organization flag (`idx_app_organizations_single_default`), trigram indexes for the audit and outbox search boxes (`idx_app_audit_events_event_type_trgm`, `idx_app_outbox_template_key_trgm`), and clears the OAuth provider tokens Better Auth stored on `auth.account` (the app keeps none from this release). It is in `REQUIRED_CORE_MIGRATIONS`, so apply it **before** merging (§1.1). Every statement is additive and idempotent; the previous build runs unchanged against it. `auth` below is `DB_SCHEMA`.
+
+1. **Preflight (read-only).** Both queries must come back empty; the migration refuses to apply otherwise, lists the offenders and changes nothing:
+
+   ```sql
+   select key, count(*) from auth.app_roles
+    where organization_id is null group by key having count(*) > 1;
+   select id, slug, created_at from auth.app_organizations
+    where is_default order by created_at, id offset 1;
+   ```
+
+   A duplicated global key: delete the unused duplicate (Administrator → Roles) or re-key it by SQL. A second default: sign-ups already go to the oldest one (listed first without the `offset`); open each other one → **Settings** and untick **Set as default organization**, which clears an extra flag.
+
+2. **Large audit or outbox table (optional).** The runner applies each file in one transaction, so it cannot build an index `CONCURRENTLY`; each `CREATE INDEX` holds a `SHARE` lock on its table until the file commits, which blocks **writes** (sign-in audit rows, outbox mail), not reads. `app_roles` and `app_organizations` are small. If `app_audit_events` or `app_outbox` is large, build those two first, outside a transaction, under the same names, with `set statement_timeout = 0` in that session (see **Build a large table's index by hand first** above, F-94), and check that both are valid (a failed concurrent build leaves an invalid index that the migration would then skip: drop it and build again):
+
+   ```sql
+   create index concurrently if not exists idx_app_audit_events_event_type_trgm
+     on auth.app_audit_events using gin (event_type gin_trgm_ops);
+   create index concurrently if not exists idx_app_outbox_template_key_trgm
+     on auth.app_outbox using gin (template_key gin_trgm_ops);
+   select indexrelid::regclass, indisvalid from pg_index
+    where indexrelid in ('auth.idx_app_audit_events_event_type_trgm'::regclass,
+                         'auth.idx_app_outbox_template_key_trgm'::regclass);
+   ```
+
+3. **Apply** with `pnpm db:app:migrate` (or `drk-deploy migrate`, §1.3) against the direct production `DATABASE_URL`, from the PR's pushed branch. The log includes `[migrate] notice [0007] cleared stored provider tokens on N account row(s).`, and the `db:app:migrate` run ends with `[migrate] done`. The runner applies the file under its lock and statement ceilings (F-94): a statement that waits longer than `DB_MIGRATE_LOCK_TIMEOUT_MS` for a lock, or an index build on a large table skipped in step 2 that runs longer than `DB_MIGRATE_STATEMENT_TIMEOUT_MS`, rolls the file back with nothing ledgered; deal with the cause and re-run.
+
+4. **Verify**, then merge:
+
+   ```sql
+   select id, checksum from auth.app_schema_migrations
+    where id = '0007-uniqueness-search-indexes-token-scrub.sql';
+   select indexname from pg_indexes where schemaname = 'auth' and indexname in (
+     'idx_app_roles_global_key', 'idx_app_organizations_single_default',
+     'idx_app_audit_events_event_type_trgm', 'idx_app_outbox_template_key_trgm');  -- 4 rows
+   select count(*) from auth.account
+    where "accessToken" is not null or "refreshToken" is not null or "idToken" is not null;  -- 0
+   ```
+
+   Once the new build is live, `GET /api/health/ready` answers **200** (§4).
+
+5. **After the deploy, scrub once more.** Between step 3 and the deploy the previous build still stored tokens at every social sign-in. The new build clears a row at that user's next sign-in; this clears the rest now and is safe to repeat:
+
+   ```sql
+   update auth.account
+      set "accessToken" = null, "refreshToken" = null, "idToken" = null,
+          "accessTokenExpiresAt" = null, "refreshTokenExpiresAt" = null
+    where "accessToken" is not null or "refreshToken" is not null or "idToken" is not null;
+   ```
+
+   An Option C satellite shares this table ([Satellite apps](./integration-satellite-apps.md)); one that runs its own social sign-in keeps storing tokens until it carries the same account hooks (`src/lib/auth-provider-tokens.ts`).
+
+**Rolling back.** A code rollback needs nothing from the database: the previous build maps the global-key conflict to `409 key_taken`, moves the default flag clear-then-set as it always has, and never reads the tokens, though it stores them again at sign-in, so repeat step 5 after rolling forward. The scrub cannot be undone and needs no undo; the next sign-in works as before. If an index itself must go in an emergency, `drop index if exists auth.<name>` by hand and leave the ledger row: re-create it from the file's own statement, or remove it for good with a new forward migration (see **Rollback** above).
 
 ---
 

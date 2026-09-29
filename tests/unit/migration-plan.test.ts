@@ -110,7 +110,7 @@ describe("REQUIRED_CORE_MIGRATIONS (readiness gate, review #43 landing gate)", (
   it("equals the core *.sql files actually in src/db/migrations, in apply order", () => {
     // The readiness probe can only catch a build promoted ahead of its
     // migration if the list names EVERY core file this build ships. Pin it
-    // to the real directory so adding the next core file (0007) without extending the list fails
+    // to the real directory so adding the next core file (0008) without extending the list fails
     // here rather than silently passing readiness on a stale schema.
     const dir = path.resolve(__dirname, "../../src/db/migrations");
     const onDisk = planMigrations(readdirSync(dir), [], false)

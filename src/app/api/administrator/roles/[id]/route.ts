@@ -7,7 +7,12 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
-import { AdminError, assertRoleNotInUse, loadRoleOrThrow } from "@/lib/admin/roles.server";
+import {
+  AdminError,
+  assertRoleNotInUse,
+  isForeignKeyViolation,
+  loadRoleOrThrow,
+} from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -123,6 +128,11 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
  * On success: deletes
  * `app_role_permissions` and the `app_roles` row in one transaction so
  * the constraint cannot leave orphan permission rows behind.
+ *
+ * F-97: the in-use check runs in that SAME transaction, after locking the
+ * role row (`assertRoleNotInUse`), so a grant committed while the request
+ * is in flight is counted instead of cascade-deleted with the role (a group
+ * grant) or failing the delete with 23503 (a direct assignment).
  */
 export const DELETE = withAdminRoute(async function DELETE(
   request: NextRequest,
@@ -160,9 +170,14 @@ export const DELETE = withAdminRoute(async function DELETE(
   }
 
   try {
-    await assertRoleNotInUse(id);
+    await db.transaction().execute(async (trx) => {
+      await assertRoleNotInUse(trx, id);
+      await trx.deleteFrom("app_role_permissions").where("role_id", "=", id).execute();
+      await trx.deleteFrom("app_roles").where("id", "=", id).execute();
+    });
   } catch (err) {
-    if (err instanceof AdminError && err.code === "role_in_use") {
+    // A 23503 is the backstop for a reference the guard does not count.
+    if ((err instanceof AdminError && err.code === "role_in_use") || isForeignKeyViolation(err)) {
       await auditRoleAction("admin.role.delete_blocked", "denied", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
@@ -172,13 +187,12 @@ export const DELETE = withAdminRoute(async function DELETE(
       });
       return adminErrorResponse("role_in_use", 409, request);
     }
+    // Deleted by a concurrent request after the read above.
+    if (err instanceof AdminError && err.code === "role_not_found") {
+      return adminErrorResponse("not_found", 404, request);
+    }
     throw err;
   }
-
-  await db.transaction().execute(async (trx) => {
-    await trx.deleteFrom("app_role_permissions").where("role_id", "=", id).execute();
-    await trx.deleteFrom("app_roles").where("id", "=", id).execute();
-  });
 
   await auditRoleAction("admin.role.deleted", "success", {
     request,

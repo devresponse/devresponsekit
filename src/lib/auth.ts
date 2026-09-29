@@ -8,6 +8,7 @@ import {
   AUTH_DISABLED_PATHS,
   rejectClosedAuthEndpoints,
 } from "@/lib/auth-admin-surface";
+import { discardProviderTokens, MICROSOFT_IDENTITY_ONLY } from "@/lib/auth-provider-tokens";
 import { authResponseFloor } from "@/lib/auth-response-floor";
 import { endBorrowedSessionsAfterOwnSweep } from "@/lib/auth-session-sweep";
 import { signInAttempts } from "@/lib/auth-sign-in-attempts";
@@ -57,6 +58,8 @@ if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
     // Multi-tenant Entra ID work/school accounts.
     tenantId: "organizations",
     prompt: "select_account",
+    // F-150: identity scopes only (no refresh token, no Graph access).
+    ...MICROSOFT_IDENTITY_ONLY,
   };
 }
 if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
@@ -589,6 +592,10 @@ export const auth = betterAuth({
         },
       },
     },
+    // F-150: social sign-in is identity only, so no provider access, refresh
+    // or ID token is ever stored on the `account` row (and a sign-in clears
+    // what an older build stored). See `auth-provider-tokens.ts`.
+    account: discardProviderTokens,
   },
 
   // F-06: vendor endpoints the app never calls over HTTP (provider-token

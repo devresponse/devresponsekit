@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { sql } from "kysely";
 import type { NextRequest } from "next/server";
@@ -34,7 +36,10 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  *      onto the same org cannot remove the new default; a save that touches
  *      the flag cannot deadlock against a move.
  *   5. A legacy EXTRA flag can be cleared (`isDefault: false`); the flag on
- *      the org sign-ups resolve to cannot.
+ *      the org sign-ups resolve to cannot. Since migration 0007 a partial
+ *      unique index refuses a second default (M-02), so that test drops the
+ *      index for its duration to rebuild a pre-0007 database, the state 0007's
+ *      preflight tells an operator to repair this way.
  *
  * The flag is platform-global, so the suite snapshots the default org(s)
  * (flag and `updated_at`) up front and restores them in `afterAll`. Fixtures
@@ -173,6 +178,22 @@ async function defaultIds(): Promise<string[]> {
     .orderBy("id")
     .execute();
   return rows.map((r) => r.id);
+}
+
+/**
+ * Makes `id` the only default on `client`, clear-then-set as the app moves it.
+ * One `set is_default = (id = $1)` can trip 0007's unique index mid-statement
+ * (M-02), depending on which row Postgres happens to update first.
+ */
+async function flagOnly(
+  client: { query(text: string, values?: unknown[]): Promise<unknown> },
+  id: string,
+): Promise<void> {
+  await client.query(
+    `update app_organizations set is_default = false where is_default and id <> $1`,
+    [id],
+  );
+  await client.query(`update app_organizations set is_default = true where id = $1`, [id]);
 }
 
 async function orgCount(where?: { slug: string }): Promise<number> {
@@ -383,7 +404,7 @@ describe("F-40: routing follows is_default, not the slug (DB-backed)", () => {
       await client.query("begin");
       // The post-rename state the old seed mishandled: the flagged default has
       // some other slug, and the slug `default` is free again.
-      await client.query(`update app_organizations set is_default = (id = $1)`, [flagged]);
+      await flagOnly(client, flagged);
       await client.query(`update app_organizations set slug = $1 where slug = 'default'`, [
         `${ORG_PREFIX}was-default`,
       ]);
@@ -533,36 +554,56 @@ describe("F-40: routing follows is_default, not the slug (DB-backed)", () => {
       `update app_organizations set created_at = created_at - interval '1 hour' where id = $1`,
       [original],
     );
-    // The pre-F-40 state: two orgs flagged default.
-    await pgPool.query(
-      `update app_organizations set is_default = (id in ($1, $2))
-        where is_default or id in ($1, $2)`,
-      [original, extra],
+    // A database 0007 has not reached yet (M-02): its unique index would
+    // refuse the state this test repairs. Recreated from the migration's own
+    // statement in `finally`, once one default is left.
+    const migration = readFileSync(
+      path.resolve(
+        __dirname,
+        "../../src/db/migrations/0007-uniqueness-search-indexes-token-scrub.sql",
+      ),
+      "utf8",
     );
-    expect((await getDefaultOrganization())?.id).toBe(original);
+    const createIndex = migration.match(
+      /create unique index if not exists idx_app_organizations_single_default[^;]*;/,
+    )?.[0];
+    expect(createIndex).toBeDefined();
+    await pgPool.query(`drop index idx_app_organizations_single_default`);
+    try {
+      // The pre-F-40 state: two orgs flagged default.
+      await pgPool.query(
+        `update app_organizations set is_default = (id in ($1, $2))
+          where is_default or id in ($1, $2)`,
+        [original, extra],
+      );
+      expect((await getDefaultOrganization())?.id).toBe(original);
 
-    // Refused on the org sign-ups resolve to...
-    const refused = await patchOrg(original, { isDefault: false });
-    expect(refused.status).toBe(409);
-    expect(await refused.json()).toMatchObject({ error: "organization_is_default" });
+      // Refused on the org sign-ups resolve to...
+      const refused = await patchOrg(original, { isDefault: false });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({ error: "organization_is_default" });
 
-    // ...but on the extra flag it is the repair.
-    const cleared = await patchOrg(extra, { isDefault: false });
-    expect(cleared.status, await cleared.clone().text()).toBe(200);
-    expect(await defaultIds()).toEqual([original]);
-    const audit = await db
-      .selectFrom("app_audit_events")
-      .select("metadata")
-      .where("actor_better_auth_user_id", "=", ACTOR)
-      .where("event_type", "=", "admin.organization.updated")
-      .where("organization_id", "=", extra)
-      .executeTakeFirstOrThrow();
-    expect(audit.metadata).toMatchObject({ clearedExtraDefaultFlag: true });
+      // ...but on the extra flag it is the repair.
+      const cleared = await patchOrg(extra, { isDefault: false });
+      expect(cleared.status, await cleared.clone().text()).toBe(200);
+      expect(await defaultIds()).toEqual([original]);
+      const audit = await db
+        .selectFrom("app_audit_events")
+        .select("metadata")
+        .where("actor_better_auth_user_id", "=", ACTOR)
+        .where("event_type", "=", "admin.organization.updated")
+        .where("organization_id", "=", extra)
+        .executeTakeFirstOrThrow();
+      expect(audit.metadata).toMatchObject({ clearedExtraDefaultFlag: true });
 
-    // On an org that is not flagged at all it is still a no-op.
-    const noop = await patchOrg(extra, { isDefault: false });
-    expect(noop.status).toBe(200);
-    expect(await defaultIds()).toEqual([original]);
+      // On an org that is not flagged at all it is still a no-op.
+      const noop = await patchOrg(extra, { isDefault: false });
+      expect(noop.status).toBe(200);
+      expect(await defaultIds()).toEqual([original]);
+    } finally {
+      await pgPool.query(`update app_organizations set is_default = false where id = $1`, [extra]);
+      await pgPool.query(createIndex!);
+    }
   });
 });
 
@@ -619,7 +660,7 @@ describe("F-40: the seed's platform org is not the default org (DB-backed)", () 
           [`${ORG_PREFIX}platform`],
         )
       ).rows[0]!.id;
-      await client.query(`update app_organizations set is_default = (id = $1)`, [platform]);
+      await flagOnly(client, platform);
       await seedBaselineRoles(client, platform);
 
       const first = await runSeed();
@@ -633,7 +674,7 @@ describe("F-40: the seed's platform org is not the default org (DB-backed)", () 
           [`${ORG_PREFIX}tenant`],
         )
       ).rows[0]!.id;
-      await client.query(`update app_organizations set is_default = (id = $1)`, [tenant]);
+      await flagOnly(client, tenant);
       logs.length = 0;
 
       // The operator re-runs db:seed / db:provision.

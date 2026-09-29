@@ -23,7 +23,9 @@ import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
  *      whose SELECT had no `id` column, or two, would fail here as a 500;
  *   3. `GET /roles?q=` (the superadmin role picker's search) and the roles CSV
  *      export match the owning org's name, so one org's `admin` role can be
- *      found among every org's;
+ *      found among every org's, and both read a repeated
+ *      `filter[organization]` (the user-detail role picker's scope, F-154) as
+ *      exactly those orgs' roles;
  *   4. `GET /groups?q=` matches the owning org's name too, and a repeated
  *      `filter[organization]` (the user-detail group picker's scope: the
  *      target user's orgs) lists exactly those orgs' groups.
@@ -354,6 +356,47 @@ describe("the roles search matches the owning org's name (DB-backed, F-41)", () 
     expect(csv.status, text.slice(0, 300)).toBe(200);
     expect(text).toContain(zenith);
     expect(text).not.toContain(other);
+  });
+
+  it("list and CSV export read a repeated `filter[organization]` as those orgs' roles and no other (F-154)", async () => {
+    // The user-detail role picker names the target user's orgs this way. A
+    // repeated value used to be dropped, which listed every org's roles.
+    const orgA = await insertOrg("rfa");
+    const orgB = await insertOrg("rfb");
+    const inA = await insertRole(orgA, "rfa");
+    const inB = await insertRole(orgB, "rfb");
+    const elsewhere = await insertRole(await insertOrg("rfc"), "rfc");
+    const global = await insertRole(null, "rfglobal");
+
+    const qs = new URLSearchParams([
+      ["filter[organization]", orgA],
+      ["filter[organization]", orgB],
+      ["q", PREFIX],
+    ]).toString();
+    const res = await get("roles", qs);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ id: string }>; total: number };
+    expect(body.items.map((r) => r.id).sort()).toEqual([inA, inB].sort());
+    expect(body.total).toBe(2);
+
+    const csv = await exportGET(qs);
+    const text = await csv.text();
+    expect(csv.status, text.slice(0, 300)).toBe(200);
+    expect(text).toContain(inA);
+    expect(text).toContain(inB);
+    expect(text).not.toContain(elsewhere);
+    expect(text).not.toContain(global);
+
+    // `global` still means "no org", alongside an id.
+    const withGlobal = new URLSearchParams([
+      ["filter[organization]", orgA],
+      ["filter[organization]", "global"],
+      ["q", PREFIX],
+    ]).toString();
+    const mixed = (await (await get("roles", withGlobal)).json()) as {
+      items: Array<{ id: string }>;
+    };
+    expect(mixed.items.map((r) => r.id).sort()).toEqual([inA, global].sort());
   });
 });
 

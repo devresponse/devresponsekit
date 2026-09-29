@@ -10,6 +10,7 @@ import {
   canAccessOrg,
   isSuperadmin,
   resolveOrgScope,
+  userIsGrantEligible,
   wouldStripLastGlobalSuperuser,
   LAST_SUPERADMIN_ERROR,
   LAST_SUPERADMIN_EVENT,
@@ -89,7 +90,8 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
  * Both ids are UUIDs and BOTH are required: `app_user_roles` is keyed
  * by `(app_user_id, organization_id, role_id)` so an assignment
  * without an org context is meaningless. Idempotent (`on conflict do
- * nothing`).
+ * nothing`). The user must hold an ACTIVE membership in that org
+ * (F-154, `userIsGrantEligible`); otherwise 404 `user_not_found`.
  *
  * Caller MUST hold `admin.roles.assign`.
  */
@@ -183,6 +185,16 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
         metadata: { roleId: role.id, roleKey: role.key },
       });
     }
+  }
+
+  // F-154: a role is granted only to an ACTIVE member of the assignment's org,
+  // the rule every grant path shares. An org admin was already held to SOME
+  // membership there (resolveTargetUser admits only their org's members, and
+  // the org must be theirs), but a superadmin could assign in an org the user
+  // had never joined, and the row conferred the role once they did. 404 as the
+  // two group adds answer.
+  if (!(await userIsGrantEligible(target.appUserId, parsed.data.organizationId))) {
+    return adminErrorResponse("user_not_found", 404, request);
   }
 
   await db.transaction().execute(async (trx) => {

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fetchAllPages, useAdminSearch } from "@/lib/admin/admin-list.client";
+import { useAdminSearch } from "@/lib/admin/admin-list.client";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -17,14 +17,15 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ListLimitNotice } from "../../_components/list-limit-notice";
+import { scopedToOrgs, useGrantableOrgs } from "./_grantable-orgs";
 
 /**
  * Group picker for the user-detail "Add to group" dialog.
  *
  * Lists the groups of the TARGET USER's organizations: the add endpoint
- * refuses a group in an org the user holds no membership in, so no other
- * group is offered. The orgs come from the user's memberships
- * (`GET …/users/[id]/memberships`, confined to the caller's scope), and each
+ * refuses a group in an org the user holds no ACTIVE membership in (F-154),
+ * so no other group is offered. The orgs come from the user's active
+ * memberships (`useGrantableOrgs`, confined to the caller's scope), and each
  * one goes to `GET /api/administrator/groups` as a repeated
  * `filter[organization]` (org boundary enforced server-side). Groups the user
  * already belongs to (`excludeIds`) are listed but cannot be chosen, so the
@@ -49,27 +50,6 @@ export interface GroupOption {
   name: string;
 }
 
-interface MembershipRow {
-  id: string;
-  organization_id: string;
-  organization_name: string | null;
-}
-
-/**
- * The most orgs sent as repeated `filter[organization]` values (about 6 KB of
- * query string). A user in more orgs is searched across the caller's whole
- * scope instead, where typing an org's name still narrows the list.
- */
-const MAX_FILTERED_ORGS = 100;
-
-/** The groups endpoint for the user's orgs; `null` when there are none. */
-function groupsEndpoint(orgIds: string[]): string | null {
-  if (orgIds.length === 0) return null;
-  if (orgIds.length > MAX_FILTERED_ORGS) return "/api/administrator/groups";
-  const qs = new URLSearchParams(orgIds.map((orgId) => ["filter[organization]", orgId]));
-  return `/api/administrator/groups?${qs.toString()}`;
-}
-
 export function GroupPicker({
   userId,
   value,
@@ -88,33 +68,19 @@ export function GroupPicker({
   id?: string;
 }) {
   const t = useTranslations("administrator.groupPicker");
-  // The user's orgs (id → name) in the caller's scope; null while loading.
-  const [orgs, setOrgs] = useState<ReadonlyMap<string, string> | null>(null);
-  const [orgsError, setOrgsError] = useState(false);
+  // The user's grant-eligible orgs (id → name) in the caller's scope; null
+  // while loading.
+  const { orgs, error: orgsError } = useGrantableOrgs(userId);
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchAllPages<MembershipRow>(
-      `/api/administrator/users/${encodeURIComponent(userId)}/memberships`,
-    )
-      .then(({ items }) => {
-        if (cancelled) return;
-        setOrgs(new Map(items.map((m) => [m.organization_id, m.organization_name ?? ""])));
-      })
-      .catch(() => {
-        if (!cancelled) setOrgsError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
-
   const search = useAdminSearch<GroupOption>(
-    orgs === null ? null : groupsEndpoint([...orgs.keys()]),
+    orgs === null ? null : scopedToOrgs("/api/administrator/groups", [...orgs.keys()]),
   );
-  // No org: nothing the user can join, and nothing to ask the server.
-  const groups = orgs !== null && orgs.size === 0 ? [] : search.items;
+  // No org: nothing the user can join, and nothing to ask the server. The
+  // hint below says why the list is empty.
+  const noOrg = orgs !== null && orgs.size === 0;
+  const groups = noOrg ? [] : search.items;
+  const hintId = `${id}-no-active-membership`;
 
   if (orgsError || (search.error && groups === null)) {
     return (
@@ -157,6 +123,7 @@ export function GroupPicker({
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            aria-describedby={noOrg ? hintId : undefined}
             disabled={disabled || groups === null}
             className="w-full justify-between font-normal"
           >
@@ -226,6 +193,11 @@ export function GroupPicker({
           </Command>
         </PopoverContent>
       </Popover>
+      {noOrg ? (
+        <p id={hintId} className="text-muted-foreground text-sm">
+          {t("noActiveMembership")}
+        </p>
+      ) : null}
     </div>
   );
 }

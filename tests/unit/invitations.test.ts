@@ -18,8 +18,9 @@ import {
  * persisted), the email-match rule, the guarded single-use consume, the
  * never-elevate-a-blocked-user rule, the same-org role re-validation, the
  * consume-time AUTHZ-3 re-check of the role against the INVITER's current
- * authority (review #6), and the consume-time re-check of the inviter's
- * standing, which voids the invitation of one who lost it (F-149). The
+ * authority (review #6), the consume-time re-check of the inviter's
+ * standing, which voids the invitation of one who lost it (F-149), and the
+ * shared grant rule that withholds the role from a non-active member (F-154). The
  * Kysely layer is stubbed per-table; hashing is real (Web Crypto).
  */
 
@@ -34,8 +35,12 @@ const globalSuperuserMock = vi.fn();
 const rolePermsMock = vi.fn();
 const heldPermsMock = vi.fn();
 const bannedMock = vi.fn();
+// F-154: whether the invitee's membership in the inviting org is ACTIVE once
+// the consume has created or activated it (the shared grant rule).
+const grantEligibleMock = vi.fn();
 vi.mock("@/lib/admin/access-scope.server", () => ({
   userIsGlobalSuperuser: (id: string) => globalSuperuserMock(id),
+  userIsGrantEligible: (userId: string, orgId: string) => grantEligibleMock(userId, orgId),
 }));
 vi.mock("@/lib/api-auth/ban-status.server", () => ({
   isBetterAuthUserBanned: (id: string) => bannedMock(id),
@@ -158,6 +163,7 @@ const ELIGIBLE_USER = { id: "user-1", primaryEmail: "ada@example.com", status: "
 beforeEach(() => {
   auditMock.mockReset();
   globalSuperuserMock.mockReset().mockResolvedValue(false);
+  grantEligibleMock.mockReset().mockResolvedValue(true);
   // Default inviter standing: an active, unbanned org admin who holds the
   // invite permission and exactly what the role confers, so the legitimate
   // grant path is the baseline.
@@ -317,6 +323,31 @@ describe("consumeInvitation", () => {
       }),
     );
   });
+
+  it.each(["blocked", "suspended"])(
+    "withholds the invited role while the invitee's membership stays %s (F-154)",
+    async (status) => {
+      // Accepting lifts neither status, so the membership is not active and
+      // the shared grant rule withholds the role: it would otherwise sleep in
+      // the row and wake whenever the membership was restored.
+      stubs.membershipSelect = () => ({ id: "m-1", status });
+      stubs.roleSelect = () => ({ id: "role-1" });
+      grantEligibleMock.mockResolvedValue(false);
+      const result = await consumeInvitation({
+        invitation: { ...INVITATION, roleId: "role-1" },
+        appUser: { ...ELIGIBLE_USER, status: "active" },
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: true, roleGranted: false });
+      expect(grantEligibleMock).toHaveBeenCalledWith("user-1", "org-1");
+      expect(insertCalls.find((c) => c.table === "app_user_roles")).toBeUndefined();
+      expect(updateCalls.filter((c) => c.table === "app_organization_memberships")).toEqual([]);
+      const metadata = (auditMock.mock.calls.at(-1)![0] as { metadata: Record<string, unknown> })
+        .metadata;
+      expect(metadata).toMatchObject({ roleGranted: false, roleWithheld: "role-1" });
+      expect(metadata).not.toHaveProperty("roleMissing");
+    },
+  );
 
   describe("consume-time AUTHZ-3 re-check of the invited role (review #6)", () => {
     const invited = { ...INVITATION, roleId: "role-1" };

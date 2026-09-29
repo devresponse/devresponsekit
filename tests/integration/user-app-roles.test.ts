@@ -13,6 +13,9 @@ import type * as Route from "@/app/api/administrator/users/[id]/app-roles/route"
  *   - the role must belong to the actor's org (global/foreign role → 404),
  *   - a non-superadmin may NOT assign a role that carries the `superuser`
  *     marker (privilege escalation → 403); a SUPERADMIN may.
+ *   - the target must hold an ACTIVE membership in the assignment's org, for
+ *     every caller (F-154; the status filter itself is pinned against
+ *     Postgres in tests/db/grant-eligibility.db.test.ts).
  */
 const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
@@ -29,7 +32,19 @@ const state: {
    * default: a platform with nothing to protect must behave exactly as before.
    */
   superuserGrants: { app_user_id: string; organization_id: string; role_id: string }[];
-} = { role: undefined, org: undefined, conferredPermKeys: [], superuserGrants: [] };
+  /**
+   * Rows `grantEligibleUserIds` sees: the target's ACTIVE membership in the
+   * assignment's org (F-154). Present by default, so the scoping tests below
+   * reach the checks they pin.
+   */
+  eligibleMembers: { app_user_id: string }[];
+} = {
+  role: undefined,
+  org: undefined,
+  conferredPermKeys: [],
+  superuserGrants: [],
+  eligibleMembers: [],
+};
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -65,6 +80,8 @@ function execFor(table: string): unknown[] {
   if (table === "app_role_permissions") return state.conferredPermKeys;
   // activeGlobalSuperuserGrants(...) reads the surviving superuser grants.
   if (table === "app_user_roles") return state.superuserGrants;
+  // grantEligibleUserIds(...) reads the target's active membership (F-154).
+  if (table === "app_organization_memberships") return state.eligibleMembers;
   return [];
 }
 function makeChain(table: string): unknown {
@@ -166,6 +183,7 @@ beforeEach(async () => {
   state.org = { id: ORG_A };
   state.conferredPermKeys = [];
   state.superuserGrants = [];
+  state.eligibleMembers = [{ app_user_id: "u-target" }];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ GET, POST, DELETE } = await import("@/app/api/administrator/users/[id]/app-roles/route"));
 });
@@ -275,6 +293,27 @@ describe("POST /users/[id]/app-roles — assignment scoping", () => {
     const res = await POST(jsonReq(body(ORG_B)), ctx);
     expect(res.status).toBe(201);
   });
+
+  it.each([
+    ["an ORG ADMIN", () => orgAdmin(["admin.roles.assign"])],
+    // The case that had no check at all: a superadmin reaches every org, so
+    // nothing else ties the assignment's org to the user's memberships.
+    ["a SUPERADMIN", () => superadmin(["admin.roles.assign"])],
+  ])(
+    "404 user_not_found when %s assigns in an org the target is not an ACTIVE member of (F-154)",
+    async (_label, actor) => {
+      state.eligibleMembers = [];
+      accessGetter.mockResolvedValue(actor());
+      const res = await POST(jsonReq(body(ORG_A)), ctx);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ error: "user_not_found" });
+      expect(auditMock).not.toHaveBeenCalledWith(
+        "admin.user.role_assigned",
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
 
   it("400 on an invalid body", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));

@@ -1225,7 +1225,8 @@
       "searchPlaceholder": "Buscar roles…",
       "noResults": "No se encontraron roles.",
       "loading": "Cargando…",
-      "loadError": "No se pudieron cargar los roles."
+      "loadError": "No se pudieron cargar los roles.",
+      "noActiveMembership": "Este usuario no es miembro activo de ninguna organización que administra, así que aún no se le puede asignar un rol. Primero apruebe, reactive o añada una membresía."
     },
     "userPicker": {
       "label": "Usuario",
@@ -1242,6 +1243,7 @@
       "noResults": "No se encontraron grupos.",
       "loading": "Cargando…",
       "loadError": "No se pudieron cargar los grupos.",
+      "noActiveMembership": "Este usuario no es miembro activo de ninguna organización que administra, así que aún no se le puede añadir a un grupo. Primero apruebe, reactive o añada una membresía.",
       "alreadyMember": "Ya es miembro"
     },
     "listLimit": {

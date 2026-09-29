@@ -13,7 +13,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, grantEligibleUserIds, isSuperadmin } from "@/lib/admin/access-scope.server";
 import {
   permissionKeysForGroup,
   conferrablePermissions,
@@ -110,8 +110,9 @@ const idsSchema = z
  * POST /api/administrator/groups/[id]/members
  *
  * Add users to the group. Body: `{ appUserIds: string[] }`. A user may only
- * be added if they hold an ACTIVE membership in the group's org — a
- * cross-org id is silently dropped, never added (ADR-0001/0002). Caller MUST
+ * be added if they hold an ACTIVE membership in the group's org (F-154,
+ * `grantEligibleUserIds`) — any other id is silently dropped, never added
+ * (ADR-0001/0002), and 404 `user_not_found` when none is left. Caller MUST
  * hold `admin.groups.assign`.
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
@@ -172,15 +173,9 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     }
   }
 
-  // Confine to users who are ACTIVE members of the group's org.
-  const eligible = await db
-    .selectFrom("app_organization_memberships")
-    .select("app_user_id")
-    .where("organization_id", "=", group.organization_id)
-    .where("status", "=", "active")
-    .where("app_user_id", "in", parsed.data.appUserIds)
-    .execute();
-  const eligibleIds = eligible.map((r) => r.app_user_id);
+  // Confine to users who are ACTIVE members of the group's org: the grant rule
+  // every grant path shares (F-154), asked here for the whole batch.
+  const eligibleIds = await grantEligibleUserIds(group.organization_id, parsed.data.appUserIds);
   if (eligibleIds.length === 0) {
     return adminErrorResponse("user_not_found", 404, request);
   }

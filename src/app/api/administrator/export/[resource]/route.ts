@@ -644,9 +644,20 @@ function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       // ADR-0001: an org admin exports only their org's roles (global
       // roles are platform config, superadmin-only).
       if (scope.kind === "org") q = q.where("organization_id", "=", scope.organizationId);
+      // Repeatable, read as `GET /roles` reads it (F-154), so a filter naming
+      // several orgs exports those orgs' roles, not every org's.
       const org = query.filters.organization;
-      if (org === ROLES_GLOBAL_ORGANIZATION) q = q.where("organization_id", "is", null);
-      else if (typeof org === "string") q = q.where("organization_id", "=", org);
+      const orgValues = typeof org === "string" ? [org] : Array.isArray(org) ? org : [];
+      if (orgValues.length > 0) {
+        const orgIds = orgValues.filter((value) => value !== ROLES_GLOBAL_ORGANIZATION);
+        const includeGlobal = orgIds.length < orgValues.length;
+        q = q.where((eb) =>
+          eb.or([
+            ...(includeGlobal ? [eb("organization_id", "is", null)] : []),
+            ...(orgIds.length > 0 ? [eb("organization_id", "in", orgIds)] : []),
+          ]),
+        );
+      }
       const scopeFilter = query.filters.scope;
       if (scopeFilter === "global") q = q.where("organization_id", "is", null);
       else if (scopeFilter === "org") q = q.where("organization_id", "is not", null);

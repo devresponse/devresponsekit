@@ -1225,7 +1225,8 @@
       "searchPlaceholder": "搜索角色…",
       "noResults": "未找到角色。",
       "loading": "加载中…",
-      "loadError": "无法加载角色。"
+      "loadError": "无法加载角色。",
+      "noActiveMembership": "该用户不是您所管理的任何组织的活跃成员，因此暂时无法分配角色。请先批准、重新激活或添加成员关系。"
     },
     "userPicker": {
       "label": "用户",
@@ -1242,6 +1243,7 @@
       "noResults": "未找到群组。",
       "loading": "加载中…",
       "loadError": "无法加载群组。",
+      "noActiveMembership": "该用户不是您所管理的任何组织的活跃成员，因此暂时无法将其加入群组。请先批准、重新激活或添加成员关系。",
       "alreadyMember": "已是成员"
     },
     "listLimit": {

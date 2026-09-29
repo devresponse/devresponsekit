@@ -83,6 +83,13 @@ function callOf(method: string) {
   );
 }
 
+// The picker lists the roles of the user's active orgs, read from their
+// memberships (F-154).
+const MEMBERSHIPS = {
+  items: [{ id: "m1", organization_id: ORG, organization_name: "Acme" }],
+  total: 1,
+};
+
 beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation((url: string, init?: { method?: string }) => {
@@ -90,6 +97,7 @@ beforeEach(() => {
     if (init?.method === "POST") return Promise.resolve(jsonOk({ ok: true }, 201));
     if (init?.method === "DELETE") return Promise.resolve(jsonOk({ ok: true }, 200));
     if (u.includes(`/users/${USER_ID}/roles`)) return Promise.resolve(jsonOk(ROLE_ROWS));
+    if (u.includes(`/users/${USER_ID}/memberships`)) return Promise.resolve(jsonOk(MEMBERSHIPS));
     if (u.includes("/api/administrator/roles")) return Promise.resolve(jsonOk(PICKER_ROLES));
     return Promise.resolve(jsonOk({ items: [], total: 0 }));
   });
@@ -98,10 +106,12 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("RolePicker", () => {
-  it("lists only org-scoped roles and reports the chosen role", async () => {
+  it("lists only org-scoped roles of the user's orgs and reports the chosen role", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
-    const { container } = renderWithIntl(<RolePicker value={null} onChange={onChange} />);
+    const { container } = renderWithIntl(
+      <RolePicker userId={USER_ID} value={null} onChange={onChange} />,
+    );
 
     const trigger = container.querySelector("#role-picker")!;
     await waitFor(() => expect(trigger).not.toBeDisabled());
@@ -114,11 +124,28 @@ describe("RolePicker", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ id: ROLE, organization_id: ORG }),
     );
+    // F-154: the roles asked for are the user's active org's.
+    const rolesRequest = fetchMock.mock.calls
+      .map((c) => new URL(String(c[0]), "http://test.local"))
+      .find((u) => u.pathname === "/api/administrator/roles")!;
+    expect(rolesRequest.searchParams.getAll("filter[organization]")).toEqual([ORG]);
   });
 
   it("shows an error when the role list fails to load", async () => {
-    fetchMock.mockResolvedValue(jsonOk({}, 500));
-    renderWithIntl(<RolePicker value={null} onChange={vi.fn()} />);
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(String(url).includes("/memberships") ? jsonOk(MEMBERSHIPS) : jsonOk({}, 500)),
+    );
+    renderWithIntl(<RolePicker userId={USER_ID} value={null} onChange={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load roles.");
+  });
+
+  it("shows an error when the user's memberships fail to load", async () => {
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/memberships") ? jsonOk({}, 500) : jsonOk(PICKER_ROLES),
+      ),
+    );
+    renderWithIntl(<RolePicker userId={USER_ID} value={null} onChange={vi.fn()} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load roles.");
   });
 });

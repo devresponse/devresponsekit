@@ -2,7 +2,7 @@ import "server-only";
 import { sql } from "kysely";
 import { defaultLocale } from "@/config/i18n-config";
 import { db } from "@/db/database";
-import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
+import { userIsGlobalSuperuser, userIsGrantEligible } from "@/lib/admin/access-scope.server";
 import {
   permissionKeysForRoles,
   permissionKeysHeldInOrg,
@@ -49,6 +49,10 @@ import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
  *     inviter who still has standing but has lost a permission the role
  *     carries) is skipped — the membership is still created — and recorded
  *     as `roleDenied` on the audit event.
+ *   - The role also follows the one grant rule every grant path shares
+ *     (F-154, `userIsGrantEligible`): only an ACTIVE member of the inviting
+ *     org receives it. An acceptance over a blocked or suspended membership,
+ *     which stays as it is, withholds the role and records `roleWithheld`.
  *   - These helpers do not scope: admin routes MUST `canAccessOrg`-guard the
  *     target organization before calling in (ADR-0001).
  */
@@ -378,7 +382,8 @@ export type ConsumeInvitationResult =
 /**
  * Consumes an invitation for `appUser`: marks it accepted (guarded),
  * creates/activates the membership in the inviting org, grants the optional
- * role, and activates a still-pending user account. Shared by BOTH
+ * role when that membership is then active (F-154; otherwise `roleWithheld`),
+ * and activates a still-pending user account. Shared by BOTH
  * acceptance paths — sign-up provisioning (the token rode the sign-up body)
  * and the explicit authenticated accept endpoint.
  *
@@ -505,7 +510,15 @@ export async function consumeInvitation(input: {
   // row that predates the guard — would still confer.
   let roleGranted = false;
   let roleDenied = false;
-  if (invitation.roleId) {
+  let roleWithheld = false;
+  if (invitation.roleId && !(await userIsGrantEligible(appUser.id, invitation.organizationId))) {
+    // F-154: the grant rule every grant path shares, an ACTIVE membership in
+    // the inviting org. A blocked or suspended membership stays put above, and
+    // the role used to be written anyway, conferring nothing until the block
+    // was lifted and then conferring it with nobody deciding to. The
+    // acceptance is still recorded; the role waits for a fresh grant.
+    roleWithheld = true;
+  } else if (invitation.roleId) {
     const role = await db
       .selectFrom("app_roles")
       .select(["id"])
@@ -548,7 +561,8 @@ export async function consumeInvitation(input: {
       invitationId: invitation.id,
       roleGranted,
       ...(roleDenied ? { roleDenied: invitation.roleId } : {}),
-      ...(invitation.roleId && !roleGranted && !roleDenied
+      ...(roleWithheld ? { roleWithheld: invitation.roleId } : {}),
+      ...(invitation.roleId && !roleGranted && !roleDenied && !roleWithheld
         ? { roleMissing: invitation.roleId }
         : {}),
     },

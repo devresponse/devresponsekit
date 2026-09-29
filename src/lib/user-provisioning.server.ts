@@ -77,7 +77,9 @@ export interface ProvisionUserResult {
  *      the one flagged `is_default`, whatever its slug (F-40). It never
  *      creates an organization (F-52): with no default org the call throws
  *      `NoDefaultOrganizationError` before writing anything.
- *   3. Create an organization membership when missing.
+ *   3. Create an organization membership when missing, in the same
+ *      transaction as step 1, so neither row exists without the other
+ *      (F-95).
  *   4. Initial statuses follow the organization's runtime-configurable
  *      signup policy (`app_organization_auth_settings`, 0007):
  *      `admin_approval` parks new accounts in `pending_approval` (the
@@ -225,75 +227,97 @@ export async function provisionUserFromAuth(
     policySource = policy.source;
   }
 
-  // 3. Find or create the app_user record. Existing rows preserve status.
-  const existing = await db
-    .selectFrom("app_users")
-    .select(["id", "status"])
-    .where("better_auth_user_id", "=", input.betterAuthUserId)
-    .executeTakeFirst();
+  // 3-4. Find or create the app_user record (existing rows preserve status),
+  // then its membership in the target org, in ONE transaction (F-95). They
+  // were separate statements on the pool, so a failure between them (a
+  // dropped connection, a statement timeout, the org deleted under the
+  // insert) committed the account without its membership. Every later
+  // sign-in then took the session hook's `existing` early return and never
+  // wrote it, and only a superadmin could repair the user, since org admins
+  // cannot see a user with no membership. Now both rows exist or neither
+  // does, and the next sign-in provisions from scratch.
+  //
+  // Both inserts are `ON CONFLICT DO NOTHING` on their unique keys, followed
+  // by a re-read: a concurrent duplicate (two sign-ins provisioning one new
+  // identity at once, such as a double-submitted OAuth callback) waits for
+  // the other transaction and converges on the rows it wrote, instead of
+  // failing the sign-in with 23505.
+  const { appUserId, status, linkedExisting, membershipStatus } = await db
+    .transaction()
+    .execute(async (trx) => {
+      const findUser = () =>
+        trx
+          .selectFrom("app_users")
+          .select(["id", "status"])
+          .where("better_auth_user_id", "=", input.betterAuthUserId);
+      let user = await findUser().executeTakeFirst();
+      let linked = user !== undefined;
+      if (!user) {
+        user = await trx
+          .insertInto("app_users")
+          .values({
+            better_auth_user_id: input.betterAuthUserId,
+            primary_email: input.email,
+            display_name: input.displayName ?? null,
+            status: decision.status,
+            preferred_locale: input.preferredLocale ?? "en",
+          })
+          .onConflict((oc) => oc.column("better_auth_user_id").doNothing())
+          .returning(["id", "status"])
+          .executeTakeFirst();
+        if (!user) {
+          // A concurrent provisioning of the same identity won the insert.
+          user = await findUser().executeTakeFirstOrThrow();
+          linked = true;
+        }
+      }
 
-  let appUserId: string;
-  let status: string;
-  let linkedExisting = false;
+      if (linked) {
+        // Only overwrite profile fields the provider actually supplied —
+        // re-provisioning must never clear an existing display name or
+        // reset a user's saved locale preference.
+        await trx
+          .updateTable("app_users")
+          .set({
+            primary_email: input.email,
+            ...(input.displayName ? { display_name: input.displayName } : {}),
+            ...(input.preferredLocale ? { preferred_locale: input.preferredLocale } : {}),
+            updated_at: sql`now()`,
+          })
+          .where("id", "=", user.id)
+          .execute();
+      }
 
-  if (existing) {
-    appUserId = existing.id;
-    status = existing.status;
-    linkedExisting = true;
+      const findMembership = () =>
+        trx
+          .selectFrom("app_organization_memberships")
+          .select(["status"])
+          .where("app_user_id", "=", user.id)
+          .where("organization_id", "=", organizationId);
+      let membership = await findMembership().executeTakeFirst();
+      if (!membership) {
+        membership =
+          (await trx
+            .insertInto("app_organization_memberships")
+            .values({
+              organization_id: organizationId,
+              app_user_id: user.id,
+              status: decision.status,
+              source_provider: resolution.provider,
+              provider_organization_key: membershipOrgKey,
+            })
+            .onConflict((oc) => oc.columns(["organization_id", "app_user_id"]).doNothing())
+            .returning(["status"])
+            .executeTakeFirst()) ?? (await findMembership().executeTakeFirstOrThrow());
+      }
 
-    // Only overwrite profile fields the provider actually supplied —
-    // re-provisioning must never clear an existing display name or
-    // reset a user's saved locale preference.
-    await db
-      .updateTable("app_users")
-      .set({
-        primary_email: input.email,
-        ...(input.displayName ? { display_name: input.displayName } : {}),
-        ...(input.preferredLocale ? { preferred_locale: input.preferredLocale } : {}),
-        updated_at: sql`now()`,
-      })
-      .where("id", "=", appUserId)
-      .execute();
-  } else {
-    const inserted = await db
-      .insertInto("app_users")
-      .values({
-        better_auth_user_id: input.betterAuthUserId,
-        primary_email: input.email,
-        display_name: input.displayName ?? null,
-        status: decision.status,
-        preferred_locale: input.preferredLocale ?? "en",
-      })
-      .returning(["id", "status"])
-      .executeTakeFirstOrThrow();
-    appUserId = inserted.id;
-    status = inserted.status;
-  }
-
-  // 4. Find or create the membership.
-  const membership = await db
-    .selectFrom("app_organization_memberships")
-    .select(["id", "status"])
-    .where("app_user_id", "=", appUserId)
-    .where("organization_id", "=", organizationId)
-    .executeTakeFirst();
-
-  let membershipStatus: string;
-  if (membership) {
-    membershipStatus = membership.status;
-  } else {
-    await db
-      .insertInto("app_organization_memberships")
-      .values({
-        organization_id: organizationId,
-        app_user_id: appUserId,
-        status: decision.status,
-        source_provider: resolution.provider,
-        provider_organization_key: membershipOrgKey,
-      })
-      .execute();
-    membershipStatus = decision.status;
-  }
+      return {
+        appUserId: user.id,
+        status: user.status,
+        linkedExisting: linked,
+        membershipStatus: membership.status,
+      };
+    });
 
   // 4b. Consume the invitation now that the user + membership exist: flips
   // it to accepted (race-guarded), grants the optional role, and emits
@@ -301,6 +325,13 @@ export async function provisionUserFromAuth(
   // already correctly placed by the decision above, and a revoke racing the
   // sign-up (the only realistic loser here) is still fully remediable by
   // the admin acting on the user directly.
+  //
+  // F-95: deliberately AFTER the placement commits, in the consume's own
+  // transaction. A failure there rolls back only the consume: the account
+  // stays placed and the invitation stays `pending`, so the invitee can still
+  // accept it from `/invite` and receive the role. Inside the placement's
+  // transaction the same failure would roll the placement back too, and the
+  // session hook would then provision the account as an uninvited sign-up.
   if (invitation) {
     try {
       await consumeInvitation({
@@ -423,7 +454,7 @@ export async function reevaluatePendingActivation(input: {
   // pending in several). Record every org activated in this pass, not just the
   // last, so the audit trail is complete; the first is the primary for the
   // event's top-level organizationId.
-  const activatedOrgIds: string[] = [];
+  const activated: Array<{ membershipId: string; organizationId: string }> = [];
   let primaryReason: SignupDecisionReason | null = null;
   for (const membership of memberships) {
     // F-480: an admin-placed membership (no sign-up source) waits for an
@@ -442,25 +473,40 @@ export async function reevaluatePendingActivation(input: {
     if (decision.status !== "active") {
       continue;
     }
-    await db
-      .updateTable("app_organization_memberships")
-      .set({ status: "active", updated_at: sql`now()` })
-      .where("id", "=", membership.id)
-      .where("status", "=", "pending_approval")
-      .execute();
-    activatedOrgIds.push(membership.organization_id);
+    activated.push({ membershipId: membership.id, organizationId: membership.organization_id });
     primaryReason ??= decision.reason;
   }
-  if (activatedOrgIds.length === 0) {
+  if (activated.length === 0) {
     return;
   }
+  const activatedOrgIds = activated.map((a) => a.organizationId);
 
-  await db
-    .updateTable("app_users")
-    .set({ status: "active", updated_at: sql`now()` })
-    .where("id", "=", user.id)
-    .where("status", "=", "pending_approval")
-    .execute();
+  // F-95: the memberships and the account activate in ONE transaction. Written
+  // one by one, a failure after a membership flipped left the account pending
+  // with no pending membership left for the next sign-in to re-decide, so only
+  // an approver could finish the activation.
+  //
+  // Lock order: the account first, then its memberships, the order the admin
+  // status change, soft-delete and restore take them in. The other way round,
+  // an approval landing between the two writes held the account while it
+  // waited on a membership this held, this then waited on the account, and
+  // Postgres aborted one side (40P01).
+  await db.transaction().execute(async (trx) => {
+    await trx
+      .updateTable("app_users")
+      .set({ status: "active", updated_at: sql`now()` })
+      .where("id", "=", user.id)
+      .where("status", "=", "pending_approval")
+      .execute();
+    for (const { membershipId } of activated) {
+      await trx
+        .updateTable("app_organization_memberships")
+        .set({ status: "active", updated_at: sql`now()` })
+        .where("id", "=", membershipId)
+        .where("status", "=", "pending_approval")
+        .execute();
+    }
+  });
 
   await auditEvent({
     eventType: "auth.account.auto_activated",

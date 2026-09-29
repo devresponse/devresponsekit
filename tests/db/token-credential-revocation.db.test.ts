@@ -12,7 +12,8 @@ import { isSourceCredentialActive } from "@/lib/api-auth/revocation.server";
  * DB-BACKED test for outstanding-token revocation (review #43).
  *
  * A JWT carries a `cid` claim naming the key / client it was minted from,
- * and the resolver asks {@link isSourceCredentialActive} on every request.
+ * and the resolver asks `readActiveSourceCredential` on every request. This
+ * suite drives its yes/no wrapper {@link isSourceCredentialActive}.
  * This suite runs the REAL lifecycle writes (`revokeApiKey`, `rotateApiKey`,
  * `revokeOauthClient`, `rotateOauthClientSecret`) against live Postgres and
  * checks the read side flips exactly when it must:

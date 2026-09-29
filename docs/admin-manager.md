@@ -1562,7 +1562,7 @@ at `/app/administrator/agents`; nav-gated on `admin.clients.read`.
 | --- | --- | --- |
 | `GET /mcp-agents` | `admin.clients.read` | Paged list of agents in scope (standard §5.1 envelope: `page` / `pageSize` ≤ 200, `sort=created_at\|name`, `filter[status]=pending\|active\|revoked`) plus a scope-wide `pendingCount`; pending agents always sort first. Each row carries the derived `status`, client id, service-account + client status, and scope ceiling |
 | `POST /mcp-agents/[id]/approve` | `admin.clients.manage` | Activate a `pending_approval` service account so it can mint tokens (idempotent); `admin.mcp_agent.approved` |
-| `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority — and, for a bearer caller, against the calling credential's own scopes, so a narrowly-scoped key or agent token can never lift a ceiling beyond itself (`422` on over-grant); `admin.mcp_agent.scopes_updated` |
+| `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority — and, for a bearer caller, against the calling credential's own scopes, so a narrowly-scoped key or agent token can never lift a ceiling beyond itself (`422` on over-grant). A lowered ceiling also binds the agent's outstanding tokens from their next request (F-71); `admin.mcp_agent.scopes_updated` |
 | `DELETE /mcp-agents/[id]` | `admin.clients.manage` | Revoke the client (idempotent — leaves the service account for the audit trail); `admin.mcp_agent.revoked` |
 
 Scopes are a **ceiling**, not a grant: per the `permission ∩ scope` invariant a

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import {
   API_SCOPE_CATALOG,
+  intersectScopes,
   isKnownScope,
   isWildcardScope,
   normalizeScopes,
@@ -101,6 +102,20 @@ describe("permission ∩ scope algebra (properties)", () => {
             expect.fail(`over-refused ${r}`);
           }
         }
+      }),
+    );
+  });
+
+  it("F-71 INVARIANT: intersectScopes authorizes exactly what BOTH grants authorize", () => {
+    // The resolver caps a token's scopes at its client's current ones with
+    // this, so it must never keep a scope either side lacks (a narrowed
+    // client's old token would act beyond the ceiling) nor drop one both hold
+    // (a scope the client still has would stop working).
+    fc.assert(
+      fc.property(scopeList, scopeList, anyScope, (a, b, r) => {
+        expect(scopesAuthorize(intersectScopes(a, b), r)).toBe(
+          scopesAuthorize(a, r) && scopesAuthorize(b, r),
+        );
       }),
     );
   });

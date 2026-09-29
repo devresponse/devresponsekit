@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   API_SCOPE_CATALOG,
+  intersectScopes,
   isAccountScope,
   isScopeNameable,
   normalizeScopes,
@@ -134,6 +135,34 @@ describe("scope algebra edges", () => {
     // A custom app permission is outside the catalog, so no credential can carry it.
     expect(ungrantableScopes(["crm.deals.write"], ["crm.deals.write"])).toEqual([
       "crm.deals.write",
+    ]);
+  });
+});
+
+describe("intersectScopes (F-71: a token capped at its client's current scopes)", () => {
+  it("drops a scope the client no longer holds and keeps the rest, in the token's order", () => {
+    expect(
+      intersectScopes(["admin.users.read", "admin.users.manage"], ["admin.users.read"]),
+    ).toEqual(["admin.users.read"]);
+    // Nothing in common, or a client narrowed to nothing: the token keeps nothing.
+    expect(intersectScopes(["admin.users.manage"], ["admin.audit.read"])).toEqual([]);
+    expect(intersectScopes(["admin.users.read"], [])).toEqual([]);
+  });
+
+  it("never widens a token past its own claim when the client was widened", () => {
+    expect(intersectScopes(["admin.users.read"], ["admin.users.*", "admin.audit.read"])).toEqual([
+      "admin.users.read",
+    ]);
+  });
+
+  it("keeps the narrower side of a wildcard pair, from either argument", () => {
+    expect(intersectScopes(["admin.users.*"], ["admin.users.read"])).toEqual(["admin.users.read"]);
+    expect(intersectScopes(["*"], ["admin.audit.read"])).toEqual(["admin.audit.read"]);
+  });
+
+  it("lists a scope both sides hold once", () => {
+    expect(intersectScopes(["admin.users.read"], ["admin.users.read"])).toEqual([
+      "admin.users.read",
     ]);
   });
 });

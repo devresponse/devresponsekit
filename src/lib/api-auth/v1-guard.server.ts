@@ -150,9 +150,18 @@ function unauthenticatedResponse(
 
 /**
  * Per-credential rate limiting for `/api/v1` mutations. Keys the bucket on
- * the credential id (api_key id / jwt jti / client id) when bearer, else
- * the principal — so one noisy key cannot exhaust the principal's whole
- * budget (design §10.2). Returns a problem+json 429 on deny, else null.
+ * the credential when bearer, else the principal — so one noisy key cannot
+ * exhaust the principal's whole budget (design §10.2). Returns a
+ * problem+json 429 on deny, else null.
+ *
+ * F-73: a JWT is charged to the key or client it was minted from (its `cid`),
+ * not to its own `jti`. Keyed on the `jti`, every freshly minted token opened
+ * a full bucket, so one credential minting at the token endpoint's 0.5/s
+ * sustained about 16 mutations a second per instance instead of 1. The source
+ * is the bare row id, the same key an API key's direct calls use and the MCP
+ * gateway's exchanged token carries, so a key's direct calls, its tokens and
+ * its agent traffic share one bucket. Only a legacy token with no `cid` keeps
+ * its `jti`.
  *
  * F-07: a cookie caller on an impersonated session is charged to the HUMAN
  * behind it, not the borrowed identity — the same rule `enforceRateLimit`
@@ -164,7 +173,8 @@ export function enforceApiRateLimit(
   request: NextRequest,
   options: RateLimitOptions = DEFAULT_ADMIN_MUTATION_LIMIT,
 ): NextResponse | null {
-  const actorId = grant.caller.credentialId ?? humanActorId(grant.caller);
+  const actorId =
+    grant.caller.jwt?.credential?.id ?? grant.caller.credentialId ?? humanActorId(grant.caller);
   const result = consumeToken(rateLimitKey(scope, actorId), options);
   if (result.ok) return null;
   return problemResponse("rate_limited", 429, request, {

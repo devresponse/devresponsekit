@@ -136,6 +136,40 @@ describe("isSourceCredentialActive — oauth_client", () => {
   });
 });
 
+describe("readActiveSourceCredential — the row's CURRENT scopes (F-71)", () => {
+  // The resolver caps a token's `scope` claim at these, so a client narrowed
+  // after the mint strips the removed scopes from its outstanding tokens.
+  it("returns an active client's current scopes, and null once it retires the token", async () => {
+    const ref = { kind: "oauth_client" as const, id: "client-1" };
+    state.takeFirst = { status: "active", secret_rotated_at: null, scopes: ["admin.users.read"] };
+    expect(await mod.readActiveSourceCredential(ref, NOW)).toEqual({
+      scopes: ["admin.users.read"],
+    });
+    state.takeFirst = {
+      status: "active",
+      secret_rotated_at: new Date(NOW.getTime() + 1_000),
+      scopes: ["admin.users.read"],
+    };
+    expect(await mod.readActiveSourceCredential(ref, NOW)).toBeNull();
+    state.takeFirst = { status: "revoked", secret_rotated_at: null, scopes: ["admin.users.read"] };
+    expect(await mod.readActiveSourceCredential(ref, NOW)).toBeNull();
+  });
+
+  it("returns an active key's scopes, and null for a revoked or expired key", async () => {
+    const ref = { kind: "api_key" as const, id: "key-1" };
+    state.takeFirst = { status: "active", expires_at: null, scopes: ["account.read"] };
+    expect(await mod.readActiveSourceCredential(ref, NOW)).toEqual({ scopes: ["account.read"] });
+    state.takeFirst = { status: "revoked", expires_at: null, scopes: ["account.read"] };
+    expect(await mod.readActiveSourceCredential(ref, NOW)).toBeNull();
+    state.takeFirst = {
+      status: "active",
+      expires_at: new Date(Date.now() - 1_000),
+      scopes: ["account.read"],
+    };
+    expect(await mod.readActiveSourceCredential(ref, NOW)).toBeNull();
+  });
+});
+
 describe("pruneExpiredRevocations", () => {
   it("still prunes the vestigial jti table and returns the number of deleted rows", async () => {
     state.takeFirst = { numDeletedRows: 5n };

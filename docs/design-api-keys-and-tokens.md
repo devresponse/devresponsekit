@@ -67,9 +67,9 @@ interface ResolvedCaller {
   kind: "session" | "api_key" | "jwt";
   betterAuthUserId: string;
   access: UserAccessContext; // same shape cookies produce — basis for every authz check
-  grantedScopes: string[] | null; // null for cookies (full authority); array for bearer
+  grantedScopes: string[] | null; // null for cookies (full authority); array for bearer, a JWT's capped at its source credential's current scopes (§6.5)
   isBearer: boolean; // bearer → CSRF/origin guard is N/A
-  credentialId: string | null; // api_key id / jwt jti, for audit + per-credential rate limit
+  credentialId: string | null; // api_key id / jwt jti, for audit (the v1 rate limit keys a JWT on its `cid`, §10.2)
   source?: CallerSource | null; // the session / key / token source to re-check at issuance (F-10, §5.3)
 }
 ```
@@ -182,8 +182,8 @@ Flow: resolve the credential → re-check that the principal is an **active memb
 | `sub` | the principal's Better Auth user id |
 | `scope` | space-delimited effective scopes |
 | `org` | the bound organization id |
-| `jti` | a UUID — used for audit + per-credential rate limiting |
-| `cid` | `"<api_key\|oauth_client>:<row id>"` — the credential the token was minted from, re-checked on every request (§6.5) |
+| `jti` | a UUID — used for audit, and as the rate-limit key only for a legacy token with no `cid` (§10.2) |
+| `cid` | `"<api_key\|oauth_client>:<row id>"` — the credential the token was minted from, re-checked on every request (§6.5) and the key of its per-credential rate limit (§10.2) |
 | `iat` | issue time; compared with an OAuth client's `secret_rotated_at` (§6.5) |
 | `exp` | now + `API_JWT_ACCESS_TTL_SECONDS` (default 900, hard-capped ≤ 3600), never past the source API key's `expires_at` (§6.1) |
 
@@ -210,10 +210,11 @@ The published/verified key set is the **current** signing key plus an **optional
 
 _Source: `src/lib/api-auth/revocation.server.ts` (review #43)._
 
-Access tokens are stateless, so killing one before its natural `exp` needs a per-request read against something that revocation actually writes. Every token carries a **`cid` claim** naming the credential it was minted from, and the resolver's JWT branch calls `isSourceCredentialActive(credential, iat)` on every request — **one primary-key read**:
+Access tokens are stateless, so killing one before its natural `exp` needs a per-request read against something that revocation actually writes. Every token carries a **`cid` claim** naming the credential it was minted from, and the resolver's JWT branch calls `readActiveSourceCredential(credential, iat)` on every request — **one primary-key read**:
 
 - **API key** — the row must be `active` and not past `expires_at`. `revokeApiKey` and `rotateApiKey` both flip the old row to `revoked`, so a revoke **or** a rotation retires every token minted from that key on its next request (`401 credential_revoked`). The same holds for the keys and clients a password reset or admin set-password revokes (F-10, §5.3).
 - **OAuth client** — the row must be `active`, and the token's `iat` must not precede `secret_rotated_at` (migration `0004`, stamped by `rotateOauthClientSecret`). Revoking the client kills all its tokens; rotating its secret kills those minted with the old secret while the client itself keeps minting.
+- **Scope edits** — the same read returns the row's current `scopes`, and the resolver caps the token's `scope` claim at them (`intersectScopes`, F-71). Narrowing a client, through `PATCH /api/v1/admin/oauth-clients/{id}` or the Agents console's `PATCH /api/administrator/mcp-agents/{id}`, therefore strips the removed scopes from its outstanding tokens on their next request: a route that needs one answers `403`, and the scopes the client kept go on working. Before this the tokens held the removed scopes until `exp`. A token can only narrow: widening a client does not widen the tokens minted before it. The MCP gateway resolves its tokens through the same resolver, so its self-call exchange copies the capped set.
 
 A token minted before the `cid` claim existed (a legacy token) has no `cid` and is honoured until its `exp` — a window of at most `API_JWT_ACCESS_TTL_SECONDS` after the deploy that closes on its own. No positive cache sits in front of the read: it would reintroduce a revocation lag equal to its TTL, which is exactly the gap this check closes, and the read replaced the (always-empty) `jti` denylist lookup, so per-request DB cost is unchanged.
 
@@ -316,7 +317,7 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 
 ### 10.2 Rate limiting
 
-- **Per-credential mutations** — `enforceApiRateLimit` keys the bucket on the credential id (`api_key` id / `jti` / `client_id`) when bearer, else the principal, so one noisy key cannot exhaust the principal's whole budget. Returns a problem+json `429` with `Retry-After`.
+- **Per-credential mutations** — `enforceApiRateLimit` keys the bucket on the credential when bearer, else the principal, so one noisy key cannot exhaust the principal's whole budget. For a JWT the credential is the key or client it was minted from (the `cid` row id), so minting a fresh token does not open a fresh bucket, and an API key's direct calls, its tokens and the MCP gateway's exchanged tokens share one (F-73). Keyed on the `jti` before, each mint bought a new 30-mutation burst, about 16 mutations a second per instance at the token endpoint's rate instead of 1. Only a legacy token with no `cid` is keyed on its `jti`. Returns a problem+json `429` with `Retry-After`.
 - **Token endpoint** — three layers, none keyed on an unverified client-supplied value (P2-4, review #11). Before the body is read and before any crypto or DB work: a **per-trusted-IP** bucket (the IP is derived from a trusted proxy hop, `TRUSTED_PROXY_COUNT`, not the spoofable leftmost `X-Forwarded-For`), then a coarse **global floor** independent of the request. The floor is charged only for a request the IP bucket admitted (F-18). When it was checked first, every request an IP bucket then refused still spent a deployment-wide token, so one IP sending about 5 requests a second held the floor at zero and every tenant's token mint got `429`. A request the floor refuses has still spent one token from its own IP's bucket; that is the accepted cost of the order. Only **after** the credential verifies does a **per-credential** bucket (keyed on the verified `client_id` / API-key id) apply, giving each credential a fair share behind a shared egress IP. Because the public `client_id` never reaches a limiter key before verification, a remote party who merely knows a victim's id cannot drain the victim's budget with wrong secrets, rotating ids cannot escape the per-IP bucket, and unknown ids never allocate limiter entries. Denials return a problem+json `429` with `Retry-After` and count toward the `devresponsekit_rate_limit_denials_total{scope="api.token"}` metric.
 - **Where the buckets live (review #98).** The two **pre-auth** buckets (per-IP, global floor) are **shared across instances**. `consumeSourceThenGlobal` (`src/lib/admin/rate-limit-tiered.server.ts`) takes them in that order, and MCP registration and the CSP sink use it too. Each consume goes through `consumeSharedToken` (`src/lib/admin/rate-limit-shared.server.ts`), which refills and consumes in one atomic `INSERT … ON CONFLICT DO UPDATE … WHERE … RETURNING` against `app_rate_limits` (migration `0006`), so on a serverless platform — one process per invocation — the floor is still one floor. An in-memory bucket there was per lambda, which multiplied the "deployment-wide" budget by the invocation count. The **per-credential** bucket stays in-process: it only exists after the credential verified, so its fan-out is bounded by the credentials the caller holds. If the database is unreachable the shared primitive falls back to the in-process bucket for a 30 s cool-down, logs a structured warning and increments `devresponsekit_rate_limit_shared_fallbacks_total{scope}` — it never fails open silently and never turns a DB blip into a 5xx on the token endpoint.
 

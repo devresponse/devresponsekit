@@ -107,6 +107,25 @@ export function scopesAuthorize(
 }
 
 /**
+ * The grant that authorizes exactly what BOTH grants authorize: every scope of
+ * one that the other covers. Wildcards are prefix sugar, so two scopes that
+ * both cover a permission always nest, and keeping the narrower of each pair
+ * loses nothing: `scopesAuthorize(intersectScopes(a, b), p)` equals
+ * `scopesAuthorize(a, p) && scopesAuthorize(b, p)` for every `p`.
+ *
+ * F-71: the resolver caps a JWT's `scope` claim with it at the scopes the
+ * token's source key or client holds now, so narrowing a client takes effect
+ * on the next request, not when its outstanding tokens expire.
+ */
+export function intersectScopes(a: ReadonlyArray<string>, b: ReadonlyArray<string>): string[] {
+  const kept = [
+    ...a.filter((s) => scopesAuthorize(b, s)),
+    ...b.filter((s) => scopesAuthorize(a, s)),
+  ];
+  return [...new Set(kept)];
+}
+
+/**
  * Normalizes a raw scope input (array or OAuth space-delimited string)
  * into a deduplicated array, dropping empties.
  */

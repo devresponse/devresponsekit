@@ -79,7 +79,7 @@ User stories
 
 - UAT-ADMIN-RGP-ROLES-LIST-S2 — As an Org Admin, I want to delete an unused role, so that the catalog stays tidy; and I want the app to stop me deleting one still in use.
   - Acceptance criteria: Given a role is bundled into a group or assigned to a user, when I confirm delete, then the request is refused with an inline "role is in use" message; given a role has no user and no group reference, when I confirm delete, then the row disappears.
-  - Note: the delete guard `assertRoleNotInUse` counts both `app_user_roles` **and** `app_group_roles` (`src/lib/admin/roles.server.ts:146`), so a role bundled into a group but assigned to nobody still cannot be deleted. It counts inside the deleting transaction after locking the role row (F-97), so a group grant or assignment saved while the delete is running also refuses it, instead of being silently removed with the role.
+  - Note: the delete guard `assertRoleNotInUse` counts both `app_user_roles` **and** `app_group_roles` (`src/lib/admin/roles.server.ts:147`), so a role bundled into a group but assigned to nobody still cannot be deleted. It counts inside the deleting transaction after locking the role row (F-97), so a group grant or assignment saved while the delete is running also refuses it, instead of being silently removed with the role.
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -503,7 +503,7 @@ User stories
 
 - UAT-ADMIN-RGP-PERMISSIONS-LIST-S3 — As a Superadmin, I want to edit a permission's description and delete an unused one, so that I can curate the catalog.
   - Acceptance criteria: Given Superadmin, when I edit a description and save, then it persists; when I delete a permission still attached to a role, then it is refused with "permission in use" (409); an unused one deletes.
-  - Note: delete is blocked when any `app_role_permissions` row references it (`assertPermissionNotInUse`, `roles.server.ts:215`, which locks the permission row first, F-97); the key is read-only in edit.
+  - Note: delete is blocked when any `app_role_permissions` row references it (`assertPermissionNotInUse`, `roles.server.ts:218`, which locks the permission row first, F-97); the key is read-only in edit.
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|

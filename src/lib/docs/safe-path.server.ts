@@ -108,10 +108,12 @@ export async function getDocsRoot(space: DocSpace = "docs"): Promise<string> {
   // F-88: literal defaults. `path.resolve(process.cwd(), space)` is a path
   // the build cannot know, so the tracer shipped the whole working tree in
   // every docs and help function. A configured root is a runtime value the
-  // build cannot see either, so that call is left out of the trace; the
-  // content itself is declared in next.config.mjs.
+  // build cannot see either. The content itself is declared, and what the
+  // trace still over-includes is excluded, in next.config.mjs
+  // (`docsTracingIncludes` / `docsTracingExcludes`); a `turbopackIgnore`
+  // comment would not help here, as it applies to imports, not `fs` calls.
   const root = configured
-    ? await fs.realpath(/* turbopackIgnore: true */ path.resolve(configured))
+    ? await fs.realpath(path.resolve(configured))
     : await fs.realpath(
         space === "help" ? path.join(process.cwd(), "help") : path.join(process.cwd(), "docs"),
       );

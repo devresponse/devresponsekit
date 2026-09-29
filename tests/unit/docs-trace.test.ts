@@ -134,15 +134,19 @@ describe("next.config.mjs tracing (F-88)", () => {
     }
   });
 
-  it("drops what Turbopack over-traces but no function reads at runtime", () => {
+  it("drops the source tree Turbopack over-traces, and nothing a package ships", () => {
     // Turbopack approximates the docs code's dynamic fs calls by tracing the
-    // src/lib/docs tree; the CI trace check (scripts/check-docs-trace.mjs)
-    // rejects src/, tests/, scripts/ and vercel-cli/ in these functions.
+    // src/lib/docs tree, which the CI trace check rejects. An exclude is not
+    // anchored to the project root, so a bare top-level pattern also matches
+    // the same directory name inside node_modules packages: `src/**` dropped
+    // regex/src/internals.js (shiki's dependency) and every docs page answered
+    // 500 in the Docker image. Only exact, repo-specific source paths belong.
     const excludes = config.default.outputFileTracingExcludes;
     for (const key of Object.keys(config.default.outputFileTracingIncludes)) {
-      expect(excludes[key]).toEqual(
-        expect.arrayContaining(["src/**", "tests/**", "scripts/**", "vercel-cli/**"]),
-      );
+      expect(excludes[key]).toContain("src/lib/docs/**");
+      for (const bare of ["src/**", "tests/**", "scripts/**", "lib/**", "dist/**"]) {
+        expect(excludes[key], `${key} must not exclude ${bare}`).not.toContain(bare);
+      }
     }
   });
 });

@@ -94,9 +94,16 @@ const apiNoStore = {
  * tree into all six functions. `turbopackIgnore` does not help there: the
  * magic comment applies only to `import()`, `require()`, `require.resolve()`
  * and `new Worker()` (node_modules/next/dist/docs, "Magic Comments"), never to
- * an `fs` call. So the excludes below also drop what no function ever reads at
- * runtime (source, tests, scripts and the deploy CLI; the compiled code ships
- * as `.next` chunks), which is the documented remedy for over-included files.
+ * an `fs` call. So the excludes below also drop that source tree (the
+ * compiled code ships as `.next` chunks, so no function reads it at runtime),
+ * which is the documented remedy for over-included files.
+ *
+ * Keep that exclude EXACT. An exclude pattern is not anchored to the project
+ * root: a bare `src/**` also matched every package's own `src/` directory
+ * under node_modules, and dropped `regex/src/internals.js`, which shiki needs
+ * to highlight a docs page. The docs pages then answered 500 in the Docker
+ * image while every unit test stayed green (caught by docker-scan.yml's smoke
+ * run on #488).
  *
  * The route keys match every form a bundler may name a route by
  * (`/[locale]/app/docs/[...slug]`, `…/(secure)/app/docs/[...slug]/page`)
@@ -125,15 +132,16 @@ const LOCAL_ARTIFACTS = [
   ".stryker-tmp/**",
 ];
 /**
- * Files no docs or help function reads at runtime, which Turbopack's
- * approximation of the docs code's dynamic `fs` calls still traces (see
- * above). The same set `scripts/check-docs-trace.mjs` rejects as foreign.
+ * The source tree Turbopack's approximation of the docs code's dynamic `fs`
+ * calls traces into these functions (see above), and that no function reads
+ * at runtime. Exact on purpose: a broader pattern also matches directories
+ * inside node_modules packages.
  */
-const NEVER_READ_AT_RUNTIME = ["src/**", "tests/**", "scripts/**", "vercel-cli/**"];
+const OVER_TRACED_SOURCE = ["src/lib/docs/**"];
 const docsTracingExcludes = Object.fromEntries(
   Object.keys(docsTracingIncludes).map((route) => [
     route,
-    [...LOCAL_ARTIFACTS, ...NEVER_READ_AT_RUNTIME],
+    [...LOCAL_ARTIFACTS, ...OVER_TRACED_SOURCE],
   ]),
 );
 

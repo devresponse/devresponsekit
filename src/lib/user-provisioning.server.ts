@@ -71,11 +71,12 @@ export interface ProvisionUserResult {
  * Responsibilities:
  *   1. Create or update `app_users`.
  *   2. Resolve the target organization: a live email-matching invitation
- *      (0008) overrides everything; otherwise provider metadata, then the
- *      admin-curated email-domain mapping (0007), then THE default org —
- *      the one flagged `is_default`, whatever its slug (F-40). With no
- *      default org the call throws `NoDefaultOrganizationError` before
- *      writing anything; it never invents one.
+ *      (0008) overrides everything; otherwise the organization-scoped hint,
+ *      then the admin-curated email-domain mapping (0007; email/password
+ *      sign-ups and verified GitHub addresses, F-52), then THE default org —
+ *      the one flagged `is_default`, whatever its slug (F-40). It never
+ *      creates an organization (F-52): with no default org the call throws
+ *      `NoDefaultOrganizationError` before writing anything.
  *   3. Create an organization membership when missing.
  *   4. Initial statuses follow the organization's runtime-configurable
  *      signup policy (`app_organization_auth_settings`, 0007):
@@ -90,11 +91,12 @@ export interface ProvisionUserResult {
  *
  * Threat / contract:
  *   - This function MUST NOT grant secure access from arbitrary OAuth
- *     profile data. Activation happens only via (a) trusted seeds,
- *     (b) the org's admin-configured policy — the domain-based rule
- *     additionally requires the address to be VERIFIED — or (c) a live
- *     invitation whose email equals the authenticating email and whose
- *     inviter still has the standing to invite (F-149).
+ *     profile data, nor create an organization from it (F-52). Activation
+ *     happens only via (a) trusted seeds, (b) the org's admin-configured
+ *     policy — the domain-based rule additionally requires the address to
+ *     be VERIFIED — or (c) a live invitation whose email equals the
+ *     authenticating email and whose inviter still has the standing to
+ *     invite (F-149).
  *   - Email-based account linking is enforced by Better Auth's
  *     `accountLinking` configuration; this function only links
  *     application records, never auth credentials.
@@ -145,10 +147,10 @@ export async function provisionUserFromAuth(
     }
   }
 
-  // 1. Find or create the target organization. An invitation overrides every
-  // other resolution — the sign-up lands in the INVITING org (that is the
-  // invitation's whole point). Otherwise: provider metadata, then the
-  // admin-curated email-domain mapping (`app_provider_organizations` with
+  // 1. Find the target organization. An invitation overrides every other
+  // resolution — the sign-up lands in the INVITING org (that is the
+  // invitation's whole point). Otherwise: the organization-scoped hint, then
+  // the admin-curated email-domain mapping (`app_provider_organizations` with
   // provider = 'email', 0007), then the default org (`is_default`, F-40).
   let organizationId: string | undefined;
   let membershipOrgKey: string | null = resolution.providerOrganizationKey;
@@ -162,7 +164,7 @@ export async function provisionUserFromAuth(
 
   // Organization-scoped sign-up (`/sign-in/<org>`, `?org=`): the visitor chose
   // this org explicitly, so target it — ranked below an invitation (which is
-  // email-bound proof) but above provider/domain inference. Only an EXISTING
+  // email-bound proof) but above the email-domain mapping. Only an EXISTING
   // active org counts; an unknown hint degrades to normal resolution and never
   // spawns an org. Placement, not activation — `decideInitialStatus` on this
   // org's policy still governs the initial status below.
@@ -176,7 +178,11 @@ export async function provisionUserFromAuth(
     }
   }
 
-  if (!organizationId && input.provider === "email" && resolution.routesToDefaultOrganization) {
+  // The mapping places an email/password sign-up, or a GitHub sign-in whose
+  // address GitHub verified (`routesByEmailDomain`, F-52). A verified GitHub
+  // sign-in used to skip it: its domain was looked up as an org SLUG, and an
+  // unknown one created an active org.
+  if (!organizationId && resolution.routesByEmailDomain) {
     const mapped = await findEmailDomainOrganization(input.email);
     if (mapped) {
       organizationId = mapped.organizationId;
@@ -185,54 +191,18 @@ export async function provisionUserFromAuth(
     }
   }
 
-  if (!organizationId && resolution.routesToDefaultOrganization) {
+  if (!organizationId) {
     // F-40: THE default org is the one flagged `is_default`, whatever its slug.
     // This used to look up the slug `default`, so after a superadmin renamed
-    // the default org the lookup missed and the branch below created a new,
-    // active "Default Organization" with no admins, roles or policy row, and
-    // every later unmapped sign-up joined it under the platform policy. With
-    // no default org at all this throws before anything is written: an account
+    // the default org the lookup missed and a fallback created a new, active
+    // "Default Organization" with no admins, roles or policy row, and every
+    // later unmapped sign-up joined it under the platform policy. With no
+    // default org at all this throws before anything is written: an account
     // with nowhere to land stays unprovisioned (and so without access) and the
     // error names the fix, rather than a tenant nobody administers appearing.
+    // F-52: this is also where a GitHub sign-in no binding claims now lands,
+    // instead of in an org it created from its email domain.
     organizationId = (await requireDefaultOrganization()).id;
-  }
-
-  if (!organizationId) {
-    // Provider-keyed placement (GitHub: the verified email domain). Creating
-    // an org for an unknown key is review item F-52, tracked separately; it
-    // never runs for the default-org fallback above.
-    const orgRow = await db
-      .selectFrom("app_organizations")
-      .select(["id"])
-      .where("slug", "=", resolution.providerOrganizationKey)
-      .executeTakeFirst();
-
-    if (orgRow) {
-      organizationId = orgRow.id;
-    } else {
-      const inserted = await db
-        .insertInto("app_organizations")
-        .values({
-          slug: resolution.providerOrganizationKey,
-          name: resolution.displayName,
-          status: "active",
-          is_default: false,
-        })
-        .returning("id")
-        .executeTakeFirstOrThrow();
-      organizationId = inserted.id;
-
-      await db
-        .insertInto("app_provider_organizations")
-        .values({
-          organization_id: organizationId,
-          provider: resolution.provider,
-          provider_organization_key: resolution.providerOrganizationKey,
-          display_name: resolution.displayName,
-        })
-        .onConflict((oc) => oc.columns(["provider", "provider_organization_key"]).doNothing())
-        .execute();
-    }
   }
 
   // 2. Decide initial statuses from the org's signup policy (0007). Seeds

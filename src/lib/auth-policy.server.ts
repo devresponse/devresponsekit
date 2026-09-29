@@ -34,9 +34,9 @@ import {
  *   - The sign-up-time verification decision (`resolveSignupPolicy`) and the
  *     provisioning-time placement (`provisionUserFromAuth`) resolve the
  *     target organization with the SAME precedence — organization hint,
- *     provider metadata, email-domain routing, the default org (by
- *     `is_default`, F-40) — so the org whose policy waived verification is
- *     always the org that receives the account (review 2026-09-04 #2).
+ *     email-domain routing, the default org (by `is_default`, F-40) — so
+ *     the org whose policy waived verification is always the org that
+ *     receives the account (review 2026-09-04 #2).
  *   - `signup_approval_mode = 'auto_active'` intentionally activates anyone
  *     who completes signup for that org — the org admin's explicit choice.
  */
@@ -84,9 +84,7 @@ export const FAIL_CLOSED_AUTH_POLICY: OrgAuthPolicy = Object.freeze({
 
 /**
  * Loads the effective policy for an organization (org row → platform default
- * → fail-closed). Pass `null` to resolve the platform default itself, e.g.
- * when the target organization does not exist yet (it will be auto-created
- * by provisioning and starts without a policy row anyway).
+ * → fail-closed). Pass `null` to resolve the platform default itself.
  */
 export async function getAuthPolicyForOrg(organizationId: string | null): Promise<OrgAuthPolicy> {
   const rows = await db
@@ -150,10 +148,12 @@ function toPolicy(row: PolicyRow, source: OrgAuthPolicy["source"]): OrgAuthPolic
 /**
  * Admin-curated email-domain routing: an `app_provider_organizations` row
  * with `provider = 'email'` maps an email domain to an organization for
- * email/password signups (which otherwise land in the default org). Rows
- * are created through the provider-bindings API by a superadmin only (F-04:
- * a binding claims the domain across the whole platform) and can be removed
- * on the organization's Providers tab; absence simply means "no routing".
+ * email/password signups and GitHub sign-ins with a verified address (F-52;
+ * both otherwise land in the default org). Rows are created through the
+ * provider-bindings API by a superadmin only (F-04: a binding claims the
+ * domain across the whole platform, and consumer mailbox domains are refused)
+ * and can be removed on the organization's Providers tab; absence simply
+ * means "no routing".
  */
 export async function findEmailDomainOrganization(
   email: string,
@@ -181,10 +181,10 @@ export async function findEmailDomainOrganization(
  * the `user.create.before` database hook to decide whether the new identity
  * needs email verification. Mirrors provisioning's org resolution EXACTLY
  * (`provisionUserFromAuth`): the organization-scoped sign-up hint
- * (`/sign-in/<org>`, `?org=`) when it names an existing ACTIVE org → provider
- * metadata → email-domain routing → the default org (`is_default`, F-40) — so
- * the verification decision and the eventual membership always follow the
- * same organization's policy. (An invitation, which outranks all of these in
+ * (`/sign-in/<org>`, `?org=`) when it names an existing ACTIVE org →
+ * email-domain routing → the default org (`is_default`, F-40) — so the
+ * verification decision and the eventual membership always follow the same
+ * organization's policy. (An invitation, which outranks all of these in
  * provisioning, is handled by the hook itself before this is consulted: a
  * live token for the address is mailbox proof, not a policy question.)
  *
@@ -210,20 +210,11 @@ export async function resolveSignupPolicy(
       // fall-through provisioning applies, so the two still agree.
     }
 
-    const resolution = resolveProviderOrganization(input);
-
-    if (!resolution.routesToDefaultOrganization) {
-      const org = await db
-        .selectFrom("app_organizations")
-        .select(["id"])
-        .where("slug", "=", resolution.providerOrganizationKey)
-        .executeTakeFirst();
-      // A not-yet-created org has no policy row by definition — the platform
-      // default governs its first member.
-      return await getAuthPolicyForOrg(org?.id ?? null);
-    }
-
-    if (input.provider === "email") {
+    // F-52: the same `routesByEmailDomain` gate provisioning applies. A
+    // verified GitHub sign-in used to be keyed by an org SLUG equal to its
+    // email domain here, and by the platform policy when no such org existed
+    // yet (provisioning then created it).
+    if (resolveProviderOrganization(input).routesByEmailDomain) {
       const mapped = await findEmailDomainOrganization(input.email);
       if (mapped) {
         return await getAuthPolicyForOrg(mapped.organizationId);

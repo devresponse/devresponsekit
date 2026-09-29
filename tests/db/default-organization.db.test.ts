@@ -22,8 +22,9 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  * stubbed:
  *
  *   1. A RENAMED default org keeps receiving unmapped sign-ups (email and
- *      social), under ITS OWN policy, and no organization is created — even
- *      with another org still holding the slug `default`.
+ *      social, a verified GitHub address included — F-52), under ITS OWN
+ *      policy, and no organization is created — even with another org still
+ *      holding the slug `default`.
  *   2. Moving the flag (PATCH, and POST of a new org) moves routing and leaves
  *      exactly one default; clearing it on the current default is refused.
  *   3. A seed re-run after the rename (slug `default` free again) reuses the
@@ -181,7 +182,7 @@ async function orgCount(where?: { slug: string }): Promise<number> {
 }
 
 /** A brand-new unmapped sign-up (no invitation, hint or domain binding). */
-async function signUp(tag: string, provider: "email" | "google") {
+async function signUp(tag: string, provider: "email" | "google" | "github") {
   return provisionUserFromAuth({
     betterAuthUserId: `${PREFIX}${tag}`,
     email: `${tag}@${EMAIL_DOMAIN}`,
@@ -296,14 +297,22 @@ describe("F-40: routing follows is_default, not the slug (DB-backed)", () => {
     const orgsBefore = await orgCount();
     const defaultSlugBefore = await orgCount({ slug: "default" });
 
-    const policy = await resolveSignupPolicy({
-      provider: "email",
-      email: `ada@${EMAIL_DOMAIN}`,
-      emailVerified: false,
-    });
-    expect(policy).toMatchObject({ source: "organization", signupApprovalMode: "invite_only" });
+    // F-52: a verified GitHub address is no exception. Its domain used to be
+    // an org slug: the policy lookup found no such org and returned the
+    // PLATFORM row, and provisioning then created an active org named after
+    // the domain (plus a `github` provider-org row) and put the user in it.
+    for (const input of [
+      { provider: "email", emailVerified: false },
+      { provider: "github", emailVerified: true },
+    ] as const) {
+      const policy = await resolveSignupPolicy({ ...input, email: `ada@${EMAIL_DOMAIN}` });
+      expect(policy, input.provider).toMatchObject({
+        source: "organization",
+        signupApprovalMode: "invite_only",
+      });
+    }
 
-    for (const provider of ["email", "google"] as const) {
+    for (const provider of ["email", "google", "github"] as const) {
       const placed = await signUp(`renamed-${provider}`, provider);
       expect(placed.organizationId).toBe(orgId);
       expect(placed.membershipStatus).toBe("pending_approval");
@@ -324,6 +333,13 @@ describe("F-40: routing follows is_default, not the slug (DB-backed)", () => {
     expect(await orgCount()).toBe(orgsBefore);
     expect(await orgCount({ slug: "default" })).toBe(defaultSlugBefore);
     expect(await defaultIds()).toEqual([orgId]);
+    // …and no provider-org row claims the GitHub user's domain (F-52).
+    const claims = await db
+      .selectFrom("app_provider_organizations")
+      .select("id")
+      .where("provider_organization_key", "=", EMAIL_DOMAIN)
+      .execute();
+    expect(claims).toEqual([]);
   });
 
   it("moving the flag moves routing and leaves exactly one default; it cannot be cleared", async () => {

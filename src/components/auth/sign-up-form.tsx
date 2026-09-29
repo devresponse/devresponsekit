@@ -67,8 +67,11 @@ export function SignUpForm({
   // non-invited sign-up.
   const scopedOrg = invitation ? null : organization;
   // Existing member choosing a social provider on the scoped screen lands with
-  // that org active (membership-checked); a brand-new social user routes by
-  // provider identity, since OAuth can't carry the sign-up-body hint.
+  // that org active (membership-checked). OAuth can't carry the sign-up-body
+  // hint, so a brand-new social user reaches the scoped org through the
+  // `org_signup_hint` cookie the proxy sets on this page; without a scope it is
+  // placed as docs/auth-signup-policy.md §4 describes (email-domain binding,
+  // then the default org), and nothing routes by provider identity (F-52).
   const socialCallback = scopedOrg ? buildActiveOrgApplyPath(scopedOrg.slug, returnTo) : returnTo;
 
   return (

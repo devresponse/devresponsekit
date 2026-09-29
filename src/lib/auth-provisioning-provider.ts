@@ -39,7 +39,8 @@ function providerFromUrl(url: string | undefined): SocialProvider | null {
  * Which auth method produced a Better Auth context — the `provider` sign-up
  * provisioning places and activates by, and sign-in re-evaluation judges
  * (`decideInitialStatus`: an org's `allowedAuthMethods`, and email-domain
- * routing, which applies to `email` alone).
+ * routing, which applies to `email` and to a `github` sign-up with a
+ * verified address, F-52).
  *
  * Better Auth sets `context.path` to the endpoint's ROUTE PATTERN, not the
  * request URL: an OAuth callback arrives as `/callback/:id` with the provider

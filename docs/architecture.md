@@ -66,7 +66,7 @@ flowchart TB
 | **Authentication** | `src/lib/auth.ts` | Better Auth configuration (providers, plugins, session hooks). |
 | **Access context** | `src/lib/auth-status.ts` | `getUserAccessContext()` resolves a user's effective permissions; `decideSecureAccess()` is the pure allow/deny decision. |
 | **Authorization primitives** | `src/lib/admin/access-scope.server.ts` | `isSuperadmin`, `resolveOrgScope`, `canAccessOrg`, `canAccessUser` — the single source of truth for tenant boundaries. |
-| **Admin guards & helpers** | `src/lib/admin/**` | `requireAdminPermission`, list-query parsing, error envelopes, rate limiting, audit helpers, request-id correlation. |
+| **Admin guards & helpers** | `src/lib/admin/**` | `requireAdminPermission`, list-query parsing, error envelopes, rate limiting, audit helpers, request-id correlation. The generic HTTP pieces are planned to move to `src/lib/http/` ([§8](#8-planned-srclibhttp)). |
 | **Machine API auth** | `src/lib/api-auth/**` | API-key and JWT issuance/verification, scope catalog and grantability, caller resolution. |
 | **SSO handoff** | `src/lib/sso*` / `src/lib/jwt-handoff.server.ts` | One-time signed token issue/verify for cross-subdomain SSO. |
 | **Email** | `src/lib/email/**` (outbox-first) | Render → record in outbox → optionally deliver via Resend/Mailgun. |
@@ -372,6 +372,91 @@ The application tables link to Better Auth's `user` table logically via `app_use
 | **Uniform list envelope** | `list-query.server.ts` | Admin/v1 list endpoints share pagination, sorting, filtering, and response shape. |
 | **Guard-returns-response** | `requireAdminPermission`, `requireAccountUser` | Guards return either a typed grant or a ready-to-send `NextResponse`, keeping handlers linear. |
 | **Frozen baseline + append-only migrations** | `0001-initial-schema.sql` + numbered `NNNN-*.sql` (today: `0002`, `0003`, `0004`, `0005`, `0006`, `0007`) via `run-migrations.ts` | Idempotent baseline is frozen and safe to re-run; further changes are append-only numbered files applied once each and tracked (id + normalised sha256 checksum) in the `app_schema_migrations` ledger under an advisory lock. Email templates live in `locales/` (en base always applied). |
+
+## 8. Planned: `src/lib/http`
+
+_Status: planned, not started. Evaluated on 2026-09-29 and deferred (I-13)._
+
+The 2026-09-22 review (advisory I-13) asks for two things. The first is to move the generic HTTP plumbing out of `src/lib/admin/`. The second is to put a route wrapper in front of every handler that owns each cross-cutting step, so a new route cannot skip one. Part of the second has shipped. `withAdminRoute`, `withV1Route`, `withMcpRoute` and `withClientRegistrationRoute` (`src/lib/route-handler.server.ts`, F-29 and A-12) mint the request id and turn a throw into the surface's 500 envelope. `tests/unit/route-request-id-invariant.test.ts` fails any handler that is neither wrapped nor listed, with a reason, in its `EXEMPT` map.
+
+The rest is not done. It was deferred because the move alone touches 156 tracked files. That is too wide to land alongside other work, and most of the rest would change behaviour. It is written down here so it can be picked up as one change.
+
+### 8.1 What moves where
+
+| From | To | Note |
+| --- | --- | --- |
+| `src/lib/admin/request-id.server.ts` | `src/lib/http/request-id.server.ts` | Pure move. |
+| `src/lib/admin/errors.server.ts` | `src/lib/http/errors.server.ts` | Pure move. Keep the `adminErrorResponse` / `adminJsonResponse` names: the first-party routes use them too, and renaming them would touch every call site a second time. |
+| `src/lib/api-auth/problem.ts` | `src/lib/http/problem.ts` | The v1 envelope. Without it, `src/lib/http` would import `src/lib/api-auth`. |
+| `src/lib/admin/origin-guard.server.ts` | `src/lib/http/origin-guard.server.ts` | Pure move. |
+| `src/lib/admin/rate-limit.server.ts`, `rate-limit-shared.server.ts`, `rate-limit-tiered.server.ts` | `src/lib/http/` (same names) | Moves as-is. Not yet generic ([§8.3](#83-risks)). |
+| `src/lib/route-handler.server.ts` | `src/lib/http/route-handler.server.ts` | Optional. It is already outside `admin/`, and moving it adds about 12 files. |
+
+These stay where they are:
+
+- `src/lib/request-id.ts`: the edge-safe normaliser that the proxy and `instrumentation.ts` import. It is not `server-only`.
+- `src/lib/trusted-origins.ts`.
+- `src/lib/bounded-body.ts`.
+
+### 8.2 Import rewrite list
+
+Counts were measured on 2026-09-29 over tracked files. The historical reports are not counted and must not be rewritten: `FULL-REVIEW-*`, `PRODUCTION-READINESS-*`, `COMMENT-AUDIT.md` and `CHANGELOG.md`.
+
+The six `admin/` modules are referenced from 156 files. Adding `problem.ts` makes it 168, and adding `route-handler.server.ts` makes it 180.
+
+| Where | Files | What changes |
+| --- | --- | --- |
+| `src/app/api/**` | 63 | Static imports only. |
+| `src/lib/**` | 19 | `account/guard.server.ts`. In `admin/`: `admin-mail-budget`, `org-route`, `permissions`, `refusals` and `user-target` (all `.server.ts`), plus the moved modules' imports of each other. In `api-auth/`: `problem.ts` and `v1-guard.server.ts`. `audit.server.ts`. `auth-sign-in-attempts.ts`, which has one type import and two lazy `import()` calls. `docs/asset-route.server.ts`. `observability/pre-auth-refusal.server.ts`. `route-handler.server.ts`. In `request-id.ts` and `trusted-origins.ts`, only comments change. |
+| `src/db/**` | 2 | Comments only, in `schema/app-schema.ts` and migration `0006`. |
+| `tests/**` | 61 | 37 static imports. 46 `vi.mock` / `vi.doMock` specifiers. 34 string specifiers in `import()`, `vi.importActual` and `typeof import()`. |
+| Scanners | (in `tests/**`) | `rate-limit-shared-floors-invariant.test.ts`: the shared limiter's module specifier, and the tiered helper's path, which is built from separate `"lib", "admin"` segments, so a text search for the old path misses it. `admin-audit-organization-invariant.test.ts`: its `"lib/admin/rate-limit.server.ts"` key, and its scanned roots, which must gain `lib/http` so the limiter's `administrator.rate_limited` write stays in the scan. `route-request-id-invariant.test.ts`: the wrapper's import pattern, only if the wrapper moves. |
+| Config | 4 | The per-file coverage floor in `vitest.config.ts`, the `mutate` list in `stryker.config.mjs`, `scripts/check-mutation-floors.mjs`, and the `paths` filter in `.github/workflows/mutation.yml`. All four cite `origin-guard.server.ts`. |
+| Docs | 7 | `admin-manager`, `architecture`, `deployment`, `design-api-keys-and-tokens`, `observability`, `testing` and `troubleshooting`. |
+
+Steps:
+
+1. `git mv` each module so its history follows it.
+2. Rewrite every string specifier in one codemod, in both the `@/lib/admin/<module>` and `lib/admin/<module>` forms.
+3. Replace this section with a short note on the result.
+4. Grep for the old paths with `grep -rE "lib/admin/(errors|request-id|rate-limit|rate-limit-shared|rate-limit-tiered|origin-guard)\.server"`. The only hits left should be in the historical reports. Migration `0006`'s comment is not one of them: the codemod rewrites it too ([§8.3](#83-risks)).
+
+Do not add re-export shims. A shim leaves two specifiers for the same module, and a `vi.mock` of one does not mock imports of the other.
+
+### 8.3 Risks
+
+- **A stale mock fails silently.** A `vi.mock` of a path nothing imports does nothing. The test then runs against the real module and may still pass. After the grep above, run the unit, integration, security and DB suites in full, not a sample.
+- **A stale path in config can fail silently.** Two of the four places give no error if they still name the old file:
+  - If the coverage floor glob in `vitest.config.ts` is stale, the floor stops applying.
+  - If the mutation workflow's `paths` filter is stale, the job stops running when the file changes.
+
+  The Stryker `mutate` list and `check-mutation-floors.mjs` do fail loudly on a stale path, but only when that job runs, so run `pnpm test:mutation` once on the move.
+- **Scanners name the modules by path.** The shared-floors, audit-organization and request-id scanners fail loudly on a stale path or specifier. Update them in the same commit. Do not loosen them to make them pass.
+- **`rate-limit.server.ts` is not generic.** It charges an impersonated request to the human behind it (`humanActorFor`, F-07). It lazily imports `audit.server` to write `administrator.rate_limited`. It also holds the admin, SSO and docs budget constants. Moved as-is, `src/lib/http` would depend on impersonation and audit. Moving the policy constants and the admin denial audit back into `src/lib/admin` is a follow-up with behaviour to pin, not part of the move.
+- **Branch conflicts.** The rename conflicts with every open branch that touches a route file. Land it alone, as one commit, when no other work is open. A branch that is still open afterwards reapplies the same codemod.
+- **Migration `0006`** names the old path in a comment. The ledger checksum ignores comments (`normalizeMigrationSql`), and `tests/unit/migration-checksums.test.ts` pins the same normalised hash, so rewriting the comment is safe and moves no pin.
+
+### 8.4 After the move
+
+**Route definitions.** Grow the wrappers into `defineAdminRoute({ permission, rateLimit, body }, handler)` and `defineV1Route(...)`. The wrapper would then own four steps: the guard call, the limiter, JSON parsing with Zod validation, and the 429.
+
+This changes behaviour route by route. Today, 42 route files call `request.json()` themselves, at 53 call sites, and they answer a malformed body in different ways:
+
+- 47 answer the admin `400 invalid_body`.
+- 5 answer the v1 `400 invalid_request`.
+- 1 treats a malformed body as `{}`.
+
+The order of the guard, the limiter and the body parse also decides which refusal a caller sees and which audit row is written. Migrate one route family at a time, behind the existing invariant tests. Once the last family has moved, add a scanner that fails on any `request.json()` outside the wrappers.
+
+**Typed linting.** This step does not depend on the move and can land first. Turn on `parserOptions.projectService` for the `.ts` and `.tsx` files, together with `@typescript-eslint/no-floating-promises` and `@typescript-eslint/no-misused-promises`. Leave out the `.mjs` configs and scripts: `allowJs` is off, so they are not in the TypeScript project.
+
+A probe on 2026-09-29 ran these two rules over the 1,081 files in `src/` and `tests/` in about 33 s:
+
+- 4 floating promises, all async fetch IIFEs inside a `useEffect`: `admin-list.client.ts`, `_group-roles-editor.tsx`, `_roles-using-sheet.tsx` and `_role-permissions-editor.tsx`.
+- 58 async JSX event handlers. Exempt these with the usual option, `checksVoidReturn: { attributes: false }`.
+- 1 in `src/db/migrations/apply-migration.ts`: pg-pool's `onConnect`, which it awaits.
+
+Apart from that migration pool, nothing in a route handler or in server-only code is flagged today. The value of the rules is keeping it that way.
 
 ---
 

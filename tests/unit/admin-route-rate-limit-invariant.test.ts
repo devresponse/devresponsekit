@@ -29,7 +29,9 @@ import { fileURLToPath } from "node:url";
  * the request CONTEXT (`request` + a `requestId` — `guard.requestId` or a local
  * one from `getOrCreateRequestId`), so a 429 carries the same `x-request-id` as
  * the request's logs/audit rows (P3-9) — a call that omits it does not count
- * and fails CI.
+ * and fails CI. F-64: the admin actions that mail someone take their per-actor
+ * budget from the SHARED bucket, through `enforceSharedRateLimit`, which counts
+ * on the same terms.
  */
 
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
@@ -48,7 +50,8 @@ const MUTATING_HANDLER = /export (?:async function|const) (?:POST|PATCH|PUT|DELE
 // authorized by the session being an impersonation session, not by a guard).
 // The lazy `[\s\S]*?` spans the multi-line call up to the closing paren, so a
 // call WITHOUT a `requestId` arg is not counted and trips the gate below.
-const ADMIN_RATE_LIMIT_CALL = /enforceRateLimit\s*\([\s\S]*?\brequestId\b[\s\S]*?\)/g;
+const ADMIN_RATE_LIMIT_CALL =
+  /(?:enforceRateLimit|enforceSharedRateLimit)\s*\([\s\S]*?\brequestId\b[\s\S]*?\)/g;
 // v1 wraps the bucket as enforceApiRateLimit; the token endpoint calls the
 // lower-level primitives directly — consumeSourceThenGlobal for its shared
 // per-IP + global pre-auth floors (review #98, F-18) and consumeToken for the

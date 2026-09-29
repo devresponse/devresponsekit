@@ -51,7 +51,17 @@ interface OutboxDetailRow extends OutboxRow {
   body_text: string | null;
 }
 
-export function AdministratorOutboxGrid({ canManage }: { canManage: boolean }) {
+export function AdministratorOutboxGrid({
+  canManage,
+  testRecipient,
+}: {
+  canManage: boolean;
+  /**
+   * F-64: the one address this caller may send the test email to (their
+   * own), or `null` when they may choose (a caller with cross-org reach).
+   */
+  testRecipient: string | null;
+}) {
   const t = useTranslations("administrator.email");
   // F-37: the viewer's zone and date format, to the second.
   const format = useAppFormatter();
@@ -129,7 +139,11 @@ export function AdministratorOutboxGrid({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="space-y-3">
-      <OutboxControls canManage={canManage} onSent={() => setGridEpoch((n) => n + 1)} />
+      <OutboxControls
+        canManage={canManage}
+        testRecipient={testRecipient}
+        onSent={() => setGridEpoch((n) => n + 1)}
+      />
       <DataGrid<OutboxRow>
         key={gridEpoch}
         name="administrator.email.outbox"
@@ -161,7 +175,15 @@ function statusVariant(status: string): "default" | "destructive" | "secondary" 
  * row, matching the search/filter/action layout used by every other
  * Administrator grid. Filters write to URL-backed grid state.
  */
-function OutboxControls({ canManage, onSent }: { canManage: boolean; onSent: () => void }) {
+function OutboxControls({
+  canManage,
+  testRecipient,
+  onSent,
+}: {
+  canManage: boolean;
+  testRecipient: string | null;
+  onSent: () => void;
+}) {
   const t = useTranslations("administrator.email");
   const { state, setFilter } = useGridState({
     defaultPageSize: 50,
@@ -197,7 +219,7 @@ function OutboxControls({ canManage, onSent }: { canManage: boolean; onSent: () 
           className="h-8 w-48"
         />
       </label>
-      {canManage ? <SendTestEmail onSent={onSent} /> : null}
+      {canManage ? <SendTestEmail onSent={onSent} fixedRecipient={testRecipient} /> : null}
     </div>
   );
 }
@@ -206,10 +228,21 @@ function OutboxControls({ canManage, onSent }: { canManage: boolean; onSent: () 
  * Toolbar action: sends the `test_email` template through the full
  * outbox pipeline — the canonical way to verify provider configuration
  * (or, with no provider, the rendering + outbox wiring itself).
+ *
+ * F-64: an org admin may mail only their own address, so for them the field
+ * is filled with it and read-only (`fixedRecipient`); the route refuses any
+ * other. A 429 from the per-actor or daily budget says so.
  */
-function SendTestEmail({ onSent }: { onSent: () => void }) {
+function SendTestEmail({
+  onSent,
+  fixedRecipient,
+}: {
+  onSent: () => void;
+  fixedRecipient: string | null;
+}) {
   const t = useTranslations("administrator.email");
-  const [to, setTo] = useState("");
+  const tApiErr = useTranslations("errors");
+  const [to, setTo] = useState(fixedRecipient ?? "");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
@@ -224,12 +257,12 @@ function SendTestEmail({ onSent }: { onSent: () => void }) {
         body: JSON.stringify({ to: to.trim() }),
       });
       if (!res.ok) {
-        setResult(t("test.error"));
+        setResult(res.status === 429 ? tApiErr("rate_limited") : t("test.error"));
         return;
       }
       const body = (await res.json()) as { status: string };
       setResult(t(`test.result.${body.status}` as Parameters<typeof t>[0]));
-      setTo("");
+      setTo(fixedRecipient ?? "");
       onSent();
     } catch {
       setResult(t("test.error"));
@@ -245,6 +278,7 @@ function SendTestEmail({ onSent }: { onSent: () => void }) {
         type="email"
         value={to}
         onChange={(e) => setTo(e.currentTarget.value)}
+        readOnly={fixedRecipient !== null}
         placeholder={t("test.placeholder")}
         aria-label={t("test.placeholder")}
         className="h-8 w-56"

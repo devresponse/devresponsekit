@@ -215,6 +215,8 @@ The token endpoint, MCP registration and the CSP sink keep their budgets next to
 
 This per-actor store is in-process (resets on restart, per instance under horizontal scaling) — see [Deployment §5](./deployment.md#5-operations--gotchas) for the topology statement.
 
+**Admin actions that send mail** are the authenticated exception (F-64): the test email, invitation create and resend, and the reset email an admin sends a user. Each token they spend is a mail from the platform's domain, and the provider quota and sending reputation are shared by every tenant, so a per-instance budget there is a per-instance mail cannon. The test email and the invitation routes take their per-actor budget from the shared Postgres bucket; a resend and a reset email also take a per-recipient cooldown from it (one per 10 minutes); and a caller confined to one org is held to a daily budget of 200 such mails per org, counted from the audit rows the four actions write, since the shared bucket holds no window longer than an hour (`src/lib/admin/admin-mail-budget.server.ts`, [Admin Manager §2.5](./admin-manager.md#25-rate-limiting-of-admin-mutations)). Only a caller with cross-org reach chooses the test email's recipient.
+
 ### Single Sign-On handoff
 
 Cross-subdomain SSO uses a **one-time, short-lived signed token**, not a shared cookie:

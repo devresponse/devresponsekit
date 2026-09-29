@@ -6,6 +6,7 @@ import type * as OutboxDetailRouteModule from "@/app/api/administrator/email/out
 import type * as TemplatesRouteModule from "@/app/api/administrator/email/templates/route";
 import type * as TemplateRouteModule from "@/app/api/administrator/email/templates/[id]/route";
 import type * as TestRouteModule from "@/app/api/administrator/email/test/route";
+import type * as MailBudgetModule from "@/lib/admin/admin-mail-budget.server";
 
 /**
  * Integration tests for the administrator email endpoints (specs.md
@@ -21,6 +22,11 @@ const itemsExecute = vi.fn();
 const selectFirst = vi.fn();
 const updateFirst = vi.fn();
 const sendMock = vi.fn();
+// F-64: the per-actor budget (shared bucket) and the org's daily mail budget.
+// Their own behaviour is pinned in tests/unit/admin-mail-budget.test.ts and
+// tests/db/admin-mail-budget.db.test.ts; here, that the route asks them.
+const sharedLimitMock = vi.fn();
+const orgMailBudgetMock = vi.fn();
 /** Every `.select(...)` argument the handler under test issued (projection guard). */
 let selectedColumns: unknown[] = [];
 
@@ -40,6 +46,18 @@ vi.mock("@/lib/audit.server", () => ({
 vi.mock("@/lib/email/send.server", () => ({
   sendAppEmail: (...args: unknown[]) => sendMock(...args),
 }));
+vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+  enforceSharedRateLimit: (...args: unknown[]) => sharedLimitMock(...args),
+}));
+vi.mock("@/lib/admin/admin-mail-budget.server", async () => {
+  const actual = await vi.importActual<typeof MailBudgetModule>(
+    "@/lib/admin/admin-mail-budget.server",
+  );
+  return {
+    ...actual,
+    enforceOrgAdminMailBudget: (...args: unknown[]) => orgMailBudgetMock(...args),
+  };
+});
 
 vi.mock("@/db/database", () => {
   function makeChain() {
@@ -144,8 +162,12 @@ beforeEach(async () => {
     selectFirst,
     updateFirst,
     sendMock,
+    sharedLimitMock,
+    orgMailBudgetMock,
   ])
     m.mockReset();
+  sharedLimitMock.mockResolvedValue(null);
+  orgMailBudgetMock.mockResolvedValue(null);
   selectedColumns = [];
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
@@ -438,5 +460,101 @@ describe("POST /api/administrator/email/test", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.email.test_sent", outcome: "error" }),
     );
+  });
+  describe("F-64: an org admin cannot use the test email as a mail cannon", () => {
+    const send = (to: string) =>
+      testPOST(makeReq("/api/administrator/email/test", { method: "POST", body: { to } }));
+    const tooMany = () => new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 });
+
+    it("takes the per-actor budget from the SHARED bucket: 10 an hour", async () => {
+      accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.manage"]));
+      sendMock.mockResolvedValue({ outboxId: "o-11", status: "logged" });
+      await send("t@x.com");
+      expect(sharedLimitMock).toHaveBeenCalledWith(
+        "admin.email.test",
+        "ba-1",
+        { capacity: 10, refillPerSec: 10 / 3600 },
+        expect.anything(),
+        expect.any(String),
+      );
+    });
+
+    it("sends nothing when the per-actor budget is spent", async () => {
+      accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.manage"]));
+      sharedLimitMock.mockResolvedValue(tooMany());
+      const res = await send("t@x.com");
+      expect(res.status).toBe(429);
+      expect(sendMock).not.toHaveBeenCalled();
+    });
+
+    it("403s an org admin naming another recipient, with a denied row that names it", async () => {
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.email.manage"]));
+      const res = await send("victim@elsewhere.test");
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe("forbidden");
+      expect(sendMock).not.toHaveBeenCalled();
+      expect(orgMailBudgetMock).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledTimes(1);
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "administrator.access.denied",
+          outcome: "denied",
+          actorBetterAuthUserId: "ba-1",
+          organizationId: "o-1",
+          email: "victim@elsewhere.test",
+          reason: "cross_org_reach_required",
+          metadata: { action: "email_test_recipient" },
+        }),
+      );
+    });
+
+    it("confines a superadmin's ORG-BOUND credential the same way (MACHINE-2)", async () => {
+      accessGetter.mockResolvedValue({ ...ORG_ADMIN(["superuser"]), orgBound: true });
+      const res = await send("victim@elsewhere.test");
+      expect(res.status).toBe(403);
+      expect(sendMock).not.toHaveBeenCalled();
+      // The recipient rule refused it, not the permission gate.
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: "cross_org_reach_required",
+          email: "victim@elsewhere.test",
+        }),
+      );
+    });
+
+    it("sends an org admin's test to their own address, in any case, against the org's daily budget", async () => {
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.email.manage"]));
+      sendMock.mockResolvedValue({ outboxId: "o-12", status: "logged" });
+      const res = await send("Admin@X.com");
+      expect(res.status).toBe(200);
+      expect(orgMailBudgetMock).toHaveBeenCalledWith(
+        expect.objectContaining({ betterAuthUserId: "ba-1" }),
+        "o-1",
+        expect.anything(),
+      );
+      expect(sendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ to: "Admin@X.com", organizationId: "o-1" }),
+      );
+    });
+
+    it("sends nothing once the org's daily admin-mail budget is spent", async () => {
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.email.manage"]));
+      orgMailBudgetMock.mockResolvedValue(tooMany());
+      const res = await send("admin@x.com");
+      expect(res.status).toBe(429);
+      expect(sendMock).not.toHaveBeenCalled();
+      expect(auditMock).not.toHaveBeenCalled();
+    });
+
+    it("still lets a superadmin session pick any recipient (a platform, org-less test)", async () => {
+      accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.manage"]));
+      sendMock.mockResolvedValue({ outboxId: "o-13", status: "logged" });
+      const res = await send("someone@elsewhere.test");
+      expect(res.status).toBe(200);
+      expect(orgMailBudgetMock).toHaveBeenCalledWith(expect.anything(), null, expect.anything());
+      expect(sendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ to: "someone@elsewhere.test", organizationId: null }),
+      );
+    });
   });
 });

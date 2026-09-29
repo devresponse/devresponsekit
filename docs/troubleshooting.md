@@ -452,7 +452,13 @@ organization.
 
 **`429 Too Many Requests`.** The per-actor rate limiter tripped (admin mutations,
 bulk ops, or export). Respect the `Retry-After` header. The limiter is in-memory
-and resets on restart; across multiple instances it's best-effort.
+and resets on restart; across multiple instances it's best-effort. The admin
+actions that send mail are the exception (F-64): the test email (10 an hour per
+admin), an invitation resend or an admin's reset email to the same recipient
+within 10 minutes, and an organization past 200 admin-sent mails in 24 hours are
+refused from Postgres, so a restart does not reset them and `Retry-After` can be
+hours for the daily budget. See
+[Admin Manager §2.5](./admin-manager.md#25-rate-limiting-of-admin-mutations).
 
 **Locale parity test or a missing translation.** Every text key must exist in all
 eight locale files. Add the key to `en.json` first, then `fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`.

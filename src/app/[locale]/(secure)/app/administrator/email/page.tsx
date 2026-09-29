@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { AdministratorOutboxGrid } from "./_outbox-grid";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,9 @@ export const dynamic = "force-dynamic";
  * rows are kept as `logged`.
  *
  * Caller MUST hold `admin.email.read`; the "send test email" action in
- * the toolbar additionally requires `admin.email.manage`.
+ * the toolbar additionally requires `admin.email.manage`, and only a caller
+ * with cross-org reach chooses its recipient (F-64): anyone else sends it to
+ * their own address, which the toolbar fills in.
  */
 export default async function AdministratorEmailPage({
   params,
@@ -34,6 +36,8 @@ export default async function AdministratorEmailPage({
   // `guard.access`. Mirrors the SUPERADMIN short-circuit the guard applies.
   const canManage =
     isSuperadmin(guard.access) || guard.access.permissions.includes("admin.email.manage");
+  // F-64: the same rule the test route enforces.
+  const testRecipient = hasCrossOrgReach(guard.access) ? null : guard.access.primaryEmail;
 
   const t = await getTranslations({ locale, namespace: "administrator.email" });
 
@@ -43,7 +47,7 @@ export default async function AdministratorEmailPage({
         <h1 className="text-lg font-semibold">{t("title")}</h1>
         <p className="text-muted-foreground text-sm">{t("description")}</p>
       </div>
-      <AdministratorOutboxGrid canManage={canManage} />
+      <AdministratorOutboxGrid canManage={canManage} testRecipient={testRecipient} />
     </section>
   );
 }

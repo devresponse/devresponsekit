@@ -147,6 +147,11 @@ export function OrganizationInvitationsPanel({
         form.setError("root", { type: "server", message: tErr("organizationNotActive") });
         return;
       }
+      // F-64: the per-actor or the org's daily admin-mail budget is spent.
+      if (body?.error === "rate_limited") {
+        form.setError("root", { type: "server", message: tApiErr("rate_limited") });
+        return;
+      }
       form.setError("root", { type: "server", message: t("sendError") });
     } catch {
       form.setError("root", { type: "server", message: t("sendError") });
@@ -181,7 +186,10 @@ export function OrganizationInvitationsPanel({
           text:
             body?.error === "organization_not_active"
               ? tErr("organizationNotActive")
-              : t("resendError"),
+              : // F-64: resent in the last 10 minutes, or a spent mail budget.
+                body?.error === "rate_limited"
+                ? tApiErr("rate_limited")
+                : t("resendError"),
         });
         return;
       }

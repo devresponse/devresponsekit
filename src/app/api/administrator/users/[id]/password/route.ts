@@ -9,6 +9,11 @@ import {
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import {
+  ADMIN_MAIL_EVENTS,
+  enforceOrgAdminMailBudget,
+  enforceRecipientCooldown,
+} from "@/lib/admin/admin-mail-budget.server";
 import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import {
   actingOrganizationId,
@@ -36,7 +41,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  *                         (F-08, F-10).
  *   - `mode: "reset_email"` — triggers a password-reset email via
  *                             Better Auth's `requestPasswordReset`
- *                             (`sendBetterAuthPasswordResetEmail`).
+ *                             (`sendBetterAuthPasswordResetEmail`). F-64:
+ *                             one per user per 10 minutes, and an
+ *                             org-confined caller spends the org's daily
+ *                             admin-mail budget (429 `rate_limited`).
  *
  * The new password is forwarded to Better Auth and never logged or
  * echoed in the response or audit metadata. The audit row records only
@@ -153,6 +161,24 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   }
 
   // mode === "reset_email"
+  // F-64: the same mail cannon as the test email and an invitation resend. An
+  // org admin reaches any address by creating a member with it, and the
+  // per-actor bucket let them mail it once a second. The daily budget is only
+  // read, so it goes first; the cooldown spends this user's token.
+  const overBudget = await enforceOrgAdminMailBudget(
+    guard,
+    actingOrganizationId(guard.access),
+    request,
+  );
+  if (overBudget) return overBudget;
+  const cooling = await enforceRecipientCooldown(
+    "admin.users.password.reset_email",
+    target.appUserId,
+    guard,
+    request,
+  );
+  if (cooling) return cooling;
+
   try {
     await sendBetterAuthPasswordResetEmail(target.primaryEmail, parsed.data.redirectTo, request);
   } catch (err) {
@@ -168,7 +194,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     return adminErrorResponse("auth_forgot_password_failed", 502, request, { cause: err });
   }
 
-  await auditUserAction("admin.user.password_reset_email_sent", "success", {
+  await auditUserAction(ADMIN_MAIL_EVENTS.passwordResetEmail, "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,

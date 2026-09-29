@@ -228,8 +228,8 @@ i18n: status option labels, field labels, and the "Global" org label localize.
 - Guard / who can access: `admin.email.read` to view; the toolbar "Send test email" action additionally needs `admin.email.manage` (`email/page.tsx:26`,`:30`).
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> sees only their own org's mail rows; can send a test email attributed to their org (`outbox/route.ts:57`; test route `src/app/api/administrator/email/test/route.ts:37`).
-  - Superadmin -> sees every org's mail plus org-less platform/system rows; a test email is a platform (org-less) test.
+  - Org Admin -> sees only their own org's mail rows; can send a test email attributed to their org, to their own address only (`outbox/route.ts:57`; test route `src/app/api/administrator/email/test/route.ts`, F-64).
+  - Superadmin -> sees every org's mail plus org-less platform/system rows; a test email is a platform (org-less) test, to any address.
 - Preconditions and test data: signed in as the target persona. Trigger at least one email first (e.g. a password reset) so the outbox has rows, or use the Send test email action.
 
 User stories
@@ -247,12 +247,12 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-EMAIL-OUTBOX-S2 — As an Org Admin, I want to send a test email, so that I can confirm rendering and provider wiring end to end.
-  - Acceptance criteria: Given I hold `admin.email.manage`, when I enter an address and Send, then a result message shows the delivery status and a new outbox row appears; with no provider configured the status is `logged` (`_outbox-grid.tsx:204`; test route sends the `test_email` template at `test/route.ts:63`).
+  - Acceptance criteria: Given I hold `admin.email.manage`, when I Send, then the test email goes to my own address, a result message shows the delivery status and a new outbox row appears; with no provider configured the status is `logged` (`_outbox-grid.tsx`; test route sends the `test_email` template, `test/route.ts`). An org admin cannot choose another recipient (F-64).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | As Org Admin, in the outbox toolbar find the **Send test email** control | An email input and a Send button are shown |
-    | 2 | Enter a valid address and click **Send** | A short result message appears (e.g. delivered / logged) |
+    | 1 | As Org Admin, in the outbox toolbar find the **Send test email** control | An email input, already filled with your own address and read-only, and a Send button are shown |
+    | 2 | Click **Send** | A short result message appears (e.g. delivered / logged) |
     | 3 | Watch the grid | A new row for the `test_email` template appears near the top |
     | 4 | Open the new row's detail | To matches your address; Status matches the result; body is text |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -277,10 +277,11 @@ User stories
 
 Negative and edge cases
 - Out-of-scope -> the outbox is org-scoped; an Org Admin never sees other orgs' rows (`outbox/route.ts:57`); a Member/Limited Admin gets 404 at the guard.
-- Invalid test address -> the email input is `type="email"` and Send is disabled until non-empty; the server validates the address and returns `invalid_body` 400 for a bad one (`test/route.ts:58`).
+- Invalid test address -> the email input is `type="email"` and Send is disabled until non-empty; the server validates the address and returns `invalid_body` 400 for a bad one (`test/route.ts`).
+- Another recipient (F-64) -> only a Superadmin types the address. The API refuses an Org Admin's request naming any address but their own with 403 `forbidden`, and the audit explorer shows an `administrator.access.denied` row (reason `cross_org_reach_required`, action `email_test_recipient`).
 - No provider configured -> the message is still recorded as `logged` (outbox-first), proving rendering + wiring.
 - HTML safety: bodies are rendered as text only (never `dangerouslySetInnerHTML`) so an admin-edited template cannot inject HTML into the operator's browser (`_outbox-grid.tsx:20`).
-- Rate limit: the test action is limited via `admin.email.test` (`test/route.ts:43`); expect a friendly failure on abuse. `TODO: verify` the exact 429 copy.
+- Rate limit (F-64): the test action is limited to 10 an hour per admin via `admin.email.test` (shared across instances), and an Org Admin's test emails also count toward the org's daily budget of 200 admin-sent mails. A 429 shows "Too many requests. Please slow down." next to the control.
 
 Accessibility: the test email input has an `aria-label`; the detail panel is a focus-trapped sheet with Esc to close; body text is a `pre` block.
 i18n: status labels, filter labels, and detail field labels localize in `en` and `uk`.
@@ -626,7 +627,7 @@ Notes on the matrix:
 
 ## TODO: verify
 
-- The exact user-facing message shown on an admin **rate-limit (HTTP 429)** for each mutating action (create/delete app, send test email, save template, issue/rotate/revoke key). The grids/forms map specific status codes (404/409/422/400/403) explicitly; 429 falls through to the generic error text, but the precise copy was not confirmed from code.
+- The exact user-facing message shown on an admin **rate-limit (HTTP 429)** for each mutating action (create/delete app, save template, issue/rotate/revoke key); send test email shows "Too many requests. Please slow down." (F-64). The grids/forms map specific status codes (404/409/422/400/403) explicitly; 429 falls through to the generic error text, but the precise copy was not confirmed from code.
 - **Read-only-in-one-area personas** (e.g. an admin with `admin.apps.read` but not `.manage`, or `admin.email.read` only, or `admin.apikeys.read` only) are **not** in the default seed. Stories that assert "read-only sees no destructive controls" require creating such a role first. Only `admin.platform` (full set) and `admin` (users + audit) exist by default (`src/db/seeds/dev-init.ts:239`).
 - Enterprise-app **status values**: the create/edit form and grid filter expose `available` and `disabled` only (`src/lib/admin/enterprise-apps.ts:61`), but a `degraded` value is referenced by the launcher and the outbox/audit colour helpers. Confirm whether `degraded` is a still-reachable status for an enterprise app or purely legacy.
 - Enterprise-app detail PATCH has **no If-Match / stale-edit protection**; confirm whether concurrency protection is expected for this form (last-write-wins today).

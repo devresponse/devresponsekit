@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
-import { readOutboxDeliveryLink } from "./helpers/outbox-db";
+import { ADMIN_API_HEADERS, SEED_ADMIN, signInAsSeedAdmin } from "./helpers/admin-auth";
+import { readOutboxDeliveryLink, resetSharedRateLimitBucket } from "./helpers/outbox-db";
 
 /**
  * E2E — the email subsystem (specs.md §35) end to end:
@@ -37,6 +37,11 @@ test("test email is recorded in the outbox and visible in the email workspace", 
   page,
 }, testInfo) => {
   const to = `e2e.outbox.${testInfo.project.name}.${Date.now()}@devresponse.local`;
+
+  // F-64: the test email's per-actor budget (10 an hour, superadmins too) is a
+  // row in the database, not dev-server memory, so earlier runs and other
+  // checkouts on this database spend it. Start this send from a full bucket.
+  await resetSharedRateLimitBucket({ scope: "admin.email.test", email: SEED_ADMIN.email });
 
   const send = await page.request.post("/api/administrator/email/test", {
     headers: ADMIN_API_HEADERS,

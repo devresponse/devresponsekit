@@ -574,7 +574,8 @@
         "partialFailureToast": "{action} aplicado a {succeeded}/{attempted} usuario(s); {failed} fallaron.",
         "errorToast": "La acción masiva falló.",
         "rateLimitedToast": "Demasiadas solicitudes masivas. Inténtelo de nuevo en breve.",
-        "tooManyToast": "Selecciona como máximo {max} usuarios para una acción masiva."
+        "tooManyToast": "Selecciona como máximo {max} usuarios para una acción masiva.",
+        "confirmAllMatching": "¿Aplicar a los {count, number} usuarios que coinciden con la búsqueda y los filtros actuales? Tu propia cuenta, si coincide, se omite."
       },
       "impersonation": {
         "confirmTitle": "¿Suplantar a {email}?",
@@ -1293,6 +1294,7 @@
     "email_taken": "Este correo ya está en uso.",
     "export_failed": "La exportación falló antes de enviar filas.",
     "filters_required_for_select_all": "Se requieren filtros al seleccionar todo.",
+    "too_many_matches": "Demasiados usuarios coinciden para una sola acción masiva. Acota la búsqueda o los filtros.",
     "forbidden": "No tienes permiso para realizar esta acción.",
     "id_taken": "Este identificador ya está en uso.",
     "audience_taken": "Esta audiencia SSO ya está en uso.",

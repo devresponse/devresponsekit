@@ -470,6 +470,42 @@ describe("every action refuses a target who outranks the actor (review #7)", () 
 });
 
 /**
+ * F-62: the grid's header checkbox selects the admin's own row like any other,
+ * so "Block selected" used to lock the admin out of an org they may be the only
+ * admin of. The lockout actions refuse that row; the rest of the batch goes on.
+ */
+describe("a batch never blocks or suspends its own actor (F-62)", () => {
+  const own = { ...target, betterAuthUserId: actor.betterAuthUserId };
+
+  it.each(["block", "suspend"] as const)(
+    "%s refuses the actor's own row and touches nothing",
+    async (action) => {
+      const out = await executeBulkUserAction(action, own, actor);
+      expect(out).toEqual({ ok: false, appUserId: "u1", error: "cannot_act_on_self" });
+      expect(performStatusChange).not.toHaveBeenCalled();
+      expect(outranksMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["approve", "reactivate"] as const)(
+    "%s still applies to the actor's own row: it can lock nobody out",
+    async (action) => {
+      const out = await executeBulkUserAction(action, own, actor);
+      expect(out).toEqual({ ok: true, appUserId: "u1" });
+      expect(performStatusChange).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("block still applies to every other row", async () => {
+    const out = await executeBulkUserAction("block", target, actor);
+    expect(out).toEqual({ ok: true, appUserId: "u1" });
+    expect(performStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({ targetAppUserId: "u1", newStatus: "blocked" }),
+    );
+  });
+});
+
+/**
  * F-32: every per-row audit is filed under the org the batch was confined to,
  * so an org admin's bulk lockouts reach that org's audit explorer and the
  * members' Audit tabs. A superadmin batch stays a platform row: its active org

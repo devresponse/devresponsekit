@@ -514,7 +514,8 @@
         "partialFailureToast": "{action} applied to {succeeded}/{attempted} user(s); {failed} failed.",
         "errorToast": "Bulk action failed.",
         "rateLimitedToast": "Too many bulk requests. Try again shortly.",
-        "tooManyToast": "Select at most {max} users for a bulk action."
+        "tooManyToast": "Select at most {max} users for a bulk action.",
+        "confirmAllMatching": "Apply to all {count, number} users matching the current search and filters? Your own account, if it matches, is skipped."
       },
       "impersonation": {
         "confirmTitle": "Impersonate {email}?",
@@ -1293,6 +1294,7 @@
     "email_taken": "This email is already in use.",
     "export_failed": "Export failed before any rows could be sent.",
     "filters_required_for_select_all": "Filters are required when selecting all.",
+    "too_many_matches": "Too many users match for one bulk action. Narrow the search or filters.",
     "forbidden": "You do not have permission to perform this action.",
     "id_taken": "This identifier is already in use.",
     "audience_taken": "This SSO audience is already in use.",

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { sql } from "kysely";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
@@ -49,7 +50,13 @@ export const dynamic = "force-dynamic";
  *   - `ids` is capped at {@link MAX_BULK_IDS} (500). When `ids === "*"`
  *     the server re-applies the SAME allow-listed filter set the GET
  *     /users endpoint uses, so "select all matching" cannot pivot to
- *     unindexed columns or escape the existing visibility model.
+ *     unindexed columns or escape the existing visibility model. A
+ *     `status` value outside that set is a 400, never dropped (F-114).
+ *   - "Select all matching" is every match or nothing (F-62): more than
+ *     {@link MAX_BULK_IDS} matches is a 400 `too_many_matches` carrying
+ *     `matched` and `max`, and nothing is applied. It never includes the
+ *     caller's own account, and it runs newest first (`created_at`, then
+ *     `id`), the grid's default order.
  *   - Each row's outcome is captured in the response so the UI can
  *     surface partial failures; one row failing does not abort the
  *     batch.
@@ -160,21 +167,31 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   //   1. Explicit ids — trust the parser's UUID format check, then
   //      look them up in one round-trip.
   //   2. "*"  — re-apply the allow-listed filter set against
-  //      `app_users` and cap the result at MAX_BULK_IDS to honour the
-  //      same per-request budget.
+  //      `app_users`, refusing the batch when more than MAX_BULK_IDS
+  //      match (the same per-request budget).
   let targetIds: string[];
   if (parsed.data.ids === "*") {
     if (!parsed.data.filters) {
       return adminErrorResponse("filters_required_for_select_all", 400, request);
     }
-    let q = db.selectFrom("app_users").select(["id"]);
+    // F-114: a status outside the allow-list used to be dropped, and an empty
+    // list meant no status filter, so `{ status: "pending" }` (a typo, or a
+    // value a client no longer knows) WIDENED the batch to every status. The
+    // list endpoint may drop one, since it only reads; a write refuses it.
     const status = parsed.data.filters.status;
-    if (typeof status === "string" && ALLOWED_STATUS.has(status)) {
-      q = q.where("status", "=", status);
-    } else if (Array.isArray(status)) {
-      const cleaned = status.filter((v) => ALLOWED_STATUS.has(v));
-      if (cleaned.length > 0) q = q.where("status", "in", cleaned);
+    const statuses =
+      status === undefined ? undefined : typeof status === "string" ? [status] : status;
+    if (statuses && (statuses.length === 0 || statuses.some((v) => !ALLOWED_STATUS.has(v)))) {
+      return adminErrorResponse("invalid_body", 400, request, { requestId: guard.requestId });
     }
+    // F-62: the window count is taken before LIMIT, so it is every match, and
+    // the caller's own account is never one: a "block all active" used to
+    // block the admin who sent it, who may be the org's only one.
+    let q = db
+      .selectFrom("app_users")
+      .select(["id", sql<string>`count(*) over()`.as("matched")])
+      .where("better_auth_user_id", "!=", guard.betterAuthUserId);
+    if (statuses) q = q.where("status", "in", statuses);
     if (parsed.data.filters.q) {
       const like = likeContains(parsed.data.filters.q);
       q = q.where((eb) =>
@@ -192,7 +209,25 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
         ),
       );
     }
-    const rows = await q.limit(MAX_BULK_IDS).execute();
+    // F-62: this used to act on the first MAX_BULK_IDS rows the planner
+    // returned, in no order, while the grid said "All 1,200 matching rows
+    // selected" and the toast counted only the ones processed. More matches
+    // than the cap now refuse the whole batch, so the admin narrows the
+    // filter instead of acting on an arbitrary part of it; `created_at` then
+    // `id` (unique, the tie-breaker) keeps the order the grid shows by
+    // default and makes a re-run process the rows in the same order.
+    const rows = await q
+      .orderBy("created_at", "desc")
+      .orderBy("id", "desc")
+      .limit(MAX_BULK_IDS)
+      .execute();
+    const matched = Number(rows[0]?.matched ?? 0);
+    if (matched > MAX_BULK_IDS) {
+      return adminErrorResponse("too_many_matches", 400, request, {
+        requestId: guard.requestId,
+        extra: { matched, max: MAX_BULK_IDS },
+      });
+    }
     targetIds = rows.map((r) => r.id);
   } else {
     // `idsSchema` already validates UUID format and caps at MAX_BULK_IDS,

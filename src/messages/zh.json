@@ -514,7 +514,8 @@
         "partialFailureToast": "已对 {succeeded}/{attempted} 名用户执行“{action}”；{failed} 个失败。",
         "errorToast": "批量操作失败。",
         "rateLimitedToast": "批量请求过多。请稍后重试。",
-        "tooManyToast": "批量操作最多可选择 {max} 个用户。"
+        "tooManyToast": "批量操作最多可选择 {max} 个用户。",
+        "confirmAllMatching": "要应用到与当前搜索和筛选条件匹配的全部 {count, number} 个用户吗？您自己的账户如果匹配，会被跳过。"
       },
       "impersonation": {
         "confirmTitle": "模拟登录 {email}？",
@@ -1293,6 +1294,7 @@
     "email_taken": "此电子邮箱已被使用。",
     "export_failed": "导出在发送任何行之前已失败。",
     "filters_required_for_select_all": "全选时需要设置筛选条件。",
+    "too_many_matches": "匹配的用户过多，无法在一次批量操作中处理。请缩小搜索或筛选范围。",
     "forbidden": "您没有权限执行此操作。",
     "id_taken": "此标识符已被使用。",
     "audience_taken": "此 SSO 受众已被使用。",

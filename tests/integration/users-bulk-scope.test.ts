@@ -10,6 +10,8 @@ import type * as Route from "@/app/api/administrator/users/bulk/route";
  *     id passed alongside a valid one is dropped to `not_found`, never acted
  *     on — proving the route operates on the org-scoped resolved set, not
  *     the raw request id list (explicit ids AND "select all").
+ *   - "Select all" refuses more matches than the cap (F-62) and a status
+ *     filter it does not recognise (F-114), before anything is applied.
  */
 const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
@@ -22,6 +24,8 @@ const state: {
     better_auth_user_id: string;
     primary_email: string;
     status: string;
+    /** F-62: the select-all expansion's window count of every match. */
+    matched?: string;
   }>;
 } = {
   targets: [],
@@ -170,6 +174,39 @@ describe("POST /users/bulk — org-scoped batch", () => {
     const body = (await res.json()) as { succeeded: number };
     expect(body.succeeded).toBe(1); // only the org-resolved U1
   });
+
+  // F-62: more matches than one batch may act on used to act on an arbitrary
+  // MAX_BULK_IDS of them. The window count rides on each row the expansion
+  // returns; tests/db/users-bulk-select-all.db.test.ts runs the real query.
+  it('"select all" refuses the batch when more users match than the cap, applying nothing', async () => {
+    state.targets = [
+      {
+        id: U1,
+        better_auth_user_id: "ba-1",
+        primary_email: "u1@org-a.com",
+        status: "active",
+        matched: "501",
+      },
+    ];
+    accessGetter.mockResolvedValue(access(ADMIN_PERMS, ORG_A));
+    const res = await POST(jsonReq({ action: "block", ids: "*", filters: { status: "active" } }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "too_many_matches", matched: 501, max: 500 });
+    expect(bulkExecMock).not.toHaveBeenCalled();
+    expect(auditUserActionMock).not.toHaveBeenCalled();
+  });
+
+  // F-114: an unrecognised status used to be dropped, widening the batch.
+  it.each([["pending"], [["active", "pending"]], [[]]])(
+    '"select all" refuses the status filter %j, applying nothing',
+    async (status) => {
+      accessGetter.mockResolvedValue(access(ADMIN_PERMS, ORG_A));
+      const res = await POST(jsonReq({ action: "approve", ids: "*", filters: { status } }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: "invalid_body" });
+      expect(bulkExecMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("403 when the caller lacks the action's permission", async () => {
     accessGetter.mockResolvedValue(access(["admin.users.read"], ORG_A));

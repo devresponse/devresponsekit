@@ -574,7 +574,8 @@
         "partialFailureToast": "{action} appliqué à {succeeded}/{attempted} utilisateur(s) ; {failed} en échec.",
         "errorToast": "L’action en masse a échoué.",
         "rateLimitedToast": "Trop de requêtes en masse. Réessayez dans un instant.",
-        "tooManyToast": "Sélectionnez au maximum {max} utilisateurs pour une action groupée."
+        "tooManyToast": "Sélectionnez au maximum {max} utilisateurs pour une action groupée.",
+        "confirmAllMatching": "Appliquer aux {count, number} utilisateurs correspondant à la recherche et aux filtres actuels ? Votre propre compte, s’il correspond, est ignoré."
       },
       "impersonation": {
         "confirmTitle": "Usurper l’identité de {email} ?",
@@ -1293,6 +1294,7 @@
     "email_taken": "Cet e-mail est déjà utilisé.",
     "export_failed": "L’export a échoué avant l’envoi de la moindre ligne.",
     "filters_required_for_select_all": "Les filtres sont requis pour tout sélectionner.",
+    "too_many_matches": "Trop d’utilisateurs correspondent pour une seule action groupée. Affinez la recherche ou les filtres.",
     "forbidden": "Vous n’avez pas la permission requise.",
     "id_taken": "Cet identifiant est déjà utilisé.",
     "audience_taken": "Cette audience SSO est déjà utilisée.",

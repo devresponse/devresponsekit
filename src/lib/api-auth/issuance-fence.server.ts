@@ -126,7 +126,8 @@ export async function enterIssuanceFence(
  * True when the credential a request authenticated with would still
  * authenticate it: the session row exists and has not expired, or the key or
  * the token's source credential passes the same check the resolver applies
- * (`isSourceCredentialActive`).
+ * (`readActiveSourceCredential`, asked here through its yes/no wrapper
+ * `isSourceCredentialActive`).
  */
 export async function isCallerSourceLive(
   source: CallerSource,

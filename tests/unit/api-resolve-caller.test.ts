@@ -10,7 +10,7 @@ import type * as ResolveModule from "@/lib/api-auth/resolve-caller.server";
 const env = vi.hoisted(() => ({ API_KEYS_ENABLED: false, API_JWT_ENABLED: false }));
 const verifyApiKey = vi.fn();
 const verifyAccessToken = vi.fn();
-const isSourceCredentialActive = vi.fn();
+const readActiveSourceCredential = vi.fn();
 const getCurrentSession = vi.fn();
 const getUserAccessContext = vi.fn();
 const isBetterAuthUserBanned = vi.fn();
@@ -50,7 +50,7 @@ vi.mock("@/lib/api-auth/jwt.server", () => ({
   JwtKeyMaterialError,
 }));
 vi.mock("@/lib/api-auth/revocation.server", () => ({
-  isSourceCredentialActive: (...a: unknown[]) => isSourceCredentialActive(...a),
+  readActiveSourceCredential: (...a: unknown[]) => readActiveSourceCredential(...a),
 }));
 
 const ISSUED_AT = new Date("2026-09-05T10:00:00.000Z");
@@ -67,6 +67,8 @@ const verifiedToken = (over: Record<string, unknown> = {}) => ({
   credential: { kind: "api_key", id: "key-1" },
   ...over,
 });
+/** The source credential as the revocation read returns it: active, same scopes. */
+const LIVE = { scopes: ["admin.users.read"] };
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => getCurrentSession() }));
 vi.mock("@/lib/auth-status", () => ({
   getUserAccessContext: (...a: unknown[]) => getUserAccessContext(...a),
@@ -86,7 +88,7 @@ beforeEach(async () => {
   for (const m of [
     verifyApiKey,
     verifyAccessToken,
-    isSourceCredentialActive,
+    readActiveSourceCredential,
     getCurrentSession,
     getUserAccessContext,
     isBetterAuthUserBanned,
@@ -95,7 +97,7 @@ beforeEach(async () => {
     m.mockReset();
   getUserAccessContext.mockResolvedValue(ACCESS);
   isBetterAuthUserBanned.mockResolvedValue(false);
-  isSourceCredentialActive.mockResolvedValue(true);
+  readActiveSourceCredential.mockResolvedValue(LIVE);
   mod = await import("@/lib/api-auth/resolve-caller.server");
 });
 afterEach(() => vi.resetModules());
@@ -365,15 +367,15 @@ describe("resolveCaller — JWT path", () => {
     env.API_JWT_ENABLED = true;
     verifyAccessToken.mockResolvedValue(verifiedToken());
     // First request: the key is still active → 200-path.
-    isSourceCredentialActive.mockResolvedValueOnce(true);
+    readActiveSourceCredential.mockResolvedValueOnce(LIVE);
     expect(await mod.resolveCaller(req("Bearer eyJ.token.sig"))).not.toBeNull();
     // The key is revoked in between; the SAME (still signature-valid,
     // unexpired) token must now be refused with the distinct reason.
-    isSourceCredentialActive.mockResolvedValueOnce(false);
+    readActiveSourceCredential.mockResolvedValueOnce(null);
     const result = await mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"));
     expect(result).toEqual({ ok: false, reason: "credential_revoked" });
-    expect(isSourceCredentialActive).toHaveBeenCalledTimes(2);
-    expect(isSourceCredentialActive).toHaveBeenLastCalledWith(
+    expect(readActiveSourceCredential).toHaveBeenCalledTimes(2);
+    expect(readActiveSourceCredential).toHaveBeenLastCalledWith(
       { kind: "api_key", id: "key-1" },
       ISSUED_AT,
     );
@@ -386,15 +388,41 @@ describe("resolveCaller — JWT path", () => {
     verifyAccessToken.mockResolvedValue(
       verifiedToken({ credential: { kind: "oauth_client", id: "client-9" } }),
     );
-    isSourceCredentialActive.mockResolvedValue(false);
+    readActiveSourceCredential.mockResolvedValue(null);
     expect(await mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"))).toEqual({
       ok: false,
       reason: "credential_revoked",
     });
-    expect(isSourceCredentialActive).toHaveBeenCalledWith(
+    expect(readActiveSourceCredential).toHaveBeenCalledWith(
       { kind: "oauth_client", id: "client-9" },
       ISSUED_AT,
     );
+  });
+
+  it("caps the token's scopes at its client's CURRENT scopes, so a narrowing bites at once (F-71)", async () => {
+    // Minted while the client held both scopes; an admin has since PATCHed
+    // the client down to read-only. The token's claim still says both.
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue(
+      verifiedToken({
+        credential: { kind: "oauth_client", id: "client-9" },
+        scopes: ["admin.users.read", "admin.users.manage"],
+      }),
+    );
+    readActiveSourceCredential.mockResolvedValue({ scopes: ["admin.users.read"] });
+    const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
+    expect(caller?.grantedScopes).toEqual(["admin.users.read"]);
+  });
+
+  it("never widens a token when its credential was widened after the mint (F-71)", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue(verifiedToken({ scopes: ["admin.users.read"] }));
+    readActiveSourceCredential.mockResolvedValue({
+      scopes: ["admin.users.read", "admin.users.manage"],
+    });
+    expect((await mod.resolveCaller(req("Bearer eyJ.token.sig")))?.grantedScopes).toEqual([
+      "admin.users.read",
+    ]);
   });
 
   it("honours a legacy token minted without a `cid` claim (it dies at exp on its own)", async () => {
@@ -402,7 +430,9 @@ describe("resolveCaller — JWT path", () => {
     verifyAccessToken.mockResolvedValue(verifiedToken({ credential: null }));
     const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
     expect(caller?.kind).toBe("jwt");
-    expect(isSourceCredentialActive).not.toHaveBeenCalled();
+    expect(readActiveSourceCredential).not.toHaveBeenCalled();
+    // No source to cap against: the claim stands until exp.
+    expect(caller?.grantedScopes).toEqual(["admin.users.read"]);
     // Nothing to re-check at issuance either (F-10).
     expect(caller?.source).toBeNull();
   });

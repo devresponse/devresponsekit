@@ -16,7 +16,8 @@ import {
   verifyAccessToken,
   type TokenCredentialRef,
 } from "@/lib/api-auth/jwt.server";
-import { isSourceCredentialActive } from "@/lib/api-auth/revocation.server";
+import { readActiveSourceCredential } from "@/lib/api-auth/revocation.server";
+import { intersectScopes } from "@/lib/api-auth/scopes";
 
 /**
  * Unified caller resolution (design docs/design-api-keys-and-tokens.md
@@ -43,12 +44,17 @@ export interface ResolvedCaller {
   /**
    * Scopes carried by the credential, intersected against the principal's
    * permissions by the guard. `null` for cookies (full user authority);
-   * always an explicit array for bearer credentials.
+   * always an explicit array for bearer credentials. For a JWT, the token's
+   * `scope` claim capped at its source credential's current scopes (F-71).
    */
   grantedScopes: string[] | null;
   /** Non-ambient credential → CSRF/origin guard is not applicable. */
   isBearer: boolean;
-  /** api_key id / jwt jti, for audit + per-credential rate limiting. */
+  /**
+   * api_key id / jwt jti, for audit and `GET /api/v1/me`. The v1
+   * per-credential rate limit keys a JWT on its source credential instead
+   * (`jwt.credential`, F-73).
+   */
   credentialId: string | null;
   /**
    * The credential this request authenticated with, as a reference an
@@ -228,11 +234,17 @@ export async function resolveCallerDetailed(
       // token minted before the `cid` claim existed has none; it is honoured
       // until it expires (≤ API_JWT_ACCESS_TTL_SECONDS after the deploy) —
       // the window closes on its own and cannot be re-opened.
-      if (
-        verified.credential &&
-        !(await isSourceCredentialActive(verified.credential, verified.issuedAt))
-      ) {
-        return reject("credential_revoked");
+      let grantedScopes = verified.scopes;
+      if (verified.credential) {
+        const source = await readActiveSourceCredential(verified.credential, verified.issuedAt);
+        if (!source) return reject("credential_revoked");
+        // F-71: the token acts with no scope its credential has lost since
+        // the mint. Narrowing a client used to leave its outstanding tokens
+        // holding the removed scopes until `exp`. A token can only narrow:
+        // a client widened since the mint does not widen its older tokens.
+        // Every consumer (the guards, delegation bounds, the MCP exchange)
+        // reads the capped set from here.
+        grantedScopes = intersectScopes(verified.scopes, source.scopes);
       }
       // Same as the API-key path: a banned owner's still-valid access token
       // must stop authenticating immediately (AUTH-1).
@@ -248,7 +260,7 @@ export async function resolveCallerDetailed(
           kind: "jwt",
           betterAuthUserId: verified.subject,
           access,
-          grantedScopes: verified.scopes,
+          grantedScopes,
           isBearer: true,
           credentialId: verified.jti,
           source: verified.credential

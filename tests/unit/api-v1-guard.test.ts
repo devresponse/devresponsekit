@@ -244,4 +244,41 @@ describe("enforceApiRateLimit", () => {
     expect(res?.status).toBe(429);
     expect(res?.headers.get("Retry-After")).toBe("7");
   });
+
+  it("charges every token minted from one credential to that credential's bucket, not its jti (F-73)", async () => {
+    // A one-mutation limiter per key stands in for the real bucket, so a
+    // second call landing in the same bucket is refused.
+    const spent = new Set<string>();
+    consumeToken.mockImplementation((key: string) => {
+      if (spent.has(key)) return { ok: false, retryAfterSeconds: 1 };
+      spent.add(key);
+      return { ok: true };
+    });
+    const token = (jti: string, credential: { kind: string; id: string } | null) =>
+      ({
+        caller: caller({ kind: "jwt", credentialId: jti, jwt: { credential } }),
+        requestId: "req-1",
+      }) as unknown as GuardModule.ApiGrant;
+    const limit = (g: GuardModule.ApiGrant) =>
+      mod.enforceApiRateLimit("api.users.status", g, makeReq())?.status ?? "allowed";
+    const client = { kind: "oauth_client", id: "client-9" };
+
+    expect(limit(token("jti-a", client))).toBe("allowed");
+    // A freshly minted token from the same client finds the bucket spent: it
+    // used to open a new one, so each mint bought a fresh burst.
+    expect(limit(token("jti-b", client))).toBe(429);
+    // An API key's direct call (keyed on its row id) and a token minted from
+    // that key share one bucket too.
+    expect(limit(grant)).toBe("allowed");
+    expect(limit(token("jti-c", { kind: "api_key", id: "k1" }))).toBe(429);
+    // A legacy token without `cid` has only its own `jti` to key on.
+    expect(limit(token("jti-d", null))).toBe("allowed");
+    expect(consumeToken.mock.calls.map((call) => call[0])).toEqual([
+      "api.users.status:client-9",
+      "api.users.status:client-9",
+      "api.users.status:k1",
+      "api.users.status:k1",
+      "api.users.status:jti-d",
+    ]);
+  });
 });

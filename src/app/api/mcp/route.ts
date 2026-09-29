@@ -127,16 +127,19 @@ export async function POST(request: NextRequest): Promise<Response> {
  *     through: replaying it made every `tools/call` verify the key twice and
  *     stamp `last_used_at` twice — two extra DB round-trips per call, one of
  *     them a write (review #207). The exchanged token keeps the key's row id
- *     as `jti`, so v1's per-credential rate-limit bucket is the same bucket a
- *     direct API-key call would use, and as `cid`, so v1 still re-reads the
- *     key's status/expiry on every request and a revoked key dies at once.
+ *     as `jti` and as `cid`, so v1 still re-reads the key's status/expiry on
+ *     every request and a revoked key dies at once, and charges the call to
+ *     the same per-credential rate-limit bucket a direct API-key call uses
+ *     (v1 keys a token's bucket on its `cid`, F-73).
  *   - a legacy v1-audience JWT (under `MCP_AUDIENCE_GRACE`) is forwarded
  *     untouched: it is already the right audience and re-verifying a
  *     signature costs no DB write.
  *
- * Every exchange carries the SAME subject, scopes, org, `jti` and source
- * credential and is capped at {@link EXCHANGE_TTL_SECONDS} (and, for a JWT,
- * at the original's remaining life). Nothing widens: the v1 guard re-applies
+ * Every exchange carries the SAME subject, org, `jti` and source credential,
+ * and the caller's resolved scopes (`grantedScopes`: for a JWT, its `scope`
+ * claim already capped at its source credential's current scopes, F-71). It
+ * is capped at {@link EXCHANGE_TTL_SECONDS} (and, for a JWT, at the
+ * original's remaining life). Nothing widens: the v1 guard re-applies
  * permission ∩ scope, the ban check and the credential-status check to the
  * exchanged token exactly as it would have to the original.
  *

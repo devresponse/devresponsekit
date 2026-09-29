@@ -252,6 +252,8 @@ describe("F-09 key/JWT path — getUserAccessContext with a bound org", () => {
 
   it("an ORG-LESS credential skips the suspended org exactly as a deleted membership would be", async () => {
     const ctx = await getUserAccessContext(ids.member.ba, { organizationId: null });
+    // Org-bound although it names no org (F-124): bound to the org it lands in.
+    expect(ctx.orgBound).toBe(true);
     expect(ctx.organizationId).toBe(ids.active);
   });
 

@@ -95,8 +95,13 @@ function orgAdmin(perms: string[]): AuthStatusModule.UserAccessContext {
     permissions: perms,
   };
 }
+/**
+ * The superadmin's own active org is ORG_A too, as a real one always has one
+ * (F-126). With no org it could never put ORG_A into a clause, so "never
+ * narrowed to ORG_A" held even for an export confined to the active org.
+ */
 function superadmin(perms: string[]): AuthStatusModule.UserAccessContext {
-  return { ...orgAdmin(perms), organizationId: null, permissions: [...perms, "superuser"] };
+  return { ...orgAdmin(perms), permissions: [...perms, "superuser"] };
 }
 function nullScopeAdmin(perms: string[]): AuthStatusModule.UserAccessContext {
   return { ...orgAdmin(perms), organizationId: null };

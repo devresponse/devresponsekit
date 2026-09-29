@@ -20,6 +20,7 @@ import {
   type BulkUserTarget,
 } from "@/lib/admin/user-actions.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { APP_USER_STATUS_VALUES } from "@/lib/status-values";
 
 export const dynamic = "force-dynamic";
 
@@ -76,13 +77,7 @@ export const dynamic = "force-dynamic";
  *     so re-sending a batch re-applies it (a second `ban` restarts the
  *     expiry). Read the per-row `results` rather than retrying the batch.
  */
-const ALLOWED_STATUS = new Set([
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-  "deactivated",
-]);
+const ALLOWED_STATUS: ReadonlySet<string> = new Set(APP_USER_STATUS_VALUES);
 
 const idsSchema = z.union([z.array(z.uuid()).min(1).max(MAX_BULK_IDS), z.literal("*")]);
 

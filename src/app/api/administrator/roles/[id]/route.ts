@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import type { Updateable } from "kysely";
 import { db } from "@/db/database";
+import type { AppRolesTable } from "@/db/schema/app-schema";
 import { updateRoleSchema } from "@/lib/validation/roles";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -87,7 +89,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
     return adminErrorResponse("invalid_body", 400, request);
   }
 
-  const updates: Record<string, unknown> = {};
+  const updates: Updateable<AppRolesTable> = {};
   if (parsed.data.name !== undefined) updates.name = parsed.data.name;
   if (parsed.data.description !== undefined) updates.description = parsed.data.description;
   if (Object.keys(updates).length === 0) {

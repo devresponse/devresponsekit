@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { db } from "@/db/database";
 import { ACTIVE_ORG_COOKIE } from "@/lib/active-org-cookie";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
+import { isUuid } from "@/lib/uuid";
 
 /**
  * Active-organization selection (cookie-based multi-org support).
@@ -52,9 +53,6 @@ export interface UserOrganization {
   name: string;
 }
 
-/** Canonical UUID text, the only shape the cookie's writers ever store. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * The active organization id from the request cookie, or `null` when unset.
  * Resilient to being called outside a request scope (e.g. in unit tests):
@@ -73,7 +71,7 @@ export async function readActiveOrgId(): Promise<string | null> {
   try {
     const store = await cookies();
     const value = store.get(ACTIVE_ORG_COOKIE)?.value?.trim();
-    return value && UUID_RE.test(value) ? value : null;
+    return value && isUuid(value) ? value : null;
   } catch {
     return null;
   }

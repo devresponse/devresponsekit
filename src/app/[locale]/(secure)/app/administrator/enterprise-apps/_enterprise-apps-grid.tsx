@@ -9,9 +9,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
-
-/** Enterprise-app statuses — the allow-listed `status` filter values. */
-const APP_STATUSES = ["available", "disabled"] as const;
+import { APP_STATUS_VALUES } from "@/lib/status-values";
 
 /**
  * Client-side enterprise applications grid (docs/admin-manager.md §8.7).
@@ -173,7 +171,11 @@ export function AdministratorEnterpriseAppsGrid({
 
   const filters = useMemo<GridFilterDescriptor[]>(
     () => [
-      { name: "status", label: t("columns.status"), options: toFilterOptions(tGrid, APP_STATUSES) },
+      {
+        name: "status",
+        label: t("columns.status"),
+        options: toFilterOptions(tGrid, APP_STATUS_VALUES),
+      },
     ],
     [t, tGrid],
   );

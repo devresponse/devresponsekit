@@ -32,6 +32,7 @@ import {
   type CreatedAppUser,
 } from "@/lib/admin/user-create.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { APP_USER_STATUS_VALUES } from "@/lib/status-values";
 
 export const dynamic = "force-dynamic";
 
@@ -59,13 +60,7 @@ export const dynamic = "force-dynamic";
  * `auth.api.*` without a read (docs/admin-manager.md §8.1), and the ban
  * flag is consulted on the machine-API path (`isBetterAuthUserBanned`).
  */
-const ALLOWED_STATUS = new Set([
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-  "deactivated",
-]);
+const ALLOWED_STATUS: ReadonlySet<string> = new Set(APP_USER_STATUS_VALUES);
 
 export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.read");

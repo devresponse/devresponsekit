@@ -1,10 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { sql } from "kysely";
+import { sql, type UpdateObject } from "kysely";
 import { z } from "zod";
 import { preferredLocaleSchema } from "@/lib/validation/users";
 import { userNameSchema } from "@/lib/user-name";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
   restoreBetterAuthBan,
@@ -167,7 +168,8 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
     return adminErrorResponse("invalid_body", 400, request);
   }
 
-  const updates: Record<string, unknown> = { updated_at: sql`now()` };
+  // `UpdateObject`, not `Updateable`: it also takes the `now()` expression.
+  const updates: UpdateObject<AppDatabase, "app_users"> = { updated_at: sql`now()` };
   if (parsed.data.displayName !== undefined) {
     updates.display_name = parsed.data.displayName;
   }

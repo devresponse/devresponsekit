@@ -25,9 +25,22 @@ import {
 import { RequiredLegend } from "@/components/ui/required-legend";
 import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 import {
+  ORGANIZATION_STATUSES,
   organizationSettingsSchema,
   type OrganizationSettingsInput,
+  type OrganizationStatus,
 } from "@/lib/validation/organizations";
+
+/**
+ * Each status's label. The options are the vocabulary itself (F-133), and the
+ * `Record` makes a status a migration adds to it fail typecheck until labelled.
+ */
+const STATUS_LABEL_KEYS: Record<OrganizationStatus, string> = {
+  active: "statusActive",
+  pending: "statusPending",
+  suspended: "statusSuspended",
+  archived: "statusArchived",
+};
 
 /** The PATCH wire shape of the form, normalized the way the route stores it. */
 function toOrganizationPatch(values: OrganizationSettingsInput) {
@@ -216,10 +229,11 @@ export function OrganizationSettingsForm({
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value="active">{t("statusActive")}</SelectItem>
-                  <SelectItem value="pending">{t("statusPending")}</SelectItem>
-                  <SelectItem value="suspended">{t("statusSuspended")}</SelectItem>
-                  <SelectItem value="archived">{t("statusArchived")}</SelectItem>
+                  {ORGANIZATION_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {t(STATUS_LABEL_KEYS[status])}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <FormMessage />

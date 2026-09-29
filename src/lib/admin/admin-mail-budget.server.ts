@@ -109,7 +109,7 @@ export async function enforceOrgAdminMailBudget(
     .select("created_at")
     .where("organization_id", "=", organizationId)
     .where("event_type", "in", Object.values(ADMIN_MAIL_EVENTS))
-    // Raw, as in the audit route: `created_at` is a `Generated<Timestamp>`.
+    // Measured on the database clock, as the retention prunes are.
     .where(sql<boolean>`created_at > now() - interval '24 hours'`)
     .orderBy("created_at", "desc")
     .limit(ORG_ADMIN_MAIL_DAILY_LIMIT)

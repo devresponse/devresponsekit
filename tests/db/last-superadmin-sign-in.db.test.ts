@@ -471,7 +471,7 @@ describe("F-56: a status change takes the grant locks before it writes the accou
             actorBetterAuthUserId: ACTOR,
             scope: ALL,
             targetAppUserId: w.s1.id,
-            expectedUpdatedAt: ifMatch ? (current.updated_at as unknown as Date) : undefined,
+            expectedUpdatedAt: ifMatch ? current.updated_at : undefined,
             ...change,
           }),
         );

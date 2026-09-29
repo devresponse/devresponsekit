@@ -129,11 +129,8 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   if (isRangeFilter(createdAt)) {
     const from = parseIsoDate(createdAt.from);
     const to = parseIsoDate(createdAt.to);
-    // `created_at` is a Kysely `Generated<Timestamp>` column; raw `sql`
-    // sidesteps the typed-overload mismatch while keeping the value
-    // parameterised by the driver.
-    if (from) base = base.where(sql<boolean>`e.created_at >= ${from}`);
-    if (to) base = base.where(sql<boolean>`e.created_at <= ${to}`);
+    if (from) base = base.where("e.created_at", ">=", from);
+    if (to) base = base.where("e.created_at", "<=", to);
   }
 
   if (query.q) {

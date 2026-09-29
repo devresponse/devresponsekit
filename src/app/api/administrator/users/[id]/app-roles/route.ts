@@ -25,12 +25,11 @@ import {
 import { refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { UUID_RE } from "@/lib/uuid";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * GET /api/administrator/users/[id]/app-roles

@@ -12,7 +12,20 @@ import type { ColumnType, Generated, Insertable, Selectable, Updateable } from "
  * against Better Auth core tables.
  */
 
-type Timestamp = ColumnType<Date, Date | string | undefined, Date | string>;
+/*
+ * `timestamptz` columns: pg hands them back as `Date`, and a write takes a
+ * `Date` or an ISO string. Each alias is ONE `ColumnType`, never wrapped in
+ * Kysely's `Generated<…>` (F-131). `Generated<T>` is itself
+ * `ColumnType<T, T | undefined, T>`, so `Generated<Timestamp>` nested one
+ * ColumnType inside another and the column selected as the inner wrapper
+ * rather than `Date`. That forced `as unknown as Date` casts at every read
+ * and made a typed `where` or `set` refuse a plain `Date`, so those went
+ * untyped as well. Pinned by tests/unit/app-schema-types.test.ts.
+ */
+/** `not null default now()`: an insert may omit it. */
+type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | string>;
+/** No default: an insert must supply it, unless the column is `Timestamp | null`. */
+type Timestamp = ColumnType<Date, Date | string, Date | string>;
 type Json = ColumnType<unknown, string | unknown, string | unknown>;
 
 export interface AppOrganizationsTable {
@@ -21,8 +34,8 @@ export interface AppOrganizationsTable {
   name: string;
   status: ColumnType<string, string | undefined, string>;
   is_default: ColumnType<boolean, boolean | undefined, boolean>;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 export interface AppProviderOrganizationsTable {
@@ -31,7 +44,7 @@ export interface AppProviderOrganizationsTable {
   provider: string;
   provider_organization_key: string;
   display_name: string | null;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 /**
@@ -56,8 +69,8 @@ export interface AppOrganizationAuthSettingsTable {
     string[] | null
   >;
   updated_by: ColumnType<string | null, string | null | undefined, string | null>;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 /**
@@ -81,8 +94,8 @@ export interface AppOrganizationInvitationsTable {
   accepted_app_user_id: ColumnType<string | null, string | null | undefined, string | null>;
   revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 export interface AppUsersTable {
@@ -93,8 +106,8 @@ export interface AppUsersTable {
   status: ColumnType<string, string | undefined, string>;
   status_reason: string | null;
   preferred_locale: ColumnType<string, string | undefined, string>;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
   deactivated_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   deactivated_by: ColumnType<string | null, string | null | undefined, string | null>;
   deactivated_reason: ColumnType<string | null, string | null | undefined, string | null>;
@@ -117,8 +130,8 @@ export interface AppOrganizationMembershipsTable {
    * lifecycle.
    */
   pre_deactivation_status: ColumnType<string | null, string | null | undefined, string | null>;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 export interface AppRolesTable {
@@ -127,7 +140,7 @@ export interface AppRolesTable {
   key: string;
   name: string;
   description: string | null;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export interface AppPermissionsTable {
@@ -153,7 +166,7 @@ export interface AppUserRolesTable {
    * role cannot be assigned inside another org; NULL for a global role.
    */
   role_organization_id: Generated<string | null>;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 /** Organization group — a cohort within one org that bundles roles (ADR-0002). */
@@ -163,8 +176,8 @@ export interface AppGroupsTable {
   key: string;
   name: string;
   description: string | null;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 /**
@@ -187,7 +200,7 @@ export interface AppGroupRolesTable {
 export interface AppGroupMembershipsTable {
   group_id: string;
   app_user_id: string;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export interface AppEnterpriseApplicationsTable {
@@ -200,7 +213,7 @@ export interface AppEnterpriseApplicationsTable {
   sso_audience: string;
   status: ColumnType<string, string | undefined, string>;
   sort_order: ColumnType<number, number | undefined, number>;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export interface AppSsoHandoffNoncesTable {
@@ -209,7 +222,7 @@ export interface AppSsoHandoffNoncesTable {
   target_application_id: string;
   expires_at: Timestamp;
   consumed_at: Timestamp | null;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export interface AppAuditEventsTable {
@@ -232,7 +245,7 @@ export interface AppAuditEventsTable {
    */
   request_id: ColumnType<string | null, string | null | undefined, string | null>;
   metadata: Json;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export interface AppEmailTemplatesTable {
@@ -243,8 +256,8 @@ export interface AppEmailTemplatesTable {
   body_html: string;
   body_text: string | null;
   description: string | null;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 /**
@@ -291,7 +304,7 @@ export interface AppOutboxTable {
   /** When the row is next eligible for a delivery attempt; null once terminal. */
   next_attempt_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   last_attempt_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
   sent_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
 }
 
@@ -301,8 +314,8 @@ export interface AppUserLocalePreferencesTable {
   time_zone: string | null;
   date_format: string | null;
   number_format_locale: string | null;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 /**
@@ -323,7 +336,7 @@ export interface AppApiKeysTable {
   last_used_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   last_used_ip: ColumnType<string | null, string | null | undefined, string | null>;
   created_by: string | null;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
   revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
   revoked_reason: ColumnType<string | null, string | null | undefined, string | null>;
@@ -339,7 +352,7 @@ export interface AppOauthClientsTable {
   name: string;
   scopes: ColumnType<string[], string[] | undefined, string[]>;
   status: ColumnType<string, string | undefined, string>;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
   created_by: string | null;
   revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
@@ -358,7 +371,7 @@ export interface AppOauthClientsTable {
 export interface AppRevokedTokensTable {
   jti: string;
   expires_at: Timestamp;
-  revoked_at: Generated<Timestamp>;
+  revoked_at: GeneratedTimestamp;
   reason: string | null;
 }
 

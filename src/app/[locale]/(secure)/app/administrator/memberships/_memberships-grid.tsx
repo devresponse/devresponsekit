@@ -8,9 +8,7 @@ import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import { PermittedLink } from "../_components/permitted-link";
-
-/** Membership statuses — the allow-listed `status` filter values. */
-const MEMBERSHIP_STATUSES = ["active", "pending_approval", "blocked", "suspended"] as const;
+import { MEMBERSHIP_STATUS_VALUES } from "@/lib/status-values";
 
 /**
  * Client-side memberships grid (docs/admin-manager.md §8.3).
@@ -101,7 +99,7 @@ export function AdministratorMembershipsGrid({
       {
         name: "status",
         label: t("columns.status"),
-        options: toFilterOptions(tGrid, MEMBERSHIP_STATUSES),
+        options: toFilterOptions(tGrid, MEMBERSHIP_STATUS_VALUES),
       },
     ],
     [t, tGrid],

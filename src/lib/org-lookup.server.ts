@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
+import { UUID_RE } from "@/lib/uuid";
 
 /** A resolved organization reference (public fields only). */
 export interface OrganizationRef {
@@ -7,8 +8,6 @@ export interface OrganizationRef {
   slug: string;
   name: string;
 }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Resolves an organization from a URL-supplied identifier — either its slug

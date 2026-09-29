@@ -46,6 +46,7 @@ import {
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { MEMBERSHIP_STATUS_VALUES } from "@/lib/status-values";
 
 export const dynamic = "force-dynamic";
 
@@ -144,7 +145,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
 const createMembershipSchema = z
   .object({
     organizationId: z.string().uuid(),
-    status: z.enum(["active", "pending_approval", "blocked", "suspended"]).optional(),
+    status: z.enum(MEMBERSHIP_STATUS_VALUES).optional(),
   })
   .strict();
 
@@ -257,7 +258,7 @@ export const POST = withAdminRoute(async function POST(
 const patchMembershipSchema = z
   .object({
     membershipIds: z.array(z.string().uuid()).min(1),
-    status: z.enum(["active", "pending_approval", "blocked", "suspended"]),
+    status: z.enum(MEMBERSHIP_STATUS_VALUES),
   })
   .strict();
 

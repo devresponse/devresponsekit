@@ -11,13 +11,13 @@ import { normalizeScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getMcpAgent } from "@/lib/mcp/agents.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { isUuid } from "@/lib/uuid";
 
 export const dynamic = "force-dynamic";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const patchSchema = z.object({ scopes: z.array(z.string()).max(64) }).strict();
 
@@ -47,7 +47,7 @@ export const PATCH = withAdminRoute(async function PATCH(
   if (limited) return limited;
 
   const { id } = await context.params;
-  if (!UUID_RE.test(id)) {
+  if (!isUuid(id)) {
     return adminErrorResponse("invalid_id", 400, request, { requestId: guard.requestId });
   }
   const agent = await getMcpAgent(guard.access, id);
@@ -148,7 +148,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   }
 
   const { id } = await context.params;
-  if (!UUID_RE.test(id)) {
+  if (!isUuid(id)) {
     return adminErrorResponse("invalid_id", 400, request, { requestId: guard.requestId });
   }
   const agent = await getMcpAgent(guard.access, id);

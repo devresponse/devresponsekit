@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import type { AppFormatter } from "@/lib/format/app-format";
+import { CREDENTIAL_STATUS_VALUES } from "@/lib/status-values";
 import {
   Sheet,
   SheetContent,
@@ -19,9 +20,6 @@ import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { PermittedLink } from "../_components/permitted-link";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
-
-/** API-key statuses — the allow-listed `status` filter values. */
-const API_KEY_STATUSES = ["active", "revoked"] as const;
 
 /**
  * Client-side API-key governance grid (docs/admin-manager.md §8.8).
@@ -249,7 +247,7 @@ export function AdministratorApiKeysGrid({
       {
         name: "status",
         label: t("filters.status"),
-        options: toFilterOptions(tGrid, API_KEY_STATUSES),
+        options: toFilterOptions(tGrid, CREDENTIAL_STATUS_VALUES),
       },
     ],
     [t, tGrid],

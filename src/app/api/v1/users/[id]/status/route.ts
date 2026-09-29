@@ -151,7 +151,7 @@ export const POST = withV1Route(async function POST(request: NextRequest, ctx: R
   // carries it in its own WHERE (a real compare-and-swap under the row lock).
   // Without that, two writers who both read the same tag both passed here and
   // both wrote — the later one silently clobbering the earlier.
-  const currentUpdatedAt = current.updated_at as unknown as Date;
+  const currentUpdatedAt = current.updated_at;
   const ifMatch = request.headers.get("if-match");
   if (!ifMatchSatisfied(ifMatch, userEtag(currentUpdatedAt))) {
     return problemResponse("precondition_failed", 412, request, {

@@ -7,13 +7,13 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { activateMcpAgent, getMcpAgent } from "@/lib/mcp/agents.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { isUuid } from "@/lib/uuid";
 
 export const dynamic = "force-dynamic";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * POST /api/administrator/mcp-agents/:id/approve
@@ -40,7 +40,7 @@ export const POST = withAdminRoute(async function POST(
   if (limited) return limited;
 
   const { id } = await context.params;
-  if (!UUID_RE.test(id)) {
+  if (!isUuid(id)) {
     return adminErrorResponse("invalid_id", 400, request, { requestId: guard.requestId });
   }
   const agent = await getMcpAgent(guard.access, id);

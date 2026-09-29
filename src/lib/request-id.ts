@@ -1,4 +1,5 @@
 import { hasForwardedHops } from "@/lib/forwarded-hops";
+import { isUuid } from "@/lib/uuid";
 
 /**
  * The correlation id every sink agrees on (review #99, #224).
@@ -125,14 +126,12 @@ export function normalizeRequestPath(value: unknown): string | null {
 }
 
 /**
- * RFC 4122 UUID (any version), canonical hex/dash form. Every id this app
- * mints is `crypto.randomUUID()`, so anything else did not come from us.
+ * Whether `value` is a well-formed request id (and therefore log-safe): a
+ * UUID, because every request id this app mints is `crypto.randomUUID()`, so
+ * anything else did not come from us.
  */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** Whether `value` is a well-formed request id (and therefore log-safe). */
 export function isValidRequestId(value: unknown): value is string {
-  return typeof value === "string" && UUID_RE.test(value);
+  return typeof value === "string" && isUuid(value);
 }
 
 /**

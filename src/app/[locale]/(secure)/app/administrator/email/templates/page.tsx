@@ -139,7 +139,7 @@ export default async function AdministratorEmailTemplatesPage({
                   <TableCell className="text-xs uppercase">{template.locale}</TableCell>
                   <TableCell className="text-sm">{template.subject}</TableCell>
                   <TableCell className="text-xs whitespace-nowrap">
-                    {format.dateTime(template.updated_at as unknown as string | Date)}
+                    {format.dateTime(template.updated_at)}
                   </TableCell>
                   <TableCell className="text-right">
                     {canManage ? (

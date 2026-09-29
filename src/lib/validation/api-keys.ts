@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UUID_RE } from "@/lib/uuid";
 
 /**
  * Shared validation schema for issuing an API key on behalf of a user.
@@ -10,8 +11,6 @@ import { z } from "zod";
  * /active status, are validated server-side (they require DB lookups) and come
  * back as `404` / `409` / `422`, which the form maps onto the relevant field.
  */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export const createApiKeySchema = z
   .object({
     name: z.string().trim().min(1, "required").max(120, "max"),

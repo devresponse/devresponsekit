@@ -7,19 +7,11 @@ import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
+import { APP_USER_STATUS_VALUES } from "@/lib/status-values";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import type { BulkActionDescriptor } from "../_components/grid/data-grid-toolbar";
 import { useGridSelection } from "../_components/grid/use-grid-selection";
-
-/** Application user statuses — the only allow-listed `status` filter values. */
-const USER_STATUSES = [
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-  "deactivated",
-] as const;
 
 /**
  * Client-side users grid for the Administrator workspace
@@ -292,7 +284,13 @@ export function AdministratorUsersGrid({
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(
-    () => [{ name: "status", label: t("status"), options: toFilterOptions(tGrid, USER_STATUSES) }],
+    () => [
+      {
+        name: "status",
+        label: t("status"),
+        options: toFilterOptions(tGrid, APP_USER_STATUS_VALUES),
+      },
+    ],
     [t, tGrid],
   );
 

@@ -17,15 +17,15 @@ import {
  *
  * Resolution order:
  *   1. the organization's own row (a COMPLETE policy, no per-field merge);
- *   2. the platform-default row (`organization_id IS NULL`, seeded by 0007
- *      to today's behavior);
+ *   2. the platform-default row (`organization_id IS NULL`, seeded by 0001
+ *      to the original workflow);
  *   3. `FAIL_CLOSED_AUTH_POLICY` — the strictest workflow.
  *
  * Threat / contract:
  *   - Every failure mode (missing rows, malformed values, DB errors during
  *     signup-time resolution) must degrade to the STRICTEST policy, never a
  *     more permissive one. Fail-closed here means "verification + admin
- *     approval", which is exactly the pre-0007 hardcoded workflow.
+ *     approval", which is exactly the hardcoded workflow from before per-org policies.
  *   - `auto_approve_email_domains` is only honored for GENUINELY verified
  *     emails (see `decideInitialStatus`): a flag stamped by a
  *     waived-verification policy carries a distinct `emailVerificationWaived`
@@ -257,7 +257,7 @@ export interface SignupStatusDecision {
  *
  * Order matters:
  *   1. a valid invitation activates immediately — the invitation IS the
- *      approval (0008), and as a targeted, admin-issued grant for one
+ *      approval, and as a targeted, admin-issued grant for one
  *      specific address it OVERRIDES the org-level method allow-list
  *      (which exists to gate unsolicited sign-ups; the explicit accept
  *      endpoint is method-agnostic for the same reason, so ranking the

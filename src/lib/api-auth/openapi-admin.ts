@@ -74,7 +74,7 @@ const ORGANIZATION_STATUS = [...ORGANIZATION_STATUSES];
 const APP_STATUS = [...APP_STATUS_VALUES];
 // Sourced from the shared, client-safe validation module so the spec's
 // enums cannot drift from the schema + DB CHECK (they did: `invite_only`
-// was added in 0008 but missed here). Spread into a mutable array because
+// was added with invitations but missed here). Spread into a mutable array because
 // the OpenAPI builder treats these as plain JSON.
 const AUTH_POLICY_METHODS = [...AUTH_POLICY_METHOD_VALUES];
 const AUTH_POLICY_MODES = [...AUTH_POLICY_APPROVAL_MODE_VALUES];
@@ -1042,7 +1042,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           properties: { bindingIds: { type: "array", items: uuid(), minItems: 1 } },
           required: ["bindingIds"],
         },
-        // Organization invitations (0008). Token hashes are never exposed.
+        // Organization invitations. Token hashes are never exposed.
         InvitationItem: {
           type: "object",
           properties: {
@@ -1082,7 +1082,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           properties: { ok: boolean(), expiresAt: dateTime() },
           required: ["ok", "expiresAt"],
         },
-        // Signup policy (0007). Deliberately camelCase (not a raw row): the
+        // Signup policy. Deliberately camelCase (not a raw row): the
         // response mirrors the PATCH request's field names exactly, since an
         // org row is a COMPLETE policy round-tripped through the form.
         AuthPolicySettings: {
@@ -2180,7 +2180,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         },
       },
 
-      // ---- Platform signup defaults (0007) --------------------------------
+      // ---- Platform signup defaults --------------------------------------
       "/auth-settings/defaults": {
         get: {
           operationId: "getPlatformAuthSettings",

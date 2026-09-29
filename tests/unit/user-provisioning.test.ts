@@ -7,8 +7,8 @@ import { provisionUserFromAuth, reevaluatePendingActivation } from "@/lib/user-p
  * Unit tests for `user-provisioning.server.ts`.
  *
  * Verifies the documented contract:
- *   - initial statuses follow the org's runtime signup policy (0007): the
- *     platform default parks new users in `pending_approval` (the pre-0007
+ *   - initial statuses follow the org's runtime signup policy: the
+ *     platform default parks new users in `pending_approval` (the pre-policy
  *     behavior), `auto_active` and verified auto-approve-domain matches
  *     activate immediately, and a disallowed auth method is parked
  *     `pending_approval` even under `auto_active`;
@@ -670,7 +670,7 @@ describe("provisionUserFromAuth", () => {
     );
   });
 
-  it("places an INVITED signup active in the inviting org and consumes the invitation (0008)", async () => {
+  it("places an INVITED signup active in the inviting org and consumes the invitation", async () => {
     findInvitationMock.mockResolvedValue({
       id: "inv-1",
       organizationId: "org-invited",

@@ -10,7 +10,7 @@ import type { OrganizationRef } from "@/lib/org-lookup.server";
 import { buildActiveOrgApplyPath } from "@/lib/scoped-auth";
 import type { SocialProvider } from "@/lib/social-providers";
 
-/** A LIVE invitation carried by `/sign-up?invite=<token>` (0008). */
+/** A LIVE invitation carried by `/sign-up?invite=<token>`. */
 export interface SignUpInvitation {
   token: string;
   email: string;
@@ -37,7 +37,7 @@ export interface SignUpFormProps {
  * SignUpForm
  *
  * Mirror of `SignInForm` but for self-registration. The workflow follows the
- * organization's signup policy (0007, review #32). Under the fail-closed
+ * organization's signup policy (review #32). Under the fail-closed
  * default, email verification is required (AUTH-4): after sign-up the user is
  * sent to `/verify-email` to confirm their address, and once verified the
  * provisioning service places non-seed users into `pending_approval`. An
@@ -45,7 +45,7 @@ export interface SignUpFormProps {
  * immediately) and/or activate the account without approval (`auto_active` or
  * an auto-approved email domain).
  *
- * With an `invitation` (0008) the email field is pre-filled and locked to
+ * With an `invitation` the email field is pre-filled and locked to
  * the invited address and the token rides the sign-up body — the account is
  * pre-verified (the token proves mailbox access) and lands active in the
  * inviting organization.
@@ -99,7 +99,7 @@ export function SignUpForm({
           invitedEmail={invitation?.email}
           organizationHint={scopedOrg?.slug}
         />
-        {/* Social login is hidden on an invited sign-up (0008): the OAuth
+        {/* Social login is hidden on an invited sign-up: the OAuth
             path does NOT carry the invitation token, so a social sign-in
             would silently drop it and land the invitee in pending_approval
             instead of active in the inviting org. Invitations are email-

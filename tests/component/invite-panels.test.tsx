@@ -11,7 +11,7 @@ import {
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
- * Component tests for the invite page panels (0008): the guest CTAs carry
+ * Component tests for the invite page panels: the guest CTAs carry
  * the token into sign-up and the return path into sign-in; the accept
  * panel posts the token and hard-navigates on success; the invalid and
  * mismatch panels stay generic.

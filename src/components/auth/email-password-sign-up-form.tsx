@@ -24,7 +24,7 @@ export interface EmailPasswordSignUpFormProps {
   /** Post-verification destination, carried as the Better Auth `callbackURL`. */
   postVerifyHref: string;
   /**
-   * Invitation secret riding the sign-up body (0008). The server pre-verifies
+   * Invitation secret riding the sign-up body. The server pre-verifies
    * the account when the token matches this email and places it active in
    * the inviting organization.
    */
@@ -45,7 +45,7 @@ export interface EmailPasswordSignUpFormProps {
  *
  * Self-registration via Better Auth (React Hook Form + the shared
  * `signUpSchema`). The workflow follows the organization's signup policy
- * (app_organization_auth_settings, 0007):
+ * (app_organization_auth_settings):
  *
  *   - Verification required (the fail-closed default, AUTH-4): sign-up
  *     creates the account and emails a verification link but does NOT start

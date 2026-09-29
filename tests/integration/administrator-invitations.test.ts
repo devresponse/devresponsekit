@@ -9,7 +9,7 @@ import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
 import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
- * Integration tests for the invitation admin endpoints (0008):
+ * Integration tests for the invitation admin endpoints:
  *
  *   /api/administrator/organizations/:id/invitations                     (GET/POST)
  *   /api/administrator/organizations/:id/invitations/:invitationId       (DELETE)

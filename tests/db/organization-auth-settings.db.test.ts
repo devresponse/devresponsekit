@@ -3,18 +3,19 @@ import { db, pgPool } from "@/db/database";
 import { getAuthPolicyForOrg } from "@/lib/auth-policy.server";
 
 /**
- * DB-BACKED integration tests for migration 0007
- * (`app_organization_auth_settings` — per-org signup policy).
+ * DB-BACKED integration tests for the per-org signup policy table
+ * (`app_organization_auth_settings`, in the initial schema).
  *
  * Proves the pieces the mocked unit tests can't reach:
  *
  *   1. The migration seeded EXACTLY ONE platform-default row, and its values
- *      reproduce the pre-0007 hardcoded workflow (verification required +
+ *      reproduce the pre-policy hardcoded workflow (verification required +
  *      admin approval) — the "no behavior change on upgrade" guarantee.
  *   2. The partial unique index rejects a second platform-default row.
  *   3. The CHECK constraints reject unknown approval modes and auth methods.
  *   4. A policy row cascades away with its owning organization (it must
- *      never block org deletion the way in-use roles/keys do — see 0005).
+ *      never block org deletion the way in-use roles/keys do — the org
+ *      DELETE's 409 `organization_in_use`, tests/db/organizations-delete.db.test.ts).
  *   5. `getAuthPolicyForOrg` resolves org row → platform default against the
  *      real SQL, including array handling and read-time domain normalization.
  *
@@ -44,8 +45,8 @@ afterAll(async () => {
   await pgPool.end();
 });
 
-describe("app_organization_auth_settings (DB-backed, 0007)", () => {
-  it("seeds exactly one platform-default row reproducing the pre-0007 workflow", async () => {
+describe("app_organization_auth_settings (DB-backed)", () => {
+  it("seeds exactly one platform-default row reproducing the pre-policy workflow", async () => {
     const rows = await db
       .selectFrom("app_organization_auth_settings")
       .select(["require_email_verification", "signup_approval_mode"])

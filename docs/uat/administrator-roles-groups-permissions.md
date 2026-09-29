@@ -39,7 +39,7 @@ Validated in `src/lib/admin/permissions.ts` (`ADMIN_PERMISSION_CATALOG`):
 
 ### Cross-cutting rules that every screen here inherits
 
-- **404-not-403 for out-of-scope resources.** Every `[id]` route resolves the row, then calls `canAccessOrg(access, orgId)` (`src/lib/admin/access-scope.server.ts:66`) and returns **Not Found**, never Forbidden, on a miss — so an org admin cannot even confirm that another tenant's role/group exists. A global role (`organization_id IS NULL`) is reachable by Superadmin only.
+- **404-not-403 for out-of-scope resources.** Every `[id]` route resolves the row, then calls `canAccessOrg(access, orgId)` (`src/lib/admin/access-scope.server.ts:258`) and returns **Not Found**, never Forbidden, on a miss — so an org admin cannot even confirm that another tenant's role/group exists. A global role (`organization_id IS NULL`) is reachable by Superadmin only.
 - **Privilege-escalation guard (AUTHZ-3).** A non-Superadmin may never *confer* a permission they do not themselves hold. The subset test lives in `src/lib/admin/grantable-permissions.server.ts` (`unheldPermissionKeys`) and gates four mutations: attaching a permission to a role, bundling a role into a group, adding a member to a group, and duplicating a role — plus the two deferred/indirect conferrals: assigning a role to a user, and attaching a role to an organization invitation (re-checked against the inviter's current authority when the invitee accepts). Each returns **403** on violation and writes an `admin.permission.conferral_denied` audit row (reason `unheld_permissions`, F-58), which subsumes the older "only a Superadmin may bundle a `superuser`-granting role" rule.
 - **Revocation symmetry (REVOKE-1).** The same subset test now bounds the REVERSE direction on **every** conferral-guarded path, so the grant side and the revoke side agree about who is trusted: detaching a permission from a role (`DELETE /roles/[id]/permissions`), revoking a role assignment from a user (`DELETE /users/[id]/app-roles`), unbundling a role from a group (`DELETE /groups/[id]/roles`), removing a group member by either route (`DELETE /groups/[id]/members`, `DELETE /users/[id]/groups`), deleting the group itself (`DELETE /groups/[id]`, measured against everything the group confers; F-11), and removing a membership by either route (`DELETE /organizations/[id]/members`, `DELETE /users/[id]/memberships`), which since F-12 deletes the member's roles and group memberships in that org with it and is measured against those. A non-Superadmin may only take away what they could confer, so a delegated admin cannot dismantle the seeded org-scoped `superuser` role — or a group carrying it — that they were never trusted to create. **403** on violation. Note the accepted consequence: an org admin also cannot revoke a role a Superadmin assigned in their tenant if it confers anything they lack; that clean-up escalates to a Superadmin. Each refusal is audited like the grant's (`admin.permission.conferral_denied`; the group delete as `admin.group.delete_denied`, a membership removal as `admin.membership.revocation_denied`).
 - **Last superadmin (REVOKE-2).** A revocation that would leave the platform with **no** global superuser at all — no `app_user` who can still sign in (an **active** account whose Better Auth user is not banned, F-56) retaining an active membership, in an **active** organization, plus an assignment of a role carrying `superuser` — is refused with **409** `last_superadmin` and an `admin.superuser.revocation_denied` audit row (`src/lib/admin/access-scope.server.ts`). This binds a Superadmin too, since the conferral guard above never does; it also covers the account-lifecycle cascades that move memberships away from `active` by another name (status block/suspend, soft-delete, and their bulk twins), a **ban** (single and bulk, F-56: the ban is undone) and the organization status change (`PATCH /api/administrator/organizations/[id]` moving the org away from `active`, F-09; UAT-ADMIN-ORG-DETAIL-S4b in [Organizations & memberships](./administrator-orgs-memberships.md#uat-admin-org-detail--organization-detail-members--providers--authentication--settings)), so a Superadmin cannot lock the platform out through a side door either. A Superadmin may still demote a *co*-superadmin, but a banned, pending, blocked or suspended co-superadmin no longer counts as the survivor. **Not covered:** authority conferred through a **group** — see docs/admin-manager.md §8.1 and §8.6.
@@ -90,7 +90,7 @@ User stories
 
 - UAT-ADMIN-RGP-ROLES-LIST-S3 — As an Org Admin, I want to duplicate a role, so that I can start a new one from an existing permission set.
   - Acceptance criteria: Given I hold `admin.roles.create`, when I duplicate a role, then a copy is created with a `-copy` key suffix and I land on its detail page.
-  - Note: duplicate is subject to the escalation guard — an org admin may only duplicate a role whose permissions are a subset of their own (`src/app/api/administrator/roles/[id]/duplicate/route.ts:72`).
+  - Note: duplicate is subject to the escalation guard — an org admin may only duplicate a role whose permissions are a subset of their own (`src/app/api/administrator/roles/[id]/duplicate/route.ts:77`).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -110,7 +110,7 @@ User stories
 Negative & edge cases
 - Out-of-scope access → the list feed simply omits other orgs' roles; a Limited Admin gets 404 on the whole page.
 - Empty state: with the org filtered to a tenant with no roles, the grid shows its empty message; loading shows skeleton rows.
-- Delete of an in-use role → HTTP 409, surfaced inline as the localized "role in use" message (`_roles-grid.tsx:78`).
+- Delete of an in-use role → HTTP 409, surfaced inline as the localized "role in use" message (`_roles-grid.tsx:83`).
 - Rate-limit: rapid repeated deletes/duplicates → friendly throttle response.
 
 Accessibility: grid is keyboard-navigable; the confirm dialog traps focus and closes on Esc; row buttons are labelled.
@@ -140,7 +140,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-ROLES-NEW-S2 — As a Superadmin, I want to create a Global or org-scoped role, so that I can manage platform-wide and tenant roles.
-  - Acceptance criteria: Given the Global option, when I create a role with scope Global, then it has no owning org; when I pick an org, then it is scoped to that org. (An org admin attempting a Global role is rejected 403 server-side — `roles/route.ts:216`.)
+  - Acceptance criteria: Given the Global option, when I create a role with scope Global, then it has no owning org; when I pick an org, then it is scoped to that org. (An org admin attempting a Global role is rejected 403 server-side — `roles/route.ts:242`.)
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -288,7 +288,7 @@ i18n: headers + dialog copy localize.
 
 - Route: `/app/administrator/groups/new`  ·  Example URL: `/en/app/administrator/groups/new`  ·  Code: `src/app/[locale]/(secure)/app/administrator/groups/new/page.tsx:16`
 - Purpose: Create an organization group (always tenant-scoped).
-- Guard / who can access: `admin.groups.create` (`page.tsx:18`). A Superadmin must pick a target org (**no** Global option); an Org Admin sees no picker and the group is forced into their org server-side (`groups/route.ts:136-150`).
+- Guard / who can access: `admin.groups.create` (`page.tsx:18`). A Superadmin must pick a target org (**no** Global option); an Org Admin sees no picker and the group is forced into their org server-side (`groups/route.ts:155-169`).
 - Access matrix: Visitor → sign-in; Member / Limited Admin → 404; Org Admin → form, no picker; Superadmin → form with a required org picker.
 - Preconditions & test data: create rights.
 
@@ -407,8 +407,8 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-GROUPS-DETAIL-MEMBERS-S3 — As an Org Admin, I want a clear message when a pick is not eligible, so that I know why the add did nothing.
-  - Acceptance criteria: Given a user who is not an active member of the group's org, when I try to add them, then the dialog shows a "not eligible" message rather than a false success. (Server returns `added: 0` / 404 for ineligible ids — `members/route.ts:146-157`; the client surfaces `notEligible` — `_group-members-grid.tsx:100`.)
-  - Escalation note: adding a member is itself a conferral — a non-Superadmin can only add members to a group whose conferred permissions are a subset of their own; otherwise the add returns **403** (`members/route.ts:140`).
+  - Acceptance criteria: Given a user who is not an active member of the group's org, when I try to add them, then the dialog shows a "not eligible" message rather than a false success. (Server returns `added: 0` / 404 for ineligible ids — `members/route.ts:176-180`; the client surfaces `notEligible` — `_group-members-grid.tsx:108`.)
+  - Escalation note: adding a member is itself a conferral — a non-Superadmin can only add members to a group whose conferred permissions are a subset of their own; otherwise the add returns **403** (`members/route.ts:156`).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -466,10 +466,10 @@ i18n: labels + messages localize.
 
 ### UAT-ADMIN-RGP-PERMISSIONS-LIST: Permissions catalog
 
-- Route: `/app/administrator/permissions`  ·  Example URL: `/en/app/administrator/permissions`  ·  Code: `src/app/[locale]/(secure)/app/administrator/permissions/page.tsx:18`
+- Route: `/app/administrator/permissions`  ·  Example URL: `/en/app/administrator/permissions`  ·  Code: `src/app/[locale]/(secure)/app/administrator/permissions/page.tsx:20`
 - Purpose: The platform-global permission catalog. Informational for any role-reader; each row shows the key, description, and how many roles use it (with a slide-over listing them).
-- Guard / who can access: **`admin.roles.read`** opens the page (`page.tsx:24`) — note it is the *roles* read key, not a permissions key. Create/Edit/Delete buttons appear only for a Superadmin holding `admin.permissions.manage` (`page.tsx`, F-66).
-- Important escalation nuance: **all catalog mutations additionally require SUPERADMIN.** The POST/PATCH/DELETE routes reject a non-Superadmin with **403** even if they somehow hold `admin.permissions.manage`, because the catalog is platform-global (`src/app/api/administrator/permissions/route.ts:105`; `[id]/route.ts:46` and `:110`). The seed `admin.platform` role *does* include `admin.permissions.manage`, so the page derives its buttons from the same predicate and offers them only to a Superadmin (F-66); a write an Org Admin sends through the API still gets 403.
+- Guard / who can access: **`admin.roles.read`** opens the page (`page.tsx:26`) — note it is the *roles* read key, not a permissions key. Create/Edit/Delete buttons appear only for a Superadmin holding `admin.permissions.manage` (`page.tsx`, F-66).
+- Important escalation nuance: **all catalog mutations additionally require SUPERADMIN.** The POST/PATCH/DELETE routes reject a non-Superadmin with **403** even if they somehow hold `admin.permissions.manage`, because the catalog is platform-global (`src/app/api/administrator/permissions/route.ts:118`; `[id]/route.ts:48` and `:112`). The seed `admin.platform` role *does* include `admin.permissions.manage`, so the page derives its buttons from the same predicate and offers them only to a Superadmin (F-66); a write an Org Admin sends through the API still gets 403.
 - Access matrix:
   - Visitor → sign-in.
   - Member → **404**.
@@ -524,7 +524,7 @@ User stories
 
 Negative & edge cases
 - Empty search result / loading skeleton in the grid.
-- Delete of an in-use permission → 409 surfaced inline as the localized "permission in use" message (`_permissions-grid.tsx:64`).
+- Delete of an in-use permission → 409 surfaced inline as the localized "permission in use" message (`_permissions-grid.tsx:63`).
 - Non-Superadmin write → 403 from the route; the UI offers a non-Superadmin no write control (F-66).
 - Rate-limit on create/edit/delete.
 
@@ -533,9 +533,9 @@ i18n: headers, sheet titles, and messages localize.
 
 ### UAT-ADMIN-RGP-PERMISSIONS-NEW: Create permission
 
-- Route: `/app/administrator/permissions/new`  ·  Example URL: `/en/app/administrator/permissions/new`  ·  Code: `src/app/[locale]/(secure)/app/administrator/permissions/new/page.tsx:16`
+- Route: `/app/administrator/permissions/new`  ·  Example URL: `/en/app/administrator/permissions/new`  ·  Code: `src/app/[locale]/(secure)/app/administrator/permissions/new/page.tsx:19`
 - Purpose: Add a new key to the platform-global permission catalog. Adding a permission alone grants no power — it must later be attached to a role.
-- Guard / who can access: the page gates on `admin.permissions.manage` **and** SUPERADMIN, the same authority as the POST route (`permissions/route.ts:105`, F-66). An Org Admin holds `admin.permissions.manage` via `admin.platform` but gets **404**.
+- Guard / who can access: the page gates on `admin.permissions.manage` **and** SUPERADMIN, the same authority as the POST route (`permissions/route.ts:118`, F-66). An Org Admin holds `admin.permissions.manage` via `admin.platform` but gets **404**.
 - Access matrix: Visitor → sign-in; Member / Limited Admin / Org Admin → 404; Superadmin → form works.
 - Preconditions & test data: a Superadmin to open.
 

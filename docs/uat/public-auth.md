@@ -28,8 +28,8 @@ test-management tool. A condensed one-row-per-story export (all areas) lives at
 
 - **Base URL:** `http://localhost:3000`. All app routes are locale-prefixed, so
   the canonical form is `/<locale><route>` (e.g. `/en/sign-in`). `/` redirects
-  to `/<defaultLocale>` via the proxy — see `src/proxy.ts:103` and the
-  next-intl middleware wiring at `src/proxy.ts:122`.
+  to `/<defaultLocale>` via the proxy — see `src/proxy.ts:149` and the
+  next-intl middleware wiring at `src/proxy.ts:223`.
 - **Locales (8):** `en`, `es`, `fr`, `hi`, `ja`, `pt`, `uk`, `zh`. Test every
   screen in `en` plus one non-Latin locale — `uk` (Cyrillic) is a good choice
   for i18n checks.
@@ -42,9 +42,9 @@ test-management tool. A condensed one-row-per-story export (all areas) lives at
   - `pnpm db:seed:dev` — the richer multi-org fixture: 3 orgs (`org-a`,
     `org-b`, `org-c`), each with `superuser@`, `orgadmin@`, and `user1..5@`
     accounts, plus 3 cross-org `multi*@shared.local` members and 2 groups in
-    ORG A (`src/db/seeds/dev-init.ts:84-152`). Every dev account shares one
+    ORG A (`src/db/seeds/dev-init.ts:94-162`). Every dev account shares one
     password: `DevPassword123!` (override with `DEV_SEED_PASSWORD`) —
-    `src/db/seeds/dev-init.ts:52`.
+    `src/db/seeds/dev-init.ts:62`.
 - **Persona credentials (dev fixture):**
 
   | Persona | Example account | Password | Seed role |
@@ -52,7 +52,7 @@ test-management tool. A condensed one-row-per-story export (all areas) lives at
   | Visitor | (none — signed out) | — | unauthenticated |
   | Member | `user1@orga.local` | `DevPassword123!` | `member` |
   | Org Admin | `orgadmin@orga.local` | `DevPassword123!` | `admin.platform` |
-  | Limited Admin | member of the ORG A **Engineering** group (`user1@orga.local`) | `DevPassword123!` | `admin` role via group (`src/db/seeds/dev-init.ts:142`) |
+  | Limited Admin | member of the ORG A **Engineering** group (`user1@orga.local`) | `DevPassword123!` | `admin` role via group (`src/db/seeds/dev-init.ts:152`) |
   | Superadmin | `superuser@orga.local` | `DevPassword123!` | `superuser` |
   | Pending user | a self-signed-up account, after verifying its email | (as chosen) | `pending_approval` (auto) |
   | Blocked user | an account an admin has blocked/suspended | (as set) | `blocked` / `suspended` / `deactivated` |
@@ -60,36 +60,37 @@ test-management tool. A condensed one-row-per-story export (all areas) lives at
   > **Note on the Limited Admin persona.** The dev fixture does not seed a user
   > whose *direct* role is `admin`; instead the `admin` role is conferred to
   > `user1@orga.local` and `user2@orga.local` through the ORG A **Engineering**
-  > group (`src/db/seeds/dev-init.ts:135-143`). Effective permissions =
-  > direct roles ∪ group-conferred roles (`src/lib/auth-status.ts:185-202`), so
+  > group (`src/db/seeds/dev-init.ts:145-153`). Effective permissions =
+  > direct roles ∪ group-conferred roles (`src/lib/auth-status.ts:361-378`), so
   > `user1@orga.local` is a valid Limited Admin for partial-permission tests.
 
 - **Resetting:** the dev seed is idempotent — re-run `pnpm db:seed:dev` to
-  restore state (`src/db/seeds/dev-init.ts:28`). To create a fresh Pending user,
+  restore state (`src/db/seeds/dev-init.ts:31`). To create a fresh Pending user,
   sign up with a new email; to create a Blocked user, have an admin block an
   existing account.
 - **Signing up requires email verification, then approval.** Self-registration
   emails a verification link and redirects the new user to `/<locale>/verify-email`
-  (`src/components/auth/email-password-sign-up-form.tsx:61`) — no session is
-  created yet. After they open the link they are auto-signed-in
-  (`autoSignInAfterVerification`, `src/lib/auth.ts:107`), provisioned as
-  `pending_approval`, and routed to the pending page until an administrator
-  approves them.
+  (`src/components/auth/email-password-sign-up-form.tsx:124`) — no session is
+  created yet. Opening the link confirms the address but does not sign them in
+  (`autoSignInAfterVerification: false`, `src/lib/auth.ts:332`): it lands on the
+  "Email verified" page (`/<locale>/verify-email/confirmed`), which links to
+  sign-in. Once signed in, an account left `pending_approval` is routed to the
+  pending page until an administrator approves it.
 
 ### Access model in one paragraph
 
 None of the public or auth pages are permission-gated — they render for anyone.
 The **authorization boundary is the secure shell** (`/<locale>/app/*`), enforced
 in two layers: a cookie-only early redirect in the proxy
-(`src/proxy.ts:103-113`) and the real server-side check in
-`requireSecureSession` (`src/lib/auth-guard.ts:55-76`), which calls
-`decideSecureAccess` (`src/lib/auth-status.ts:66-77`). That function routes a
+(`src/proxy.ts:190-201`) and the real server-side check in
+`requireSecureSession` (`src/lib/auth-guard.ts:181-205`), which calls
+`decideSecureAccess` (`src/lib/auth-status.ts:80-91`). That function routes a
 signed-in user to `/pending-approval` (pending status or no active membership)
 or `/blocked` (blocked/suspended/deactivated) before any secure page renders.
 The auth pages themselves have **no session check** — an already-signed-in user
 who navigates to `/sign-in` still sees the form (verified: no `getSession` /
 `redirect` in any `(auth)` page). Email/password sign-in additionally requires a
-**verified email** (`requireEmailVerification`, `src/lib/auth.ts:70`): an
+**verified email** (`requireEmailVerification`, `src/lib/auth.ts:159`): an
 unverified account is rejected at sign-in and offered a resend prompt (see
 AUTH-VERIFY-EMAIL). OAuth logins and admin/API-provisioned accounts arrive
 pre-verified.
@@ -106,7 +107,7 @@ pre-verified.
   namespace. Primary CTA links to the public GitHub repo; secondary CTAs go to
   sign-up / sign-in.
 - Guard / who can access: None. Lives in the `(public)` route group with a
-  lightweight shell, no session required (`src/app/[locale]/(public)/layout.tsx:29`).
+  lightweight shell, no session required (`src/app/[locale]/(public)/layout.tsx:32`).
 - Access matrix: Visitor -> see: yes, act: yes · Pending / Member / Limited
   Admin / Org Admin / Superadmin -> see: yes, act: yes (all personas can view
   the public home regardless of status).
@@ -118,7 +119,7 @@ User stories
   page, so that I can start creating an account.
   - Acceptance criteria: Given I am on `/en`, when I click the "Create account"
     secondary CTA (button text from `public.hero.secondaryCta`,
-    `src/app/[locale]/(public)/page.tsx:127-129`), then I land on `/en/sign-up`.
+    `src/app/[locale]/(public)/page.tsx:129-131`), then I land on `/en/sign-up`.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -130,7 +131,7 @@ User stories
   the project's GitHub, so that I can view the source.
   - Acceptance criteria: Given I am on `/en`, when I click the primary hero CTA,
     then a new tab opens to `https://github.com/devresponse/devresponsekit`
-    (`src/app/[locale]/(public)/page.tsx:38`, `:121`).
+    (`src/app/[locale]/(public)/page.tsx:38`, `:123`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -142,7 +143,7 @@ User stories
   brand bar, so that I can read the page in my language.
   - Acceptance criteria: Given I am on `/en`, when I pick another language in the
     brand-bar locale switcher, then the URL locale prefix and the visible copy
-    change to that language (brand bar from `src/app/[locale]/(public)/layout.tsx:54-70`).
+    change to that language (brand bar from `src/app/[locale]/(public)/layout.tsx:61-77`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -162,18 +163,18 @@ Negative & edge cases
   marketing page with no data fetch and no forms.
 
 Accessibility: Sections use `aria-labelledby` on headings
-(`src/app/[locale]/(public)/page.tsx:98`, `:172`, `:202`); decorative glyphs are
+(`src/app/[locale]/(public)/page.tsx:100`, `:174`, `:204`); decorative glyphs are
 `aria-hidden`. Keyboard: Tab reaches every CTA link/button; visible focus ring on
 each. Skip links are rendered by the shell (`ShellSkipLinks`,
-`src/app/[locale]/(public)/layout.tsx:43`).
+`src/app/[locale]/(public)/layout.tsx:50`).
 i18n: Run in `en` + `uk`. All copy comes from the `public` namespace; verify no
 raw message keys and that stats/labels localize.
 
 ### AUTH-ABOUT — About
 
-- Route: `/about`  ·  Example URL: `/en/about`  ·  Code: `src/app/[locale]/(public)/about/page.tsx:3`
+- Route: `/about`  ·  Example URL: `/en/about`  ·  Code: `src/app/[locale]/(public)/about/page.tsx:30`
 - Purpose: Placeholder public marketing/about page. Renders the brand name and a
-  single line of placeholder copy.
+  single localized line (the `public.about` namespace).
 - Guard / who can access: None (`(public)` group).
 - Access matrix: Visitor / Pending / Member / Limited Admin / Org Admin /
   Superadmin -> see: yes, act: n/a (no interactive controls on the page body).
@@ -185,31 +186,30 @@ User stories
   learn what the product is.
   - Acceptance criteria: Given I navigate to `/en/about`, then a page renders
     with the brand name as an `<h1>` and a short description
-    (`src/app/[locale]/(public)/about/page.tsx:6-11`).
+    (`src/app/[locale]/(public)/about/page.tsx:36-39`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Open `/en/about` | An `<h1>` shows the brand name; below it one line: "<brand name> Platform — public marketing/landing content goes here." |
+    | 1 | Open `/en/about` | An `<h1>` shows the brand name; below it one line: "<brand name> is an enterprise application shell. See the home page for a product overview." |
     | 2 | Confirm the brand bar is present | Sign in / Sign up links and the language switcher appear at the top (shared public layout) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
 
-- Content is **not** localized on this page: the body text is hard-coded English
-  interpolated with the brand name (`src/app/[locale]/(public)/about/page.tsx:8-10`),
-  not drawn from a message namespace. `TODO: verify` whether this placeholder is
-  expected to remain un-localized; flag if product wants it translated.
+- The body text comes from the `public.about` message namespace, interpolated
+  with the brand name (`src/app/[locale]/(public)/about/page.tsx:38`); the
+  `<h1>` is the brand name, which is not translated (review #225).
 - No forms/data — no empty/loading/error states.
 
 Accessibility: single `<h1>` in a `<main>` landmark; keyboard Tab reaches only
 the shared brand-bar controls. No axe violations expected on the body.
-i18n: The brand bar localizes; the body paragraph does not (see edge case above).
+i18n: The brand bar and the body paragraph localize; the brand name does not (see edge case above).
 
 ### AUTH-DOCS-PUBLIC — Public documentation index
 
-- Route: `/docs`  ·  Example URL: `/en/docs`  ·  Code: `src/app/[locale]/(public)/docs/page.tsx:1`
-- Purpose: Placeholder public-facing documentation index. Static heading +
-  one-line description. (Distinct from the in-app docs viewer at `/app/docs`,
+- Route: `/docs`  ·  Example URL: `/en/docs`  ·  Code: `src/app/[locale]/(public)/docs/page.tsx:27`
+- Purpose: Placeholder public-facing documentation index. A localized heading +
+  one-line description (the `public.docs` namespace). (Distinct from the in-app docs viewer at `/app/docs`,
   which is behind the secure shell.)
 - Guard / who can access: None (`(public)` group).
 - Access matrix: Visitor / Pending / Member / Limited Admin / Org Admin /
@@ -221,36 +221,37 @@ User stories
 - UAT-AUTH-DOCS-PUBLIC-S1 — As a Visitor, I want to open the public docs index,
   so that I can find documentation entry points.
   - Acceptance criteria: Given I navigate to `/en/docs`, then a page renders with
-    the heading "Documentation" and the line "Public-facing documentation index."
-    (`src/app/[locale]/(public)/docs/page.tsx:3-6`).
+    the heading "Documentation" and a line pointing signed-in readers to the
+    Documentation workspace
+    (`src/app/[locale]/(public)/docs/page.tsx:32-35`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Open `/en/docs` | An `<h1>` reads "Documentation"; a paragraph reads "Public-facing documentation index." |
+    | 1 | Open `/en/docs` | An `<h1>` reads "Documentation"; a paragraph reads "A public index of the product documentation. The full guides live in the Documentation workspace once you are signed in." |
     | 2 | Confirm access without signing in | The page renders for a signed-out visitor (no redirect to sign-in) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
 
-- Content is hard-coded English (`src/app/[locale]/(public)/docs/page.tsx:4-5`),
-  not localized. `TODO: verify` whether this placeholder should localize.
+- Content comes from the `public.docs` message namespace
+  (`src/app/[locale]/(public)/docs/page.tsx:33-34`), so it localizes (review #225).
 - Do **not** confuse with `/app/docs` (the secure, frontmatter-driven viewer) —
   that one requires a session and is covered in the account/docs UAT set.
 - No forms/data — no empty/loading/error states.
 
 Accessibility: `<h1>` in a `<main>` landmark; only brand-bar controls are
 focusable on this page.
-i18n: Brand bar localizes; body is static English (edge case above).
+i18n: The brand bar, heading and body localize (edge case above).
 
 ### AUTH-LOGGED-OUT — Logged out
 
-- Route: `/logged-out`  ·  Example URL: `/en/logged-out`  ·  Code: `src/app/[locale]/(public)/logged-out/page.tsx:12`
+- Route: `/logged-out`  ·  Example URL: `/en/logged-out`  ·  Code: `src/app/[locale]/(public)/logged-out/page.tsx:15`
 - Purpose: Confirmation shown after `SignOutButton` completes a local-only
   sign-out. Renders `LoggedOutPanel` (an alert + a link back to sign-in). Lives
   in `(public)` so it never re-engages the secure shell
   (`src/components/auth/logged-out-panel.tsx:11-18`).
 - Guard / who can access: None. Reached programmatically after sign-out
-  (`src/components/auth/sign-out-button.tsx:29`), but directly navigable by anyone.
+  (`src/components/auth/sign-out-button.tsx:35`), but directly navigable by anyone.
 - Access matrix: Visitor / Pending / Member / Limited Admin / Org Admin /
   Superadmin -> see: yes, act: yes (the only action is the "Sign in" link).
 - Preconditions & test data: None to view. To reach it via the real flow, be
@@ -262,7 +263,7 @@ User stories
   and a way back in, so that I know my session ended and can sign in again.
   - Acceptance criteria: Given I click "Sign out" anywhere in the secure shell,
     when the local sign-out completes, then I am redirected to `/<locale>/logged-out`
-    (`src/components/auth/sign-out-button.tsx:29`) showing the "You have been
+    (`src/components/auth/sign-out-button.tsx:35`) showing the "You have been
     signed out" alert with a "Sign in" link.
   - UAT script:
     | # | Step (what to do) | Expected result |
@@ -286,10 +287,10 @@ User stories
 Negative & edge cases
 
 - Sign-out is **local-only** (this subdomain): other subdomain sessions are
-  intentionally left intact (`src/components/auth/sign-out-button.tsx:14-16`).
+  intentionally left intact (`src/components/auth/sign-out-button.tsx:20-22`).
   Expected: signing out here does not sign you out of a sibling app.
 - Locale coercion: an unsupported locale segment coerces to `en`
-  (`src/app/[locale]/(public)/logged-out/page.tsx:14`). Expected: renders in English.
+  (`src/app/[locale]/(public)/logged-out/page.tsx:17`). Expected: renders in English.
 - No form validation / empty / loading states.
 
 Accessibility: The panel is an `Alert` with a titled region; the "Sign in" link
@@ -313,19 +314,19 @@ to confirm both localize.
 > `sign-up`, `forgot-password`, `reset-password`, `pending-approval`, and
 > `blocked` are classified as `auth` routes; `sso/confirm` (also under the
 > `(auth)` folder) is classified as `public` by the route-region map
-> (`src/config/route-regions.ts:27-34`).
+> (`src/config/route-regions.ts:33-40`).
 
 ### AUTH-SIGNIN — Sign in
 
-- Route: `/sign-in`  ·  Example URL: `/en/sign-in`  ·  Code: `src/app/[locale]/(auth)/sign-in/page.tsx:14`
+- Route: `/sign-in`  ·  Example URL: `/en/sign-in`  ·  Code: `src/app/[locale]/(auth)/sign-in/page.tsx:16`
 - Purpose: Email/password + social sign-in. Sanitizes the `returnTo` query
   server-side and re-points it at the page's locale (`getSafeReturnToInLocale`,
   `src/app/[locale]/(auth)/sign-in/page.tsx:27`), so it cannot drive an open
   redirect or undo a language switch, then passes it to Better Auth as
   `callbackURL`.
 - Guard / who can access: None. Unauthenticated deep-links into secure routes are
-  bounced here by the proxy with a `returnTo` param (`src/proxy.ts:106-112`) and
-  by `requireSecureSession` (`src/lib/auth-guard.ts:58-62`).
+  bounced here by the proxy with a `returnTo` param (`src/proxy.ts:194-200`) and
+  by `requireSecureSession` (`src/lib/auth-guard.ts:184-188`).
 - Access matrix: Visitor -> see: yes, act: yes · Pending / Blocked / Member /
   admins -> see: yes (no redirect away from the form) but signing in again just
   re-runs the flow.
@@ -335,14 +336,16 @@ to confirm both localize.
   - Password input (`type="password"`, `autoComplete="current-password"`, label
     `common.password`) — required (any non-empty value; Better Auth verifies).
   - Primary submit button, label `common.signIn`.
-  - Three social buttons: "Continue with Google", "Continue with Microsoft",
-    "Continue with GitHub" (`src/components/auth/social-login-buttons.tsx:32-41`).
+  - One social button per configured provider: "Continue with Google",
+    "Continue with Microsoft", "Continue with GitHub"
+    (`src/components/auth/social-login-buttons.tsx:50-55`); none without provider
+    credentials.
   - Links: "Forgot password?" -> `/forgot-password`; "Create account" -> `/sign-up`
-    (`src/components/auth/sign-in-form.tsx:39-52`).
+    (`src/components/auth/sign-in-form.tsx:92-109`).
   - A required-field legend ("\* indicates a required field") from `RequiredLegend`
-    (`src/components/auth/email-password-login-form.tsx:61`).
+    (`src/components/auth/email-password-login-form.tsx:109`).
 - Validation schema: `signInSchema` — `email` must be a valid email; `password`
-  min length 1 (`src/lib/validation/auth.ts:10-13`).
+  min length 1 (`src/lib/validation/auth.ts:13-16`).
 - Preconditions & test data: an `active` account with an `active` membership,
   e.g. `user1@orga.local` / `DevPassword123!`.
 
@@ -357,7 +360,7 @@ User stories
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Open `/en/sign-in` | Sign-in card: title "Sign in to your account", email + password fields, a "Sign in" button, three social buttons, and Forgot/Create links |
+    | 1 | Open `/en/sign-in` | Sign-in card: title "Sign in to your account", email + password fields, a "Sign in" button, a social button per configured provider, and Forgot/Create links |
     | 2 | Enter `user1@orga.local` and `DevPassword123!` | Both fields accept input; no validation error |
     | 3 | Click "Sign in" | Button shows "Loading…" while submitting, then you are redirected into the secure shell at `/en/app/dashboard` |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -366,8 +369,8 @@ User stories
   returned there after signing in, so that I don't lose my place.
   - Acceptance criteria: Given I open a secure URL while signed out, when the
     proxy redirects me to sign-in with `returnTo` and I then sign in, then I land
-    on the originally requested secure page (`src/proxy.ts:108`, honored via
-    `callbackURL` at `src/components/auth/email-password-login-form.tsx:46`).
+    on the originally requested secure page (`src/proxy.ts:196`, honored via
+    `callbackURL` at `src/components/auth/email-password-login-form.tsx:56`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -380,7 +383,7 @@ Negative & edge cases
 - UAT-AUTH-SIGNIN-S3 (wrong password) — Given a real email with a wrong password,
   when I submit, then an inline alert reads "Invalid email or password."
   (`auth.invalidCredentials`, rendered in a `role="alert"` paragraph —
-  `src/components/auth/email-password-login-form.tsx:49`, `:91-95`). The message
+  `src/components/auth/email-password-login-form.tsx:85`, `:139-143`). The message
   is generic (no account-existence leak).
   - UAT script:
     | # | Step | Expected result |
@@ -425,9 +428,9 @@ Negative & edge cases
 - Empty required fields: submitting with an empty email shows "Enter a valid
   email address." (`validation.email`); empty password shows "This field is
   required." (`validation.required`) — both via `FormMessage`
-  (`src/components/ui/form.tsx:193-219`), with the field getting `aria-invalid`
+  (`src/components/ui/form.tsx:192-218`), with the field getting `aria-invalid`
   and an error border. The `*` marker appears on both labels (schema-derived,
-  `src/components/ui/form.tsx:144-151`).
+  `src/components/ui/form.tsx:143-150`).
 - Malicious `returnTo`: an absolute URL, `//evil.com`, a backslash-smuggled path,
   an `/api/*` path, or an auth/status page all fall back to
   `/<locale>/app/dashboard` (`src/lib/safe-return-to.ts:62-97`). So does a path
@@ -450,11 +453,11 @@ Negative & edge cases
   (`src/components/i18n/use-switch-locale.ts`).
 - Blocked/pending user signing in: sign-in itself succeeds, then the secure
   layout's `requireSecureSession` redirects them to `/blocked` or
-  `/pending-approval` (`src/lib/auth-guard.ts:67-73`). Assert they never see a
+  `/pending-approval` (`src/lib/auth-guard.ts:196-202`). Assert they never see a
   secure page.
 - Unexpected transport error: the catch branch surfaces
   "An unexpected error occurred. Please try again." (`auth.unexpectedError`,
-  `src/components/auth/email-password-login-form.tsx:51`).
+  `src/components/auth/email-password-login-form.tsx:87`).
 - Rate-limit (production only; both are off under `AUTH_RATE_LIMIT_DISABLED`
   and outside `NODE_ENV=production`): Better Auth allows 3 sign-ins per 10 s
   per client IP, and the app allows 10 attempts per 15 minutes per **address**,
@@ -469,9 +472,9 @@ Negative & edge cases
   `eventType` `auth.sign_in.failed` and `metadata.emailHash`, never the address.
 
 Accessibility: labelled email/password controls (`FormLabel` + `htmlFor`,
-`src/components/ui/form.tsx:126-155`); the error is a live `role="alert"`;
+`src/components/ui/form.tsx:125-154`); the error is a live `role="alert"`;
 `aria-required` / `aria-invalid` are set on the controls
-(`src/components/ui/form.tsx:157-172`); social buttons are real `<button>`s.
+(`src/components/ui/form.tsx:156-171`); social buttons are real `<button>`s.
 Keyboard-only: Tab through email -> password -> Sign in -> social buttons ->
 Forgot/Create links; visible focus throughout.
 i18n: Titles, labels, and errors come from the `auth` / `common` / `validation`
@@ -479,9 +482,9 @@ namespaces; run in `uk`, confirm no raw keys and localized error text.
 
 ### AUTH-SIGNUP — Sign up
 
-- Route: `/sign-up`  ·  Example URL: `/en/sign-up`  ·  Code: `src/app/[locale]/(auth)/sign-up/page.tsx:6`
-- Purpose: Self-registration (name + email + password) plus the same three social
-  providers. On success Better Auth creates the account, emails a verification
+- Route: `/sign-up`  ·  Example URL: `/en/sign-up`  ·  Code: `src/app/[locale]/(auth)/sign-up/page.tsx:9`
+- Purpose: Self-registration (name + email + password) plus the same configured
+  social providers. On success Better Auth creates the account, emails a verification
   link, and the form redirects to the **verify-email** page — no session is
   created yet (email verification is required, AUTH-4). Provisioning to
   `pending_approval` happens on the first sign-in, after the address is verified.
@@ -497,7 +500,7 @@ namespaces; run in `uk`, confirm no raw keys and localized error text.
   - Email input — required, valid email.
   - Password input (`autoComplete="new-password"`) — required, **min 8**, max 128.
   - Submit button, label `auth.createAccount` ("Create account").
-  - Three social buttons + a "Already have an account?" link to `/sign-in`.
+  - The configured social buttons + a "Already have an account?" link to `/sign-in`.
   - Required-field legend.
 - Validation schema: `signUpSchema` — `name` follows the shared name rule
   (`userNameSchema`, `src/lib/user-name.ts`): required, at most 200 characters
@@ -516,8 +519,8 @@ User stories
   - Acceptance criteria: Given a fresh email and a password of at least 8
     characters, when I submit, then Better Auth creates the account, emails a
     verification link, and I am redirected to `/<locale>/verify-email`
-    (`src/components/auth/email-password-sign-up-form.tsx:61`; the after-verify
-    `callbackURL` is `/<locale>/app`, `:55`). See AUTH-VERIFY-EMAIL for the
+    (`src/components/auth/email-password-sign-up-form.tsx:124`; the after-verify
+    `callbackURL` is `/<locale>/app`, `:115`). See AUTH-VERIFY-EMAIL for the
     verify + resend flow.
   - UAT script:
     | # | Step (what to do) | Expected result |
@@ -587,15 +590,15 @@ i18n: card title from `auth.signUpTitle`, labels from `common`, errors from
 - Route: `/verify-email`  ·  Example URL: `/en/verify-email`  ·  Code: `src/app/[locale]/(auth)/verify-email/page.tsx:12`
 - Purpose: The "check your inbox" landing shown immediately after an
   email/password sign-up (AUTH-4). Email verification is required
-  (`requireEmailVerification`, `src/lib/auth.ts:70`): sign-up sends a verification
-  link (`sendVerificationEmail` / `sendOnSignUp`, `src/lib/auth.ts:105-108`) and
+  (`requireEmailVerification`, `src/lib/auth.ts:159`): sign-up sends a verification
+  link (`sendVerificationEmail` / `sendOnSignUp`, `src/lib/auth.ts:330-336`) and
   does not start a session until the address is confirmed. Renders
   `VerifyEmailPanel` — an informational alert plus a **Resend** form; like the
   pending panel it never mounts the secure shell
-  (`src/components/auth/verify-email-panel.tsx:25-40`).
+  (`src/components/auth/verify-email-panel.tsx:27-42`).
 - Guard / who can access: None. It is where the sign-up form sends the user
-  (`src/components/auth/sign-up-form.tsx:33`,
-  `src/components/auth/email-password-sign-up-form.tsx:61`).
+  (`src/components/auth/sign-up-form.tsx:96`,
+  `src/components/auth/email-password-sign-up-form.tsx:124`).
 - Access matrix: Visitor / just-signed-up user -> see: yes, act: yes (resend). No
   persona is *routed* here by the shell; it is a post-sign-up destination.
 - Fields & controls (verified against `verify-email-panel.tsx` and
@@ -618,15 +621,16 @@ User stories
   inbox and confirm my address, so that I can activate my account.
   - Acceptance criteria: Given I just submitted the sign-up form, when the page
     loads, then I see the "Verify your email" panel telling me a link was sent,
-    with a Resend option; opening the emailed link verifies me and
-    (`autoSignInAfterVerification`, `src/lib/auth.ts:107`) signs me in, landing at
-    `/<locale>/app` (which routes a new, unapproved account on to pending-approval).
+    with a Resend option; opening the emailed link verifies me without signing
+    me in (`autoSignInAfterVerification: false`, `src/lib/auth.ts:332`) and lands
+    on the "Email verified" page at `/<locale>/verify-email/confirmed`, which
+    links to sign-in.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign up with a fresh email at `/en/sign-up` | You are redirected to `/en/verify-email` |
     | 2 | Read the panel | Card titled "Verify your email"; an alert saying a verification link was sent to your address; a Resend form below |
-    | 3 | Find the `email_verification` row for your address in the admin Email outbox and open its link | You are verified, auto-signed-in, and land in the app — then routed to `/en/pending-approval` (new accounts are unapproved) |
+    | 3 | Find the `email_verification` row for your address in the admin Email outbox and open its link | You land on "Email verified" (`/en/verify-email/confirmed`) with a "Proceed to sign in" link; no session was created |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -673,7 +677,7 @@ field label from `common`; run in `uk` and confirm no raw keys.
     `auth.forgotPassword` ("Forgot password?") from
     `src/app/[locale]/(auth)/forgot-password/page.tsx:20`.
 - Validation schema: `forgotPasswordSchema` — just a valid `email`
-  (`src/lib/validation/auth.ts:25-27`).
+  (`src/lib/validation/auth.ts:32-34`).
 - Preconditions & test data: to see a real email arrive, use an existing account
   and check the outbox (emails are recorded through the outbox pipeline —
   `src/app/[locale]/(auth)/forgot-password/page.tsx:8-11`); the confirmation is
@@ -723,7 +727,7 @@ Negative & edge cases
 - Invalid email format: submitting `not-an-email` shows "Enter a valid email
   address." (`validation.email`); the `*` marker is on the Email label.
 - Empty email: "Enter a valid email address." (the schema rejects an empty string
-  as an invalid email, `src/lib/validation/auth.ts:25`).
+  as an invalid email, `src/lib/validation/auth.ts:32`).
 - Transport failure: the `result.error` and catch branches both set the root
   error to "An unexpected error occurred. Please try again."
   (`auth.unexpectedError`), rendered in a `role="alert"`
@@ -759,7 +763,7 @@ i18n: description/button/confirmation from the `auth` namespace; run in `uk`.
 - Validation schema: `resetPasswordSchema` = fields + refine (passwords must
   match; the mismatch message `validation.passwordsMismatch` is surfaced on the
   Confirm field). The unrefined `resetPasswordFieldsSchema` drives the required
-  `*` markers so **both** fields show one (`src/lib/validation/auth.ts:34-42`,
+  `*` markers so **both** fields show one (`src/lib/validation/auth.ts:41-49`,
   wired at `src/components/auth/reset-password-form.tsx:45`, `:91`).
 - Preconditions & test data: complete AUTH-FORGOT first and copy the `token` from
   the emailed link (or the outbox record).
@@ -784,7 +788,7 @@ Negative & edge cases
 
 - UAT-AUTH-RESET-S2 (mismatched passwords) — Given two different passwords, when I
   submit, then the Confirm field shows "Passwords do not match."
-  (`validation.passwordsMismatch`, `src/lib/validation/auth.ts:38-41`) and the
+  (`validation.passwordsMismatch`, `src/lib/validation/auth.ts:45-48`) and the
   form does not submit.
   - UAT script:
     | # | Step | Expected result |
@@ -837,14 +841,14 @@ i18n: title, labels, and messages from `auth` / `validation`; run in `uk`.
   session (F-148); for anyone else the banner renders nothing.
 - Guard / who can access: None on the page itself; it is the **destination** of
   `requireSecureSession` when `decideSecureAccess` returns `pending_approval`
-  (`src/lib/auth-guard.ts:67-69`; decision logic
-  `src/lib/auth-status.ts:70-76` — pending status, or a null / pending membership).
+  (`src/lib/auth-guard.ts:196-198`; decision logic
+  `src/lib/auth-status.ts:84-90` — pending status, or a null / pending membership).
 - Access matrix: Pending user -> see: yes, act: yes (sign out). Any other persona
   -> can view the page directly, but only a genuinely pending user is *routed*
   here by the shell.
 - Preconditions & test data: a self-signed-up account that has **verified its
   email** (so it can sign in) but has not been approved — sign up, open the
-  verification link (AUTH-VERIFY-EMAIL); you are then auto-signed-in and land here.
+  verification link (AUTH-VERIFY-EMAIL), then sign in; you land here.
 
 User stories
 
@@ -852,11 +856,11 @@ User stories
   account awaits approval, so that I understand why I can't reach the app yet.
   - Acceptance criteria: Given I am signed in but `pending_approval`, when I try
     to open any secure page, then I am redirected to `/<locale>/pending-approval`
-    (`src/lib/auth-guard.ts:68`) showing the pending alert and a "Sign out" button.
+    (`src/lib/auth-guard.ts:197`) showing the pending alert and a "Sign out" button.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Sign up with a brand-new email, then open the verification link from the outbox (AUTH-VERIFY-EMAIL) | After verifying you are auto-signed-in and, being unapproved, routed to `/en/pending-approval` |
+    | 1 | Sign up with a brand-new email, then open the verification link from the outbox (AUTH-VERIFY-EMAIL) | After verifying, sign in from the "Email verified" page; being unapproved, you are routed to `/en/pending-approval` |
     | 2 | Read the panel | Card + alert titled "Your account is pending approval"; body: "An administrator must approve your account before you can access secure pages." (`auth.pendingApprovalTitle` / `auth.pendingApprovalDescription`) |
     | 3 | Manually open `/en/app/dashboard` | You are redirected back to `/en/pending-approval` (the shell guard blocks pending users) |
     | 4 | Click "Sign out" | You are signed out and land on `/en/logged-out` |
@@ -866,9 +870,9 @@ Negative & edge cases
 
 - Pending user cannot bypass into a secure page: every `/en/app/*` request
   re-runs `requireSecureSession` and re-redirects
-  (`src/lib/auth-guard.ts:67-69`). Assert no secure content flashes.
+  (`src/lib/auth-guard.ts:196-198`). Assert no secure content flashes.
 - No membership at all (provisioned user, zero active memberships) also resolves
-  to `pending_approval` (`src/lib/auth-status.ts:72-73`), so the same screen is
+  to `pending_approval` (`src/lib/auth-status.ts:86-87`), so the same screen is
   shown. `TODO: verify` this specific sub-case with a user that has no membership
   row.
 - The panel deliberately shows only generic copy — no admin/operational detail.
@@ -892,13 +896,13 @@ i18n: title/description from `auth`, button label from `common.signOut`
   renders nothing.
 - Guard / who can access: None on the page; it is the destination of
   `requireSecureSession` when `decideSecureAccess` returns `blocked`
-  (`src/lib/auth-guard.ts:71-73`). The shell appends `?reason=<status>` to the
-  redirect URL (`src/lib/auth-guard.ts:72`), though the panel does not display it.
+  (`src/lib/auth-guard.ts:200-202`). The shell appends `?reason=<status>` to the
+  redirect URL (`src/lib/auth-guard.ts:201`), though the panel does not display it.
 - Access matrix: Blocked user -> see: yes, act: yes (sign out). Others -> can view
   directly, but only a blocked/suspended/deactivated user is *routed* here.
 - Preconditions & test data: an account an admin has blocked/suspended (or whose
   status is `deactivated`). Also reached for an unknown/corrupt status because the
-  status coercion fails **closed** to `deactivated` (`src/lib/auth-status.ts:48-52`).
+  status coercion fails **closed** to `deactivated` (`src/lib/auth-status.ts:62-66`).
 
 User stories
 
@@ -906,7 +910,7 @@ User stories
   message, so that I know my account is not usable and can contact an admin.
   - Acceptance criteria: Given my status is `blocked` (or `suspended` /
     `deactivated`), when I try to open a secure page, then I am redirected to
-    `/<locale>/blocked` (`src/lib/auth-guard.ts:72`) showing the restricted alert
+    `/<locale>/blocked` (`src/lib/auth-guard.ts:201`) showing the restricted alert
     and a "Sign out" button.
   - UAT script:
     | # | Step (what to do) | Expected result |
@@ -923,9 +927,9 @@ Negative & edge cases
   who blocked the account or why (`src/components/auth/blocked-account-panel.tsx:14-19`).
   Assert the `?reason=` value is not rendered on screen.
 - Blocked user cannot reach secure pages: every `/en/app/*` request re-redirects
-  to `/blocked` (`src/lib/auth-guard.ts:71-73`).
+  to `/blocked` (`src/lib/auth-guard.ts:200-202`).
 - Unknown/corrupt DB status: fails closed to `deactivated` -> `blocked` decision
-  (`src/lib/auth-status.ts:48-52`, `:70`), so a bad row can never grant access.
+  (`src/lib/auth-status.ts:62-66`, `:84`), so a bad row can never grant access.
   `TODO: verify` behavior with a deliberately corrupted status row.
 - No form fields; only "Sign out" (plus **Stop impersonating** for an
   impersonated session, F-148). No validation states.
@@ -948,7 +952,7 @@ i18n: title/description from `auth`, button from `common.signOut`; run in `uk`.
   re-verification + the trusted-origin-guarded POST, not a session.
 - Access matrix: Visitor arriving from an enterprise app launch -> see: yes, act:
   yes (Continue / Cancel). Note: this route is classified `public`, not `auth`
-  (`src/config/route-regions.ts:27-34`).
+  (`src/config/route-regions.ts:33-40`).
 - Controls (verified against `src/app/[locale]/(auth)/sso/confirm/page.tsx`):
   - **Valid token:** heading "Confirm sign-in" (`sso.confirm.title`); body "You're
     about to sign in as {email}." with the email from the *re-verified* token
@@ -1079,8 +1083,8 @@ are gated).
 ## Coverage checklist
 
 - [x] AUTH-LANDING — happy + negative + a11y/i18n
-- [x] AUTH-ABOUT — view + edge (un-localized body) + a11y/i18n
-- [x] AUTH-DOCS-PUBLIC — view + edge (un-localized body, distinct from `/app/docs`)
+- [x] AUTH-ABOUT — view + edge (localized body) + a11y/i18n
+- [x] AUTH-DOCS-PUBLIC — view + edge (localized body, distinct from `/app/docs`)
 - [x] AUTH-LOGGED-OUT — via-flow + direct-nav + local-only-signout edge
 - [x] AUTH-SIGNIN — happy + returnTo + wrong-password + unverified→resend + validation + open-redirect + gate routing
 - [x] AUTH-SIGNUP — happy (-> verify-email) + short-password + duplicate-email + validation
@@ -1093,23 +1097,23 @@ are gated).
 
 ## Open TODO: verify items
 
-1. **AUTH-ABOUT / AUTH-DOCS-PUBLIC copy is hard-coded English** (not from a
-   message namespace) — confirm with product whether these placeholders should be
-   localized (`src/app/[locale]/(public)/about/page.tsx:8-10`,
-   `src/app/[locale]/(public)/docs/page.tsx:4-5`).
+1. **AUTH-ABOUT / AUTH-DOCS-PUBLIC copy** — resolved: both pages now read the
+   `public.about` / `public.docs` message namespaces in all eight locales
+   (`src/app/[locale]/(public)/about/page.tsx:38`,
+   `src/app/[locale]/(public)/docs/page.tsx:33-34`, review #225).
 2. **Rate-limiting on sign-up / forgot-password** — no client-side
    rate-limit handling is visible in those forms; verify how Better Auth's
    per-IP limit surfaces to the user there. (Sign-in is covered: AUTH-SIGNIN
    above, F-55.)
 3. **Sign-up duplicate-email message** — currently mapped to the generic
    `auth.unexpectedError`; confirm whether a specific "email already registered"
-   message is desired (`src/components/auth/email-password-sign-up-form.tsx:50`).
+   message is desired (`src/components/auth/email-password-sign-up-form.tsx:103`).
 4. **AUTH-PENDING no-membership sub-case** — confirm a provisioned user with zero
    active memberships lands on `/pending-approval`
-   (`src/lib/auth-status.ts:72-73`).
+   (`src/lib/auth-status.ts:86-87`).
 5. **AUTH-BLOCKED corrupt-status sub-case** — confirm a deliberately corrupted DB
    status coerces to `deactivated` and routes to `/blocked`
-   (`src/lib/auth-status.ts:48-52`).
+   (`src/lib/auth-status.ts:62-66`).
 6. **AUTH-SSO-CONFIRM end-to-end** — document the exact enterprise-app launch
    steps and the local `SSO_HANDOFF_AUDIENCE_PREFIX` / `SSO_HANDOFF_APPLICATION_ID`
    values needed, and verify the `/api/sso/consume` POST handler's trusted-origin

@@ -9,7 +9,7 @@ import {
 } from "@/lib/validation/auth-policy";
 
 /**
- * Unit tests for the shared signup-policy validation (0007). The enum
+ * Unit tests for the shared signup-policy validation. The enum
  * parity assignments below are the compile-time guard promised in the
  * module doc: if the client-safe constants drift from the server-only
  * `auth-policy.server.ts` unions, `pnpm typecheck` fails here.

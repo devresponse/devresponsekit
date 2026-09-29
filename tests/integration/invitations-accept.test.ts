@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AcceptRoute from "@/app/api/invitations/accept/route";
 
 /**
- * Integration tests for POST /api/invitations/accept (0008) — the explicit
+ * Integration tests for POST /api/invitations/accept — the explicit
  * acceptance path for signed-in users.
  *
  * Pins the contract: session required but NOT active membership (pending

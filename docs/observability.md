@@ -199,7 +199,9 @@ business counter — not the full target set.
   Postgres-backed pre-auth limiter (review #98) could not reach `app_rate_limits` and fell back
   to the in-process bucket for one cool-down. Non-zero means the deployment-wide floors are
   per-instance right now: the database is unhealthy or migration `0006` is not applied; the
-  paired `warn` log line carries the error.
+  paired `warn` log line (`shared rate-limit backend unavailable`) carries the error. On a
+  serverless deployment a zero here covers only the instance the scrape reached, so the log line
+  is the signal to alert on (see the topology note below).
 - **`devresponsekit_pre_auth_refusals_total{event_type}`** — incremented for every request
   refused before its caller is authenticated (F-15): `administrator.access.denied`,
   `api.access.denied`, `account.access.denied` and `invitation.access.denied` for the CSRF
@@ -265,11 +267,15 @@ scrape_configs:
       - targets: ["your-app-host:443"]
 ```
 
-**Topology note:** counters are **per-process** (like the in-memory rate limiter). Under the
-single-instance 1.0 topology that is the whole picture; a multi-instance deployment scrapes each
-target independently and aggregates at the Prometheus layer. A CLI process (`pnpm outbox:drain`)
-has its own registry and serves no `/api/metrics`, so anything it counts is lost when it exits;
-see the outbox delivery counter above.
+**Topology note:** counters are **per-process**, like the per-actor admin rate limiter
+([deployment.md §5](./deployment.md#5-operations--gotchas) says which limiters are shared and
+that multi-instance is supported). A long-running multi-instance deployment scrapes each target
+and aggregates at the Prometheus layer. On a serverless platform such as Vercel every function
+instance keeps its own counters and a scrape reaches whichever instance answers it, so a scrape
+there is a sample of one instance, not a deployment total: alert on the structured log lines
+instead, such as `shared rate-limit backend unavailable` for a floor that fell back (F-107). A
+CLI process (`pnpm outbox:drain`) has its own registry and serves no `/api/metrics`, so anything
+it counts is lost when it exits; see the outbox delivery counter above.
 
 ## 6. Roadmap — not yet shipped
 

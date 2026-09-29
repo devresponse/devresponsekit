@@ -16,16 +16,16 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 
 | Rule | Behaviour | Source |
 | --- | --- | --- |
-| Read gate | List, detail, memberships, members, provider-bindings all require `admin.orgs.read` | `organizations/page.tsx:28`, `organizations/[orgId]/page.tsx:34`, `memberships/page.tsx:22`, `api/administrator/organizations/route.ts:40`, `api/administrator/memberships/route.ts:32` |
-| Create gate | `/organizations/new` page and `POST` require `admin.orgs.create`; the page also requires a Superadmin and is **404** for anyone else, the same authority as the `POST` (F-66) | `organizations/new/page.tsx`, `api/administrator/organizations/route.ts:141` |
+| Read gate | List, detail, memberships, members, provider-bindings all require `admin.orgs.read` | `organizations/page.tsx:37`, `organizations/[orgId]/page.tsx:62`, `memberships/page.tsx:22`, `api/administrator/organizations/route.ts:41`, `api/administrator/memberships/route.ts:34` |
+| Create gate | `/organizations/new` page and `POST` require `admin.orgs.create`; the page also requires a Superadmin and is **404** for anyone else, the same authority as the `POST` (F-66) | `organizations/new/page.tsx`, `api/administrator/organizations/route.ts:142` |
 | The UI offers only what the API allows (F-66) | The **New organization** button (list and top menubar), the per-row **Delete** button and an editable **Settings** form appear only for a Superadmin holding `admin.orgs.create` / `.delete` / `.update`. An Org Admin holds those keys too, but every such request would be refused, so they get no button and a read-only form | `organizations/page.tsx`, `organizations/[orgId]/page.tsx`, `_components/administrator-navigation.ts` |
-| Create is SUPERADMIN-only | Even with `admin.orgs.create`, a non-superadmin `POST` gets **403** | `api/administrator/organizations/route.ts:158` |
-| Rename / status / default is SUPERADMIN-only | `PATCH` gates on `admin.orgs.update`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:105,125` |
-| Delete is SUPERADMIN-only | `DELETE` gates on `admin.orgs.delete`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:280,296` |
+| Create is SUPERADMIN-only | Even with `admin.orgs.create`, a non-superadmin `POST` gets **403** | `api/administrator/organizations/route.ts:159` |
+| Rename / status / default is SUPERADMIN-only | `PATCH` gates on `admin.orgs.update`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:113,133` |
+| Delete is SUPERADMIN-only | `DELETE` gates on `admin.orgs.delete`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:291,307` |
 | Refusals are audited | Each of these three 403s writes `administrator.access.denied` (reason `cross_org_reach_required`, `metadata.action` `organization_create` / `_update` / `_delete`) under the caller's org (F-58) | `lib/admin/refusals.server.ts` |
-| Org Admin sees only their org | List is scoped by `resolveOrgScope`; a null scope returns an empty list | `api/administrator/organizations/route.ts:53`, `lib/admin/access-scope.server.ts:51` |
-| Cross-tenant detail is 404, not 403 | A foreign `orgId` returns `notFound()` / a 404 envelope, never 403 | `organizations/[orgId]/page.tsx:54`, `api/administrator/organizations/[id]/route.ts:58` |
-| Delete of a default org | Blocked with **409** `organization_is_default`; re-checked inside the deleting transaction under the default-flag lock, so a delete racing a "Set as default" on the same org cannot remove the new default (F-40) | `api/administrator/organizations/[id]/route.ts:315,362`, `lib/admin/orgs.server.ts:120` |
+| Org Admin sees only their org | List is scoped by `resolveOrgScope`; a null scope returns an empty list | `api/administrator/organizations/route.ts:54`, `lib/admin/access-scope.server.ts:198` |
+| Cross-tenant detail is 404, not 403 | A foreign `orgId` returns `notFound()` / a 404 envelope, never 403 | `organizations/[orgId]/page.tsx:82`, `api/administrator/organizations/[id]/route.ts:66` |
+| Delete of a default org | Blocked with **409** `organization_is_default`; re-checked inside the deleting transaction under the default-flag lock, so a delete racing a "Set as default" on the same org cannot remove the new default (F-40) | `api/administrator/organizations/[id]/route.ts:326,374`, `lib/admin/orgs.server.ts:155` |
 | The default organization is the org flagged `is_default` (F-40) | Unmapped sign-ups (no invitation, `/sign-in/<org>` hint or email-domain binding) land in it under its policy, whatever its slug; no org is ever auto-created for them. *Set as default organization* (Settings, or `isDefault: true` on create/update) **moves** the flag, so exactly one org carries it (since migration 0007 a partial unique index refuses a second one outright, M-02); clearing it on the current default is refused with **409** `organization_is_default` and the checkbox is read-only there (on a legacy database's extra flag the checkbox stays enabled and unticking it clears that flag). A slug edit shows a warning (it breaks `/sign-in/<slug>` links and slug-configured env vars). `db:seed` keeps its platform roles and admin in the platform org, never in a moved default | `lib/default-organization.server.ts`, `lib/user-provisioning.server.ts`, `lib/auth-policy.server.ts` (`resolveSignupPolicy`), `api/administrator/organizations/[id]/route.ts` (PATCH), `_organization-settings-form.tsx`, `db/seeds/default-organization.ts` |
 | Organization status is enforced (F-09) | Only an `active` org confers membership: a `pending` / `suspended` / `archived` org's members, org admins, bound credentials, SSO launches and invitations stop working, and a `superuser` grant held there confers nothing, until it is reactivated | `lib/auth-status.ts` (`getUserAccessContext`), `lib/admin/access-scope.server.ts` (`userIsGlobalSuperuser`) |
 | Suspending the tenant that holds the last superuser grant | Blocked with **409** `last_superadmin` (REVOKE-2); reactivation is never blocked | `api/administrator/organizations/[id]/route.ts` (PATCH) |
@@ -35,9 +35,9 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 | An invitation outlives its inviter's standing only until someone accepts it (F-149) | When the inviter has since been banned, soft-deleted, blocked or suspended, or no longer holds `admin.orgs.update` in the org (and is not a superadmin), accepting it admits nobody and grants no role: the accept answers the generic "invalid or expired" (**404** `invitation_invalid`), a sign-up carrying it lands as an uninvited sign-up, and the invitation now shows **Revoked** (and stays so if the ban is lifted). **Resend** on such an invitation is refused with **409** `invitation_inviter_lacks_standing` ("…can no longer invite, so it has been revoked. Send a new invitation."), sends no email, and the row reloads as **Revoked**. The Audit log records `invitation.access.denied` with reason `inviter_lacks_standing` | `lib/invitations.server.ts` (`enforceInviterStanding`), `lib/user-provisioning.server.ts`, `…/[invitationId]/resend/route.ts` |
 | An invitation whose email the mail provider rejects (F-104) | With a delivery provider configured, inviting (or resending to) an address the provider refuses outright still creates (or rotates) the invitation, but the panel shows "Invitation saved, but the mail provider rejected its email, so the link was not delivered. Check the address, then resend it." instead of "Invitation sent.", and the API answers `ok: false`. The Audit log records `admin.organization.invitation_created` (or `_resent`) as `error`, reason `email_rejected`, with `metadata.outboxId` and `metadata.emailStatus` `failed`. With no provider configured the email is `logged` and the panel says sent | `api/administrator/organizations/[id]/invitations/route.ts`, `…/[invitationId]/resend/route.ts`, `_organization-invitations-panel.tsx` |
 | An invitation email still waiting for a retry when the invitation dies (F-100) | With a delivery provider configured and failing transiently (the invite answers `ok: true`, and the Email workspace shows the row `pending`), revoke the invitation, resend it, or delete its (otherwise empty) organization, then let the outbox drain run once the provider is back (`pnpm outbox:drain`, or the cron route after the row's retry time). The waiting email is not delivered: its row reads `failed` with `invitation_superseded: …` and the drain's summary counts it as `superseded`, not `failed`. After a resend only the fresh email arrives. An invitation left pending is delivered as before | `lib/email/outbox-worker.server.ts` (`invitationLinkState`), `lib/invitations.server.ts` |
-| Delete of a non-empty org | Blocked with **409** `organization_not_empty` (any membership, any status) | `api/administrator/organizations/[id]/route.ts:326`, `lib/admin/orgs.server.ts:107` |
+| Delete of a non-empty org | Blocked with **409** `organization_not_empty` (any membership, any status) | `api/administrator/organizations/[id]/route.ts:327`, `lib/admin/orgs.server.ts:107` |
 | Delete of an org with other dependents (roles, bindings, apps, **active** API keys or OAuth clients) | FK violation translated to **409** `organization_in_use`; the `.delete_blocked` audit row names the blocking constraint in `metadata.blockedBy`. Revoked API keys and OAuth clients no longer block: they are deleted with the org, in the same transaction (F-98) | `api/administrator/organizations/[id]/route.ts` (DELETE), `lib/admin/orgs.server.ts` (`deleteRevokedOrgCredentials`) |
-| Member / binding mutations | `POST`/`PATCH`/`DELETE` on members and bindings require `admin.orgs.update` (NOT `.delete`, NOT `.manage`); **creating** a binding additionally requires a Superadmin (F-04) | `api/administrator/organizations/[id]/members/route.ts:123,239,340`, `.../provider-bindings/route.ts:113,207` |
+| Member / binding mutations | `POST`/`PATCH`/`DELETE` on members and bindings require `admin.orgs.update` (NOT `.delete`, NOT `.manage`); **creating** a binding additionally requires a Superadmin (F-04) | `api/administrator/organizations/[id]/members/route.ts:225,351,488`, `.../provider-bindings/route.ts:201,314` |
 
 > `TODO: verify` — the catalog defines `admin.orgs.manage` ("Manage organization members and bindings", `lib/admin/permissions.ts:49`) but **no page guard or API route references it**; member and binding mutations gate on `admin.orgs.update` instead. Confirm with product whether `admin.orgs.manage` is intended to gate the Members/Providers write actions (currently dead), or is reserved for future use. A holder of only `admin.orgs.manage` (without `.update`) can read but cannot mutate members/bindings today.
 
@@ -62,7 +62,7 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 
 Notes:
 
-- The **Limited Admin** persona (`admin` role) is the partial-permission control: it holds `admin.users.read`, `admin.users.manage`, `admin.audit.read` only (`src/db/seeds/dev-init.ts:249`), so it reaches the console but the entire tenancy area (list, memberships, detail, new) returns **404** because it lacks `admin.orgs.read`/`create`. The nav never shows the Organizations or Memberships links to it (`administrator-navigation.ts:125,132`).
+- The **Limited Admin** persona (`admin` role) is the partial-permission control: it holds `admin.users.read`, `admin.users.manage`, `admin.audit.read` only (`src/db/seeds/dev-init.ts:260`), so it reaches the console but the entire tenancy area (list, memberships, detail, new) returns **404** because it lacks `admin.orgs.read`/`create`. The nav never shows the Organizations or Memberships links to it (`administrator-navigation.ts:128,135`).
 - The **New organization** action button (on the list and in the top menubar's Tenancy menu) and the per-row **Delete** button are *hidden* (not disabled) unless the caller is a Superadmin holding `admin.orgs.create` / `admin.orgs.delete` (F-66). An Org Admin (`admin.platform`) holds both keys, but the API refuses both writes to anyone without cross-org reach, so neither is offered to them.
 - Links to other areas follow the destination page's guard (F-67): a member's name links to the user page only for a holder of `admin.users.read`, and the invite dialog lists roles only for a holder of `admin.roles.read` (otherwise it invites without a role). Without the permission the name is plain text.
 
@@ -93,11 +93,11 @@ Seed data you can rely on: default org has `slug` `default` and `is_default = tr
 
 ### UAT-ADMIN-ORG-LIST — Organizations list
 
-- Route: `/app/administrator/organizations`  ·  Example URL: `/en/app/administrator/organizations`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/page.tsx:22`
+- Route: `/app/administrator/organizations`  ·  Example URL: `/en/app/administrator/organizations`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/page.tsx:31`
 - Purpose: Paginated table of organizations with member counts. The entry point into per-org administration; the "New organization" call-to-action lives here for a Superadmin.
 - Guard / who can access: `admin.orgs.read` (server-revalidated on top of the layout's any-admin gate). `resolveOrgScope` then bounds the rows: Superadmin sees every org, Org Admin sees only their one org, a null scope yields an empty list.
 - Access matrix: Visitor / Pending / Member / Limited Admin -> cannot see (404 / redirect). Org Admin -> sees their row only, no "New" button. Superadmin -> sees all rows plus "New organization" and per-row "Delete".
-- Preconditions & test data: seeded via `pnpm db:seed:dev` (orgs `org-a/b/c`). Columns rendered: slug (link), name, status, default flag, member count, created date (`_organizations-grid.tsx:94`).
+- Preconditions & test data: seeded via `pnpm db:seed:dev` (orgs `org-a/b/c`). Columns rendered: slug (link), name, status, default flag, member count, created date (`_organizations-grid.tsx:92`).
 
 User stories
 
@@ -150,10 +150,10 @@ User stories
 
 Negative & edge cases (each a short numbered check)
 
-1. Out-of-scope: as `orgadmin@orgb.local`, the list shows only `org-b`; no way to surface `org-a` via search or filter (server scope, `route.ts:49`).
+1. Out-of-scope: as `orgadmin@orgb.local`, the list shows only `org-b`; no way to surface `org-a` via search or filter (server scope, `route.ts:54`).
 2. Empty state: an Org Admin whose org has no rows to match a filter sees the grid's empty-state message, not an error.
 3. Loading: on a slow network, a loading skeleton renders before rows appear.
-4. Inline error: if the list endpoint fails, an inline error with `role="alert"` appears; the delete-row error path shows the same alert region (`_organizations-grid.tsx:180`).
+4. Inline error: if the list endpoint fails, an inline error with `role="alert"` appears; the delete-row error path shows the same alert region (`_organizations-grid.tsx:182`).
 5. Pagination: default page size is 25 (`_organizations-grid.tsx:192`); with fewer rows, no pager controls are needed.
 
 Accessibility: reach and operate the table (search, filters, sort, the slug link, the Delete button) by keyboard only; focus is visible; the inline error region is announced (`role="alert"`).
@@ -163,9 +163,9 @@ i18n: run in `en` and `uk`/`ja`; column headers, status badges, the "New organiz
 
 ### UAT-ADMIN-ORG-NEW — Create organization
 
-- Route: `/app/administrator/organizations/new`  ·  Example URL: `/en/app/administrator/organizations/new`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/new/page.tsx:14`
+- Route: `/app/administrator/organizations/new`  ·  Example URL: `/en/app/administrator/organizations/new`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/new/page.tsx:17`
 - Purpose: Form to create a new organization (tenant): slug, name, and an optional "make default" flag. Creating a tenant is a platform-level action.
-- Guard / who can access: page requires `admin.orgs.create` **and** a Superadmin, the same authority as the **SUPERADMIN-only** `POST` (`api/administrator/organizations/route.ts:158`, F-66). So only a Superadmin ever reaches and successfully submits this form.
+- Guard / who can access: page requires `admin.orgs.create` **and** a Superadmin, the same authority as the **SUPERADMIN-only** `POST` (`api/administrator/organizations/route.ts:159`, F-66). So only a Superadmin ever reaches and successfully submits this form.
 - Access matrix: Visitor / Pending / Member / Limited Admin -> cannot open (404; no `admin.orgs.create`). Org Admin -> cannot open (404: holds `admin.orgs.create` but is not a Superadmin, F-66). Superadmin -> can open and submit.
 - Preconditions & test data: signed in as `superuser@orga.local`. Shared schema `createOrganizationSchema` (`lib/validation/organizations.ts:16`): slug required, lowercase, matches the slug pattern, max 64; name required, max 200; `isDefault` optional.
 
@@ -208,11 +208,11 @@ i18n: in `uk`/`ja`, field labels, the slug help text, validation messages, and t
 
 ### UAT-ADMIN-ORG-DETAIL — Organization detail (Members / Providers / Authentication / Settings)
 
-- Route: `/app/administrator/organizations/[orgId]`  ·  Example URL: `/en/app/administrator/organizations/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/[orgId]/page.tsx:27`
-- Purpose: Per-organization admin surface. Header shows name, slug, status badge, and a "default" badge. Four tabs: **Members** (paginated memberships, add/remove, plus the **invitations** panel — invite by email + optional role, resend, revoke), **Providers** (provider bindings: list and unbind; binding is Superadmin-only via the API, F-04), **Authentication** (the per-org sign-up policy — email verification, approval mode incl. invite-only, allowed methods, auto-approve domains, 0007), **Settings** (edit slug/name/status/default — Superadmin only).
-- Guard / who can access: `admin.orgs.read`; the `orgId` must be a valid UUID (else 404); and `canAccessOrg` must pass — a foreign org returns `notFound()` (404, **not** 403) so its existence is not leaked (`page.tsx:38,54`). Members, invitations and the Authentication policy are editable when `canUpdate` (`admin.orgs.update`) is held. The Settings form writes the organization record, which is SUPERADMIN-only, so it is editable only for a Superadmin holding `admin.orgs.update` (`canEditSettings`, F-66). A member's name links to the user page only for a holder of `admin.users.read`, and the invite dialog offers a role only to a holder of `admin.roles.read` (F-67).
+- Route: `/app/administrator/organizations/[orgId]`  ·  Example URL: `/en/app/administrator/organizations/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/[orgId]/page.tsx:55`
+- Purpose: Per-organization admin surface. Header shows name, slug, status badge, and a "default" badge. Four tabs: **Members** (paginated memberships, add/remove, plus the **invitations** panel — invite by email + optional role, resend, revoke), **Providers** (provider bindings: list and unbind; binding is Superadmin-only via the API, F-04), **Authentication** (the per-org sign-up policy — email verification, approval mode incl. invite-only, allowed methods, auto-approve domains), **Settings** (edit slug/name/status/default — Superadmin only).
+- Guard / who can access: `admin.orgs.read`; the `orgId` must be a valid UUID (else 404); and `canAccessOrg` must pass — a foreign org returns `notFound()` (404, **not** 403) so its existence is not leaked (`page.tsx:66,82`). Members, invitations and the Authentication policy are editable when `canUpdate` (`admin.orgs.update`) is held. The Settings form writes the organization record, which is SUPERADMIN-only, so it is editable only for a Superadmin holding `admin.orgs.update` (`canEditSettings`, F-66). A member's name links to the user page only for a holder of `admin.users.read`, and the invite dialog offers a role only to a holder of `admin.roles.read` (F-67).
 - Access matrix: Visitor / Pending / Member / Limited Admin -> 404. Org Admin -> can view + manage Members/Invitations/Authentication and view/unbind Providers for their own org (binding is 403, F-04); the Settings form is read-only (F-66); a foreign `orgId` returns 404. Superadmin -> full access to any org including Settings and the platform sign-up defaults.
-- Preconditions & test data: use an org UUID from the list. ORG A has members `user1..5@orga.local` plus cross-org `multi1..3@shared.local`. Member statuses: active / pending_approval / blocked / suspended (`members/route.ts:118`).
+- Preconditions & test data: use an org UUID from the list. ORG A has members `user1..5@orga.local` plus cross-org `multi1..3@shared.local`. Member statuses: active / pending_approval / blocked / suspended (`members/route.ts:217`).
 
 User stories
 
@@ -236,7 +236,7 @@ User stories
     | 1 | As `orgadmin@orga.local`, open `org-a` → **Members**. | Members are listed, each with a **Remove** button (because you hold `admin.orgs.update`). |
     | 2 | Click **Remove** on a `user5@orga.local` row. | A destructive confirm dialog appears naming the user. |
     | 3 | Confirm the removal. | The dialog closes, the grid refreshes, and the `user5` row is gone. |
-    | 4 | If the remove fails server-side, observe the alert. | An inline error `role="alert"` with the localized "remove error" message is shown (`_organization-members-grid.tsx:131`). |
+    | 4 | If the remove fails server-side, observe the alert. | An inline error `role="alert"` with the localized "remove error" message is shown (`_organization-members-grid.tsx:135`). |
     | 5 | As the Superadmin, open `user5`'s detail → **Roles** and **Groups**. | Nothing from `org-a` is listed (F-12). Any role or group `user5` holds in another org is still there. |
     | 6 | Add `user5` back to `org-a` (`POST .../members`), then re-open **Roles** and **Groups**. | Still nothing from `org-a`: the old roles and groups did not come back. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -314,7 +314,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-ORG-DETAIL-S5 — As an Org Admin, I want the Settings form to be read-only for me, so that I am not offered edits to an org record only a Superadmin may change.
-  - Acceptance criteria: Given I am an Org Admin on my org's Settings tab, then every field and the Save button are disabled, even though I hold `admin.orgs.update` (F-66), while the Members, Invitations and Authentication controls stay usable. A `PATCH` sent anyway is refused with **403** and the record is unchanged (SUPERADMIN-only, `[id]/route.ts:125`).
+  - Acceptance criteria: Given I am an Org Admin on my org's Settings tab, then every field and the Save button are disabled, even though I hold `admin.orgs.update` (F-66), while the Members, Invitations and Authentication controls stay usable. A `PATCH` sent anyway is refused with **403** and the record is unchanged (SUPERADMIN-only, `[id]/route.ts:133`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -332,18 +332,18 @@ User stories
     | 1 | As `superuser@orga.local`, open **Organizations**, click `org-b`, and copy its URL (contains ORG B's UUID). | You have a valid ORG B detail URL. |
     | 2 | Sign out and sign in as `orgadmin@orga.local`. | You are the ORG A Org Admin. |
     | 3 | Paste and open the ORG B detail URL. | A **Not Found (404)** page appears — **not** a "Forbidden" page. |
-    | 4 | Open `/en/app/administrator/organizations/not-a-uuid`. | A **Not Found (404)** page appears (invalid id short-circuits, `page.tsx:38`). |
+    | 4 | Open `/en/app/administrator/organizations/not-a-uuid`. | A **Not Found (404)** page appears (invalid id short-circuits, `page.tsx:66`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
 
-1. Cross-tenant 404 (not 403): a foreign `orgId` returns Not Found for the page and a 404 envelope for the members/providers endpoints (`members/route.ts:54`, `provider-bindings/route.ts:53`).
+1. Cross-tenant 404 (not 403): a foreign `orgId` returns Not Found for the page and a 404 envelope for the members/providers endpoints (`members/route.ts:154`, `provider-bindings/route.ts:46`).
 2. Invalid id: a non-UUID `orgId` returns 404 on the page and `invalid_id` (400) on the API.
 3. Settings required validation: clearing Slug or Name shows the `*` marker, a red border, and a localized "required" message; Slug also enforces the lowercase slug pattern.
-4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:138`).
+4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:151`).
 5. Member add errors: adding a non-existent `appUserId` returns `user_not_found` (404); adding an existing membership returns `membership_exists` (409).
-6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, or is not a Superadmin (F-66), every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:162,269`).
-7. Rate-limit: rapid member/binding mutations hit the admin mutation limit and return a friendly rate-limited response (`members/route.ts:126`).
+6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, or is not a Superadmin (F-66), every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:175,283`).
+7. Rate-limit: rapid member/binding mutations hit the admin mutation limit and return a friendly rate-limited response (`members/route.ts:228`).
 8. Removing a member whose roles or groups in the org confer a permission the caller cannot confer is refused with **403** `forbidden` and an `admin.membership.revocation_denied` audit row, and nothing is removed (REVOKE-1, F-12). An Org Admin at a browser is normally stopped earlier by the rank guard; the case to try is a bearer key scoped only to `admin.orgs.update`, removing a member who holds an `admin.*` role. The same key removes a plain member (`user1..5`, the `member` role) with **200**: `shell.view` goes with the membership and is not measured.
 9. Invitation refusals name their reason (F-156): inviting with a role that confers a permission you cannot confer shows "You do not have permission to perform this action." (403 `forbidden`); a role deleted after the dialog listed it shows "Role not found." under **Role**; the rate limit shows its own message. **Resend** or **Revoke** on a row that another browser revoked meanwhile shows "Invitation not found." and the list reloads to show the row as it is now. A dropped connection shows the resend or revoke error instead of doing nothing. Only a server fault (5xx) keeps the generic "Could not send / resend / revoke" text.
 10. A tab switch keeps unsaved edits (F-158): as a Superadmin (Settings is read-only for anyone else, F-66), on **Settings** change the name without saving (or on **Authentication** click Customize and untick a box), open **Members**, come back: the edit is still there and nothing was saved.
@@ -357,9 +357,9 @@ i18n: in `uk`/`ja`, tab labels (Members / Providers / Settings), status options,
 
 - Route: `/app/administrator/memberships`  ·  Example URL: `/en/app/administrator/memberships`  ·  Code: `src/app/[locale]/(secure)/app/administrator/memberships/page.tsx:16`
 - Purpose: A read/search surface across all memberships (org × user), so an operator can answer "which orgs is this user in?" and "who is in this org?" from one place, pivoting to either the org or the user detail.
-- Guard / who can access: `admin.orgs.read`. Rows are org-scoped by `resolveOrgScope`: Superadmin sees every membership; Org Admin sees only their org's memberships; a null scope returns an empty list (`api/administrator/memberships/route.ts:32,50`). This screen is **read-only** — there are no mutation actions on it.
+- Guard / who can access: `admin.orgs.read`. Rows are org-scoped by `resolveOrgScope`: Superadmin sees every membership; Org Admin sees only their org's memberships; a null scope returns an empty list (`api/administrator/memberships/route.ts:34,53`). This screen is **read-only** — there are no mutation actions on it.
 - Access matrix: Visitor / Pending / Member / Limited Admin -> 404. Org Admin -> their org's memberships only. Superadmin -> all memberships across orgs.
-- Preconditions & test data: `pnpm db:seed:dev`. Cross-org members `multi1..3@shared.local` each appear three times (once per org) for a Superadmin. Columns: organization (link), user (a link for a holder of `admin.users.read`, plain text otherwise, F-67), status, source, created date (`_memberships-grid.tsx:38`).
+- Preconditions & test data: `pnpm db:seed:dev`. Cross-org members `multi1..3@shared.local` each appear three times (once per org) for a Superadmin. Columns: organization (link), user (a link for a holder of `admin.users.read`, plain text otherwise, F-67), status, source, created date (`_memberships-grid.tsx:45`).
 
 User stories
 
@@ -398,10 +398,10 @@ User stories
 
 Negative & edge cases
 
-1. Out-of-scope: as `orgadmin@orgb.local`, no `org-a`/`org-c` rows appear regardless of search or the org filter (server scope, `route.ts:50`).
+1. Out-of-scope: as `orgadmin@orgb.local`, no `org-a`/`org-c` rows appear regardless of search or the org filter (server scope, `route.ts:53`).
 2. Empty state: a search with no matches shows the grid's empty-state message.
 3. Loading: a skeleton renders before rows load.
-4. Filters: the Status filter offers active / pending_approval / blocked / suspended (`_memberships-grid.tsx:13`); an unmatched filter yields the empty state, not an error.
+4. Filters: the Status filter offers active / pending_approval / blocked / suspended (`_memberships-grid.tsx:102`); an unmatched filter yields the empty state, not an error.
 5. Read-only: there are no Add/Remove/Edit controls on this screen; membership changes happen on the org detail Members tab.
 
 Accessibility: operate search, the status filter, sorting, and the org/user links by keyboard; focus is visible; the empty state and any error are announced.
@@ -453,7 +453,7 @@ Legend: `see` = screen renders with data; `act` = at least one write action succ
 
 ## TODO: verify
 
-1. `admin.orgs.manage` is defined in the catalog (`lib/admin/permissions.ts:49`, `admin-manager.md:232`, migration `0001-initial-schema.sql:456`) but is referenced by **no page guard or API route**. Members/bindings mutations gate on `admin.orgs.update`. Confirm whether `.manage` is intended to gate those writes (currently dead) or is reserved for future use — a holder of only `.manage` can read but not mutate today.
-2. UI/permission edge: the per-row **Delete** button on the list is shown to any holder of `admin.orgs.delete` (which `admin.platform` / Org Admin holds), yet the `DELETE` is SUPERADMIN-only and returns 403. Confirm intended behaviour — the button arguably should be hidden for non-superadmins, or the 403 should surface a clearer inline message (currently the grid falls through to the generic delete-error text; there is no dedicated `forbidden` mapping in `_organizations-grid.tsx:72-88`).
+1. `admin.orgs.manage` is defined in the catalog (`lib/admin/permissions.ts:49`, `admin-manager.md:232`, migration `0001-initial-schema.sql:462`) but is referenced by **no page guard or API route**. Members/bindings mutations gate on `admin.orgs.update`. Confirm whether `.manage` is intended to gate those writes (currently dead) or is reserved for future use — a holder of only `.manage` can read but not mutate today.
+2. UI/permission edge: the per-row **Delete** button on the list is shown to any holder of `admin.orgs.delete` (which `admin.platform` / Org Admin holds), yet the `DELETE` is SUPERADMIN-only and returns 403. Confirm intended behaviour — the button arguably should be hidden for non-superadmins, or the 403 should surface a clearer inline message (currently the grid falls through to the generic delete-error text; there is no dedicated `forbidden` mapping in `_organizations-grid.tsx:70-86`).
 3. There is no dedicated "add member" / "bind provider" **dialog** described in the UI components read; the Members/Providers grids expose Remove and rely on the `POST` endpoints for create. Verify how a tester triggers an add in the running app (dedicated add form vs. API), and update steps UAT-ADMIN-ORG-DETAIL-S1 / S3 accordingly.
 4. Confirm the exact create-form submit button label rendered by `t("new.submit")` and the Members "add" affordance labels in the running app, in case the message catalog differs from the assumed "Create" / "Add member".

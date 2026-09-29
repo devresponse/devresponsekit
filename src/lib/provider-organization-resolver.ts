@@ -15,9 +15,9 @@ import { DEFAULT_ORGANIZATION_PROVIDER_KEY } from "@/lib/default-organization";
  * spawned GUID-slugged organizations from raw tenant ids.
  *
  * The supported ways to place a sign-up in a specific organization are all
- * admin-curated and already live: a live invitation (0008), an
+ * admin-curated and already live: a live invitation, an
  * organization-scoped sign-up hint (`/sign-in/<org>`), and the email-domain
- * mapping in `app_provider_organizations` (0007). Tenant-claim routing can be
+ * mapping in `app_provider_organizations`. Tenant-claim routing can be
  * reintroduced on top of that curated table — where an unmatched tenant id
  * resolves to nothing instead of creating an organization — if an operator
  * ever asks for it.

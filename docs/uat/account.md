@@ -18,8 +18,8 @@ Seed the personas with the development fixture, then sign in at the base URL.
 
 - Base URL: `http://localhost:3000` (dev). All routes are locale-prefixed, e.g. `/en/app/dashboard`.
 - Seed: run `pnpm db:seed:dev` (source: `src/db/seeds/dev-init.ts`). This creates three orgs (`ORG A` / `ORG B` / `ORG C`, domains `orga.local` / `orgb.local` / `orgc.local`) and, per org, the accounts `superuser@<domain>`, `orgadmin@<domain>`, and `user1..5@<domain>`, plus three cross-org members `multi1..3@shared.local`.
-- Reset: `pnpm db:reset:reload` re-provisions and reseeds (`src/db/seeds/dev-init.ts:747` refuses to run under `NODE_ENV=production`).
-- Password: every seeded account shares one password, `DevPassword123!` (override with `DEV_SEED_PASSWORD`; `src/db/seeds/dev-init.ts:52`).
+- Reset: `pnpm db:reset:reload` re-provisions and reseeds (`src/db/seeds/dev-init.ts:768` refuses to run under `NODE_ENV=production`).
+- Password: every seeded account shares one password, `DevPassword123!` (override with `DEV_SEED_PASSWORD`; `src/db/seeds/dev-init.ts:62`).
 - Locales to test: `en` plus one non-Latin locale — use `uk` (Ukrainian) or `ja` (Japanese).
 
 Persona-to-account map for this area:
@@ -27,7 +27,7 @@ Persona-to-account map for this area:
 | Persona | Seed account | Role / state |
 |---|---|---|
 | Member | `user5@orga.local` | `member` (USER) — secure-shell self-service, no admin |
-| Limited Admin | `user1@orga.local` | `member` **plus** the `admin` role conferred by the Engineering group (`src/db/seeds/dev-init.ts:141`) |
+| Limited Admin | `user1@orga.local` | `member` **plus** the `admin` role conferred by the Engineering group (`src/db/seeds/dev-init.ts:151`) |
 | Org Admin | `orgadmin@orga.local` | `admin.platform` — full `admin.*` within ORG A |
 | Superadmin | `superuser@orga.local` | `superuser` — every org |
 | Multi-org member | `multi1@shared.local` | `member` in all three orgs (exercises the org switcher) |
@@ -35,9 +35,9 @@ Persona-to-account map for this area:
 | Pending user | a freshly self-signed-up account | `pending_approval` |
 | Blocked user | an admin-blocked account | `blocked` / `suspended` |
 
-Everything under `/[locale]/app/**` is guarded by the secure layout `SecureLayout` (`src/app/[locale]/(secure)/layout.tsx:56`), which calls `requireSecureSession` (`src/lib/auth-guard.ts:55`). That helper redirects: no session → `/{locale}/sign-in?returnTo=…`; status pending → `/{locale}/pending-approval`; status blocked/suspended → `/{locale}/blocked`. By the time any page in this area renders, the caller is guaranteed an `active` user with an `active` membership. The `returnTo` is the page that was requested, path and query, as the proxy stamped it (F-70), so a deep link survives the sign-in bounce even when the browser still holds a revoked or expired session cookie. The Account, Docs and Help pages call `requireSecureSession` a second time; the section root each one passes is only the fallback for when the requested page is unavailable.
+Everything under `/[locale]/app/**` is guarded by the secure layout `SecureLayout` (`src/app/[locale]/(secure)/layout.tsx:60`), which calls `requireSecureSession` (`src/lib/auth-guard.ts:181`). That helper redirects: no session → `/{locale}/sign-in?returnTo=…`; status pending → `/{locale}/pending-approval`; status blocked/suspended → `/{locale}/blocked`. By the time any page in this area renders, the caller is guaranteed an `active` user with an `active` membership. The `returnTo` is the page that was requested, path and query, as the proxy stamped it (F-70), so a deep link survives the sign-in bounce even when the browser still holds a revoked or expired session cookie. The Account, Docs and Help pages call `requireSecureSession` a second time; the section root each one passes is only the fallback for when the requested page is unavailable.
 
-The Account write surface is strictly self-scoped: the API guard `requireAccountUser` (`src/lib/account/guard.server.ts:48`) exposes only the caller's own `appUserId`, and every route scopes its writes to it — no id is ever read from the request body. There is therefore no cross-tenant read/write to exercise in Account except the API-key `[id]` routes, which return **404 (not 403)** for a key that is not the caller's own (`src/app/api/v1/me/api-keys/[id]/route.ts:44`).
+The Account write surface is strictly self-scoped: the API guard `requireAccountUser` (`src/lib/account/guard.server.ts:311`) exposes only the caller's own `appUserId`, and every route scopes its writes to it — no id is ever read from the request body. There is therefore no cross-tenant read/write to exercise in Account except the API-key `[id]` routes, which return **404 (not 403)** for a key that is not the caller's own (`src/app/api/v1/me/api-keys/[id]/route.ts:56`).
 
 ---
 
@@ -116,12 +116,12 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-- Pending user → `/app/dashboard` redirects to `pending-approval`; Blocked user → `blocked` (both via the layout guard, `src/lib/auth-guard.ts:67`).
+- Pending user → `/app/dashboard` redirects to `pending-approval`; Blocked user → `blocked` (both via the layout guard, `src/lib/auth-guard.ts:196`).
 - No empty/loading/error state applies — the page is static text.
 - Switching organization is a full page reload (F-68) → setup: as `orgadmin@orga.local`, open `/en/app/administrator/users` → **Shared Member One** (`multi1@shared.local`) → **Roles** and assign ORG A's **Administrator** (`admin`) role, so `multi1` is an admin in ORG A and a plain member in ORG B. Sign in as `multi1@shared.local`, switch to ORG A and open `/en/app/dashboard`: the sidebar lists **Administration**, **Users** and **Audit log**. With DevTools → Network open, choose **ORG B** in the brand-bar switcher. Network shows a new `document` request for `/en/app/dashboard` (a full reload, not only a fetch), and the sidebar no longer lists those three entries, with no manual reload. Switching back to ORG A brings them back the same way. Before the fix only the server-rendered parts changed: the sidebar kept the previous org's entries, and in ORG B each one led to a 404. If the switch request fails (DevTools → Network → Offline), the page stays on the current org instead of showing an error screen. Remove the role afterwards.
 - Breakpoint (F-36): "narrow" is one breakpoint, 48rem (768 px at the default font size), shared by the shell CSS, the drawer logic and Tailwind's `md` (`src/lib/breakpoints.ts`). It used to be one pixel apart: at exactly 768 px the sidebar was hidden and the button only collapsed it, so there was no way to the navigation. The breakpoint follows the browser's default font size: with a 20 px default font it moves to 960 px, so run steps 4–5 at 960 px and 959 px instead.
 
-Accessibility: One `<h1>`; keyboard focus lands on the shell skip-links first (`ShellSkipLinks`, `src/app/[locale]/(secure)/layout.tsx:75`). No axe violations expected on this minimal page.
+Accessibility: One `<h1>`; keyboard focus lands on the shell skip-links first (`ShellSkipLinks`, `src/app/[locale]/(secure)/layout.tsx:99`). No axe violations expected on this minimal page.
 i18n: The heading uses the `shell.dashboard` message; in `uk`/`ja` it must be translated, not a raw key. The welcome line is currently hardcoded English (`src/app/[locale]/(secure)/app/dashboard/page.tsx:17`) — flag this as a known non-localized string.
 
 ### UAT-ACCOUNT-WORKSPACE — Workspace
@@ -215,7 +215,7 @@ i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the sta
 
 - Route: `/app/account/profile`  ·  Example URL: `/en/app/account/profile`  ·  Code: `src/app/[locale]/(secure)/app/account/profile/page.tsx:18`
 - Purpose: Edit the caller's **Name** (Better Auth `user.name`) and optional **Display name** (app-side). Email is shown read-only — changing it is a future verified flow (`src/app/[locale]/(secure)/app/account/profile/page.tsx:11`).
-- Guard / who can access: `requireSecureSession`; `notFound()` if no `appUserId` or profile row (`src/app/[locale]/(secure)/app/account/profile/page.tsx:27`). The write endpoint `PATCH /api/account/profile` is self-scoped via `requireAccountUser` (no scope required for a cookie session; `src/app/api/account/profile/route.ts:27`).
+- Guard / who can access: `requireSecureSession`; `notFound()` if no `appUserId` or profile row (`src/app/[locale]/(secure)/app/account/profile/page.tsx:27`). The write endpoint `PATCH /api/account/profile` is self-scoped via `requireAccountUser` (no scope required for a cookie session; `src/app/api/account/profile/route.ts:58`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away.
   - Member / Limited Admin / Org Admin / Superadmin: each edits **their own** profile only.
@@ -248,9 +248,9 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-- Server rejects a malformed body with 400 → the form shows the localized "Please check the form and try again." (`account.errors.invalid`); other failures show "Saving your changes failed. Please try again." (`src/app/[locale]/(secure)/app/account/profile/_profile-form.tsx:60`).
+- Server rejects a malformed body with 400 → the form shows the localized "Please check the form and try again." (`account.errors.invalid`); other failures show "Saving your changes failed. Please try again." (`src/app/[locale]/(secure)/app/account/profile/_profile-form.tsx:81`).
 - Whitespace-only Name is trimmed to empty and rejected (`validation.required`, the shared name rule in `src/lib/user-name.ts`). Several spaces in a row are saved as one; a single full-width space typed by a Japanese or Chinese input method (U+3000) is saved as typed.
-- The Better Auth name write is attempted first; if it fails the API returns 502 and no display-name write happens (`src/app/api/account/profile/route.ts:59`). `TODO: verify` there is a UI way to trigger 502 in test (may need to stub Better Auth).
+- The Better Auth name write is attempted first; if it fails the API returns 502 and no display-name write happens (`src/app/api/account/profile/route.ts:125`). `TODO: verify` there is a UI way to trigger 502 in test (may need to stub Better Auth).
 - No id is accepted from the client — you cannot edit another user's profile (self-scoped by session).
 - While an admin is **impersonating** the user, the save is allowed (a routine support action), but the `account.profile.updated` audit row names the **admin** as the actor, with the user's id in `metadata.impersonatedBetterAuthUserId` (F-07). The rate limit is charged to the admin.
 
@@ -266,7 +266,7 @@ i18n: Field labels (`account.fields.*`), the required legend, and validation mes
   - Visitor / Pending / Blocked: redirected away.
   - Member / Limited Admin / Org Admin / Superadmin: each edits **their own** preferences.
 - Preconditions & test data: Sign in as `user5@orga.local`.
-- Controls (`_preferences-form.tsx`, validated by `updatePreferencesSchema`, `src/lib/validation/account.ts:23`):
+- Controls (`_preferences-form.tsx`, validated by `updatePreferencesSchema`, `src/lib/validation/account.ts:52`):
   - **Language** — select of the 8 supported locales (`preferredLocale`, must be supported).
   - **Time zone** — select including **System default (zone)** (empty; the option names the deployment's zone, `deploymentTimeZone`) plus IANA zones from the runtime; validated by the engine (`isValidTimeZone`).
   - **Date format** — one of System default / ISO 8601 / US / European / Long (`DATE_FORMAT_OPTIONS`, `src/lib/account/preferences.ts:15`).
@@ -320,7 +320,7 @@ i18n: Language option labels use `account.locales.*`; date-format labels use `ac
   - Visitor / Pending / Blocked: redirected away.
   - Member / Limited Admin / Org Admin / Superadmin: each manages **their own** password and sessions; there is no way to act on another account.
 - Preconditions & test data: Sign in as `user5@orga.local`; to test "sign out other sessions", first sign in on a second browser/device with the same account.
-- Password fields (`_password-form.tsx`, validated by `changePasswordSchema`, `src/lib/validation/account.ts:38`): **Current password** (required), **New password** (min 8 / max 128), **Confirm new password** (must match). On success `revokeOtherSessions: true` signs out other devices.
+- Password fields (`_password-form.tsx`, validated by `changePasswordSchema`, `src/lib/validation/account.ts:67`): **Current password** (required), **New password** (min 8 / max 128), **Confirm new password** (must match). On success `revokeOtherSessions: true` signs out other devices.
 
 User stories
 
@@ -366,7 +366,7 @@ i18n: Section titles (`account.security.*`), the confirmation, and validation me
 
 - Route: `/app/account/api-keys`  ·  Example URL: `/en/app/account/api-keys`  ·  Code: `src/app/[locale]/(secure)/app/account/api-keys/page.tsx:24`
 - Purpose: Self-service management of the caller's **own** API keys — create, rotate, and revoke — through the `/api/v1/me/api-keys` surface, which is inherently self-scoped to the session principal (`src/app/[locale]/(secure)/app/account/api-keys/page.tsx:9`). Secrets are shown exactly once.
-- Guard / who can access: `requireSecureSession`. The grantable-scope list is computed from the caller's own authority: all `account.*` scopes are always self-grantable, plus any admin permission the caller happens to hold (`src/app/[locale]/(secure)/app/account/api-keys/page.tsx:33`). The create/rotate/revoke API requires the `account.apikeys.manage` scope for bearer callers; a cookie session passes unconditionally (`src/app/api/v1/me/api-keys/route.ts:54`).
+- Guard / who can access: `requireSecureSession`. The grantable-scope list is computed from the caller's own authority: all `account.*` scopes are always self-grantable, plus any admin permission the caller happens to hold (`src/app/[locale]/(secure)/app/account/api-keys/page.tsx:33`). The create/rotate/revoke API requires the `account.apikeys.manage` scope for bearer callers; a cookie session passes unconditionally (`src/app/api/v1/me/api-keys/route.ts:86`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away.
   - Member: can create keys carrying `account.*` scopes only (they hold no admin permissions), and manage their own keys.
@@ -406,16 +406,16 @@ User stories
     |---|---|---|
     | 1 | Sign in as `user5@orga.local` (no admin permissions). | Only `account.*` scopes appear in the Scopes list. |
     | 2 | Confirm no `admin.*` scope is offered in the checkbox list. | The picker itself omits scopes you cannot grant. |
-    | 3 | `TODO: verify` (developer path) submit a POST to `/api/v1/me/api-keys` with an `admin.users.read` scope. | The API responds 403 and the form shows "You can't grant these scopes: admin.users.read" (`account.apiKeys.create.invalidScope`, `src/app/api/v1/me/api-keys/route.ts:85`). |
+    | 3 | `TODO: verify` (developer path) submit a POST to `/api/v1/me/api-keys` with an `admin.users.read` scope. | The API responds 403 and the form shows "You can't grant these scopes: admin.users.read" (`account.apiKeys.create.invalidScope`, `src/app/api/v1/me/api-keys/route.ts:128`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-- Out-of-scope access: revoking/rotating a key that is not yours returns **404, not 403** (so other users' key ids are not leaked; `src/app/api/v1/me/api-keys/[id]/route.ts:44`). A non-UUID id returns 400.
-- Empty name → the form blocks submit with "Enter a name." (`_api-keys-panel.tsx:270`).
+- Out-of-scope access: revoking/rotating a key that is not yours returns **404, not 403** (so other users' key ids are not leaked; `src/app/api/v1/me/api-keys/[id]/route.ts:56`). A non-UUID id returns 400.
+- Empty name → the form blocks submit with "Enter a name." (`_api-keys-panel.tsx:275`).
 - Empty list → **You don't have any API keys yet.** First load shows two skeleton bars.
 - Load / create / rotate / revoke failures each show their localized error in `role="alert"` (`loadError` / `create.error` / `rotateError` / `revokeError`).
-- Rotating a non-active key returns 409 "Key is not active and cannot be rotated." (`src/app/api/v1/me/api-keys/[id]/rotate/route.ts:51`); the panel only offers Rotate on active keys, so this is an edge/tamper case.
-- Rate limit: create / rotate / revoke share a per-principal token bucket; exceeding it returns 429 with `Retry-After` (`src/app/api/v1/me/api-keys/route.ts:64`). `TODO: verify` the exact UI message on a client-side 429 (the panel maps non-OK create to the generic `create.error`).
+- Rotating a non-active key returns 409 "Key is not active and cannot be rotated." (`src/app/api/v1/me/api-keys/[id]/rotate/route.ts:119`); the panel only offers Rotate on active keys, so this is an edge/tamper case.
+- Rate limit: create / rotate / revoke share a per-principal token bucket; exceeding it returns 429 with `Retry-After` (`src/app/api/v1/me/api-keys/route.ts:100`). `TODO: verify` the exact UI message on a client-side 429 (the panel maps non-OK create to the generic `create.error`).
 
 Accessibility: The create form has labelled inputs and a `<fieldset>`/`<legend>` for scopes; the confirm dialogs are managed by the dialog manager (focus-trap + Esc — `TODO: verify` Esc closes each). The reveal dialog traps focus too, but on purpose only its **Done** button closes it: Esc, a click outside it and a corner close button would lose the one-time secret, so Esc and an outside click leave it open and it has no corner button (F-122, `src/components/api-keys/api-key-reveal.tsx`). Status is a labelled badge, not color alone.
 i18n: All labels/messages are under `account.apiKeys.*`; run in `uk`/`ja` and confirm the create form, list metadata (Created/Last used/Expires, Never/No expiry), status badges, and both dialogs localize; dates go through the app formatter (`useAppFormatter`, `_api-keys-panel.tsx:53`), so they follow the saved time zone and date format.
@@ -426,7 +426,7 @@ i18n: All labels/messages are under `account.apiKeys.*`; run in `uk`/`ja` and co
 
 The in-app docs viewer renders the same Markdown under `docs/` that this file lives in, filtered by visibility. It is frontmatter-driven: a document's `visibility`, `group`, `order`, and optional `requires` come from its YAML frontmatter, and the catalog is assembled and visibility-filtered server-side (`src/lib/docs/catalog.server.ts`).
 
-Key visibility rule (`filterCatalogForViewer`, `src/lib/docs/catalog.server.ts:35`): a doc marked `visibility: internal` is dropped unless the server env `DOCS_INTERNAL_VISIBLE` is truthy (default false; `src/lib/env.ts:176`); a doc with `requires` is dropped unless the viewer holds **all** listed permission keys. The same filter powers both the landing catalog and the per-article guard, so a hidden doc never appears and 404s if its URL is guessed.
+Key visibility rule (`filterCatalogForViewer`, `src/lib/docs/catalog.server.ts:35`): a doc marked `visibility: internal` is dropped unless the server env `DOCS_INTERNAL_VISIBLE` is truthy (default false; `src/lib/env.ts:558`); a doc with `requires` is dropped unless the viewer holds **all** listed permission keys. The same filter powers both the landing catalog and the per-article guard, so a hidden doc never appears and 404s if its URL is guessed.
 
 > Note for testers: because these UAT files are themselves `visibility: internal`, they are hidden in the viewer unless `DOCS_INTERNAL_VISIBLE=true` is set for the server. Use a public doc (e.g. the architecture guide) for the visible-catalog stories, and set `DOCS_INTERNAL_VISIBLE=true` only to exercise the internal-visibility path.
 
@@ -469,13 +469,13 @@ Negative & edge cases
 - No loading skeleton (server-rendered); no inline error surface on the landing.
 
 Accessibility: Each card is a focusable link with a visible focus ring (`focus-visible:ring-2`, `src/app/[locale]/(secure)/app/docs/page.tsx:48`); group headings are `<h2>`. Keyboard users can Tab card-to-card and activate with Enter.
-i18n: The landing title/description use `docs.index.*`; the empty line uses `docs.emptyCatalog`. Document titles/descriptions come from each file's frontmatter and are not translated per-locale — `TODO: verify` whether the catalog is localized or always English (the catalog cache is permission-keyed, not locale-keyed; `src/lib/docs/catalog.server.ts:77`). Run in `uk`/`ja` and confirm the page chrome localizes even if doc titles remain in their source language.
+i18n: The landing title/description use `docs.index.*`; the empty line uses `docs.emptyCatalog`. Document titles/descriptions come from each file's frontmatter and are not translated per-locale — `TODO: verify` whether the catalog is localized or always English (the catalog cache is permission-keyed, not locale-keyed; `src/lib/docs/catalog.server.ts:78`). Run in `uk`/`ja` and confirm the page chrome localizes even if doc titles remain in their source language.
 
 ### UAT-ACCOUNT-DOCS-ARTICLE — Documentation article
 
 - Route: `/app/docs/[...slug]`  ·  Example URL: `/en/app/docs/architecture`  ·  Code: `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:28`
 - Purpose: Renders a single document: breadcrumbs, the sanitized article body, an "On this page" table of contents, and a "Last updated" line. The body is rendered server-side through the sanitizing pipeline; document JavaScript is never evaluated (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:26`).
-- Guard / who can access: Layered — (1) `requireSecureSession`; (2) `getViewableDocument(slug, access.permissions)` → `notFound()` if the doc is hidden (internal-with-flag-off, or unmet `requires`), so a hidden doc 404s even if its URL is known. It checks the catalog entry before reading the file and the entry it read afterwards, so what renders is what was authorized (I-18); (3) the slug resolves through a path-safe resolver, and a traversal/missing slug returns null → `notFound()` (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:39`).
+- Guard / who can access: Layered — (1) `requireSecureSession`; (2) `getViewableDocument(slug, access.permissions)` → `notFound()` if the doc is hidden (internal-with-flag-off, or unmet `requires`), so a hidden doc 404s even if its URL is known. It checks the catalog entry before reading the file and the entry it read afterwards, so what renders is what was authorized (I-18); (3) the slug resolves through a path-safe resolver, and a traversal/missing slug returns null → `notFound()` (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:40`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away.
   - Member: can open any doc `getViewableDocument` allows (non-internal, no unmet `requires`); a hidden/unknown slug → 404.

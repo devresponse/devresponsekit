@@ -19,7 +19,7 @@ export default async function SignUpPage({
   const rawReturn = typeof sp.returnTo === "string" ? sp.returnTo : null;
   const returnTo = getSafeReturnToInLocale(rawReturn, safeLocale);
 
-  // Invitation-backed sign-up (0008): `?invite=<token>` pre-fills and locks
+  // Invitation-backed sign-up: `?invite=<token>` pre-fills and locks
   // the invited email and threads the token through the sign-up body so the
   // account lands active in the inviting org. An invalid/expired token
   // silently renders the normal form — nothing to leak, nothing to block.

@@ -38,7 +38,7 @@ import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
 import { ListLimitNotice } from "../../_components/list-limit-notice";
 
 /**
- * Invitations panel on the organization detail's Members tab (0008).
+ * Invitations panel on the organization detail's Members tab.
  *
  * Reuses the shared `DataGrid` over
  * `/api/administrator/organizations/:id/invitations`; the header hosts the

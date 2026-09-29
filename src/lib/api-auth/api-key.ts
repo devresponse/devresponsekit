@@ -39,7 +39,7 @@ export function looksLikeApiKey(token: string): boolean {
 
 /**
  * CSPRNG base62 secret. Exported for other single-use secrets that follow
- * the same hash-at-rest model (organization invitations, 0008).
+ * the same hash-at-rest model (organization invitations).
  */
 export function randomBase62(length: number): string {
   // Rejection-free mapping: draw a byte per char and fold into 62. The

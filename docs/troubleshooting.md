@@ -248,9 +248,14 @@ warrant a comms channel and an owner before deep debugging.
   ≈1/min/actor/scope) as `administrator.rate_limited` (outcome `denied`) — query
   by `actor_better_auth_user_id` / `ip_address` to find the source. Every denial
   also increments `devresponsekit_rate_limit_denials_total{scope}` (unsampled).
-- The limiter is in-memory per instance (single-instance is the supported 1.0
-  topology); a process restart resets buckets. A shared (Redis/Postgres) backend
-  is post-1.0 — see [deployment.md §5](./deployment.md#5-operations--gotchas).
+- Which store a 429 came from depends on the route. The pre-auth floors and the
+  admin mail budgets keep one budget in Postgres across every instance and
+  restart; only the authenticated per-actor and per-credential buckets (admin
+  mutations, the v1, account and preference self-service routes, MCP tool calls;
+  `src/lib/admin/rate-limit.server.ts`) are in-memory per instance and reset on
+  restart. Multi-instance (Vercel) is a supported topology: see
+  [deployment.md §5](./deployment.md#5-operations--gotchas), the one statement of
+  which limiter lives where (F-107).
 - Sign-in / password-reset floods hit Better Auth's built-in limiter (3 req / 10 s
   and 3 req / 60 s per client IP) on `/api/auth/*`. It keys on the same client IP
   as the app's limiters — the app-derived `x-drk-client-ip`, read from the header
@@ -631,9 +636,11 @@ instance, so under horizontal scaling its budget multiplies by the instance
 count — expected, and best-effort by design. The **pre-auth floors** (token
 endpoint, the MCP endpoint and MCP registration, CSP sink, SSO consume, a
 signed-out SSO launch, invitation acceptance) and Better Auth's sign-in limiter are Postgres-backed and
-MUST be consistent; if they are not, check
-`devresponsekit_rate_limit_shared_fallbacks_total` on `/api/metrics` and the log
-stream for `shared rate-limit backend unavailable` — the app floors fall back to
+MUST be consistent; if they are not, check the log stream for
+`shared rate-limit backend unavailable` and
+`devresponsekit_rate_limit_shared_fallbacks_total` on `/api/metrics` (on Vercel
+trust the log line: a scrape reaches one function instance, so a zero there
+proves nothing about the others) — the app floors fall back to
 per-instance buckets when `app_rate_limits` is missing (migration `0006` not
 applied) or the database is unreachable. See
 [deployment.md §5](./deployment.md#5-operations--gotchas).
@@ -653,9 +660,14 @@ outbox drain used up the tick's budget before retention started: check its
 
 ## Known risks & missing information
 
-- **In-memory rate limiting / metrics** — neither is shared across instances; the
-  supported 1.0 topology is a single application instance. A shared backend for
-  horizontal scale is planned post-1.0 (see [deployment.md §5](./deployment.md#5-operations--gotchas)).
+- **Per-process rate limiting and metrics** — the authenticated per-actor and
+  per-credential buckets (admin mutations, the v1, account and preference
+  self-service routes, MCP tool calls) and the Prometheus counters live in each
+  process's memory, so neither is shared across instances; the pre-auth floors
+  are shared in Postgres. Multi-instance (Vercel) is supported: those buckets are
+  a best-effort UX limit there, and a scrape of `/api/metrics` sees one instance (see
+  [deployment.md §5](./deployment.md#5-operations--gotchas) and
+  [Observability §5](./observability.md#5-metrics)).
 - **CSP is enforcing** (nonce-based, minted per request in `src/proxy.ts`).
   `script-src` allows only `'self' 'nonce-…' 'strict-dynamic'` — an injected
   inline `<script>` is blocked, not just reported. `style-src` keeps

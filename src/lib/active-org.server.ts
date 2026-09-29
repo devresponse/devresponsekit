@@ -113,13 +113,17 @@ export async function listUserActiveOrganizations(appUserId: string): Promise<Us
  *     {@link userHasActiveMembership}: a suspended or pending membership does
  *     not let the admin act in that tenant themselves, so it must not widen
  *     what a session they borrow can reach either.
- *   - `u.status = 'active'` (the ACCOUNT, IMP-2). Suspending or blocking a
- *     user writes `app_users.status` (`POST /api/administrator/users/[id]/
- *     status`) and leaves their membership rows untouched, so without this the
- *     confinement's own fail-closed branch was a fiction: a just-suspended
- *     admin kept the full intersection and the session they had borrowed kept
- *     its full reach until it expired. `decideSecureAccess` is the authority
- *     on which statuses block, and it allows exactly `active`.
+ *   - `u.status = 'active'` (the ACCOUNT, IMP-2). `decideSecureAccess` is the
+ *     authority on which statuses block, it reads the account status, and it
+ *     allows exactly `active`. Blocking or suspending a user
+ *     (`performAdminStatusChange`) does cascade to memberships, but only to
+ *     those in the actor's scope: a SUPERADMIN's change writes the account and
+ *     every membership, an org admin's writes their org's membership (and the
+ *     account only when the user is in no other org). The two columns still
+ *     diverge (I-16): an admin can add an `active` membership to a blocked
+ *     account, and the MCP reaper deactivates an account but blocks only its
+ *     `mcp` memberships. Without this filter such an account would keep its
+ *     intersection, and a session it had borrowed would keep its reach.
  *
  * A third filter joined in by F-09: `o.status = 'active'` (the
  * ORGANIZATION). An admin cannot act as themselves in a suspended tenant, so a

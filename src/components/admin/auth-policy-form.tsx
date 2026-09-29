@@ -85,7 +85,7 @@ function toFormValues(settings: AuthPolicySettingsJson | null): AuthPolicyFormIn
 }
 
 /**
- * Signup-policy editor (0007) — shared by the organization detail's
+ * Signup-policy editor — shared by the organization detail's
  * Authentication tab (scope "organization", PATCH/DELETE
  * `/api/administrator/organizations/:id/auth-settings`) and the superadmin
  * platform-defaults card (scope "platform", PATCH

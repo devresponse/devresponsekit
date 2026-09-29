@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/invitations/accept
  *
- * The explicit acceptance path (0008) for users who already have an
+ * The explicit invitation-acceptance path for users who already have an
  * account: the invite page posts the plaintext token here once the user
  * confirms. Sign-up-time acceptance (a token riding the sign-up body) is
  * handled inside provisioning instead.

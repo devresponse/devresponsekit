@@ -24,7 +24,7 @@ interface RouteContext {
 /**
  * GET /api/administrator/organizations/:id/auth-settings
  *
- * The org's signup policy (0007): the raw override row (`settings`, null
+ * The org's signup policy: the raw override row (`settings`, null
  * when the org inherits) plus the EFFECTIVE resolved policy (`effective`,
  * whose `source` says organization / platform_default / fail_closed).
  *
@@ -48,7 +48,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
 /**
  * PATCH /api/administrator/organizations/:id/auth-settings
  *
- * Creates or replaces the org's COMPLETE policy override (0007 has no
+ * Creates or replaces the org's COMPLETE policy override (the policy has no
  * per-field inheritance, so the body is the full policy — see
  * `authPolicySettingsSchema`).
  *

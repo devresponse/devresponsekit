@@ -20,11 +20,11 @@ Every claim below is grounded in the code and cited as `file:line`. Where a fact
 ## Test environment and accounts
 
 - **Base URL:** `http://localhost:3000` (dev). Every route is locale-prefixed, e.g. `/en/app/administrator/audit`.
-- **Seed the personas:** run the dev fixture seed (`src/db/seeds/dev-init.ts`). It provisions three organizations, each with a `superuser@<org>`, an `orgadmin@<org>`, and `user1..5@<org>`, plus cross-org members and two groups in ORG A (`src/db/seeds/dev-init.ts:44`, `:156`).
+- **Seed the personas:** run the dev fixture seed (`src/db/seeds/dev-init.ts`). It provisions three organizations, each with a `superuser@<org>`, an `orgadmin@<org>`, and `user1..5@<org>`, plus cross-org members and two groups in ORG A (`src/db/seeds/dev-init.ts:54`, `:166`).
 - **Locales to test:** run each screen in `en` and once in a non-Latin locale (`uk` or `ja`); confirm no raw message keys and that dates/labels localize.
 - **Reset:** re-run the seed to restore a clean fixture.
 
-Persona-to-seed mapping for these four areas (`src/db/seeds/dev-init.ts:239`):
+Persona-to-seed mapping for these four areas (`src/db/seeds/dev-init.ts:250`):
 
 | Persona | Seed role / account | Permissions relevant here | Net effect on these screens |
 | --- | --- | --- | --- |
@@ -41,14 +41,14 @@ Key permission keys for this set (`src/lib/admin/permissions.ts:50`):
 - `admin.apikeys.read` / `admin.apikeys.manage`
 - `admin.audit.read`
 
-**Console navigation (verified — no gate drift).** These areas are reached from the Administrator sidebar, not the top-level launcher. Each sidebar link's `requires` key equals its destination page guard, so no link surfaces a page that then 404s (`src/app/[locale]/(secure)/app/administrator/_components/administrator-navigation.ts:144`):
+**Console navigation (verified — no gate drift).** These areas are reached from the Administrator sidebar, not the top-level launcher. Each sidebar link's `requires` key equals its destination page guard, so no link surfaces a page that then 404s (`src/app/[locale]/(secure)/app/administrator/_components/administrator-navigation.ts:148`):
 
 - Apps group -> `enterprise-apps` requires `admin.apps.read`; the "New application" action requires `admin.apps.manage`.
 - APIs group -> `api-keys` requires `admin.apikeys.read`; the "New API key" action requires `admin.apikeys.manage`.
 - Communication group -> `email` (outbox) and `email/templates` both require `admin.email.read`.
 - Activity group -> `audit` requires `admin.audit.read`.
 
-The Administrator layout itself is a defence-in-depth gate: any single `admin.*` permission admits the caller, otherwise `notFound()` (`src/app/[locale]/(secure)/app/administrator/layout.tsx:48`).
+The Administrator layout itself is a defence-in-depth gate: any single `admin.*` permission admits the caller, otherwise `notFound()` (`src/app/[locale]/(secure)/app/administrator/layout.tsx:49`).
 
 ---
 
@@ -58,19 +58,19 @@ The Administrator layout itself is a defence-in-depth gate: any single `admin.*`
 
 - Route: `/app/administrator/enterprise-apps` · Example URL: `/en/app/administrator/enterprise-apps` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/page.tsx:22`
 - Purpose: A searchable, filterable grid of enterprise applications (the SSO handoff targets). Each row links to its detail page; managers get an inline Delete.
-- Guard / who can access: `admin.apps.read` (re-validated on the page at `enterprise-apps/page.tsx:28`; API `GET /api/administrator/enterprise-apps` re-checks at `src/app/api/administrator/enterprise-apps/route.ts:37`). The "New application" button is hidden unless the caller also holds `admin.apps.manage` (`enterprise-apps/page.tsx:32`).
+- Guard / who can access: `admin.apps.read` (re-validated on the page at `enterprise-apps/page.tsx:28`; API `GET /api/administrator/enterprise-apps` re-checks at `src/app/api/administrator/enterprise-apps/route.ts:49`). The "New application" button is hidden unless the caller also holds `admin.apps.manage` (`enterprise-apps/page.tsx:32`).
 - Access matrix:
   - Visitor -> redirected to sign-in (no access).
   - Member -> Not Found.
   - Limited Admin -> Not Found (no `admin.apps.read`).
-  - Org Admin -> can see; sees only their own org's apps plus nothing global; can act (New/Delete) within their org (`src/app/api/administrator/enterprise-apps/route.ts:66`).
+  - Org Admin -> can see; sees only their own org's apps plus nothing global; can act (New/Delete) within their org (`src/app/api/administrator/enterprise-apps/route.ts:79`).
   - Superadmin -> can see every org's apps and global apps; can act everywhere.
 - Preconditions and test data: signed in as the target persona; at least one seeded enterprise application. Confirm your org owns at least one app for the Org Admin cases.
 
 User stories
 
 - UAT-ADMIN-AEK-APPS-LIST-S1 — As an Org Admin, I want to browse the enterprise applications, so that I can see which apps are wired for SSO in my org.
-  - Acceptance criteria: Given I hold `admin.apps.read`, when I open the list, then I see a grid with columns Id, Label, Subdomain, Status, Organization, Sort order, Created at (`_enterprise-apps-grid.tsx:94`), sorted by Sort order ascending (`_enterprise-apps-grid.tsx:197`).
+  - Acceptance criteria: Given I hold `admin.apps.read`, when I open the list, then I see a grid with columns Id, Label, Subdomain, Status, Organization, Sort order, Created at (`_enterprise-apps-grid.tsx:92`), sorted by Sort order ascending (`_enterprise-apps-grid.tsx:199`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -93,7 +93,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-LIST-S3 — As an Org Admin, I want to delete an application I no longer use, so that stale SSO targets are removed.
-  - Acceptance criteria: Given an app, launched or not, when I confirm Delete, then the row disappears, and the SSO handoff nonces its launches left are deleted with it (F-84). Only a row in some other table still referencing the app (none does today) would refuse it: then I see an inline "application in use" message and the row stays (`_enterprise-apps-grid.tsx:76`; API `DELETE` returns 409 `application_in_use`, `src/app/api/administrator/enterprise-apps/[id]/route.ts`).
+  - Acceptance criteria: Given an app, launched or not, when I confirm Delete, then the row disappears, and the SSO handoff nonces its launches left are deleted with it (F-84). Only a row in some other table still referencing the app (none does today) would refuse it: then I see an inline "application in use" message and the row stays (`_enterprise-apps-grid.tsx:74`; API `DELETE` returns 409 `application_in_use`, `src/app/api/administrator/enterprise-apps/[id]/route.ts`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -103,9 +103,9 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
-- Out-of-scope access -> Not Found: as Org Admin the list simply omits other orgs' and global apps (empty page for a null scope, `src/app/api/administrator/enterprise-apps/route.ts:66`); a Member/Limited Admin hitting the URL gets 404 at the page guard.
+- Out-of-scope access -> Not Found: as Org Admin the list simply omits other orgs' and global apps (empty page for a null scope, `src/app/api/administrator/enterprise-apps/route.ts:79`); a Member/Limited Admin hitting the URL gets 404 at the page guard.
 - Empty state: with no apps in scope the grid renders its empty state (no rows) rather than an error.
-- Delete refused (409 `application_in_use`, only if a future table references the app) -> friendly inline message ("application in use"); non-409 failures show the generic delete-error text (`_enterprise-apps-grid.tsx:85`).
+- Delete refused (409 `application_in_use`, only if a future table references the app) -> friendly inline message ("application in use"); non-409 failures show the generic delete-error text (`_enterprise-apps-grid.tsx:83`).
 - Rate limit: repeated deletes are subject to the admin mutation limiter; a limited response yields the generic delete error inline. `TODO: verify` the exact user-facing text on 429 (the grid maps only 409 specially).
 
 Accessibility: keyboard-reach the search box, filter, and each row link/Delete; visible focus on the confirm dialog with Esc to cancel; the inline error uses `role="alert"` (`_enterprise-apps-grid.tsx:186`).
@@ -115,17 +115,17 @@ i18n: run in `en` and `uk`; column headers, the Status filter options, the "Glob
 
 - Route: `/app/administrator/enterprise-apps/new` · Example URL: `/en/app/administrator/enterprise-apps/new` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/new/page.tsx:14`
 - Purpose: Create a new enterprise application with a stable text id, HTTPS origin, subdomain, SSO audience, and sort order.
-- Guard / who can access: `admin.apps.manage` (page `new/page.tsx:20`; API `POST` at `src/app/api/administrator/enterprise-apps/route.ts:143`).
+- Guard / who can access: `admin.apps.manage` (page `new/page.tsx:20`; API `POST` at `src/app/api/administrator/enterprise-apps/route.ts:159`).
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can create, but only in their own org; the server rejects a global app or another org's app with `forbidden` 403 (`route.ts:170`).
+  - Org Admin -> can create, but only in their own org; the server rejects a global app or another org's app with `forbidden` 403 (`route.ts:189`).
   - Superadmin -> can create in any org and global apps.
-- Preconditions and test data: signed in as a manager persona. Have a valid HTTPS origin that is on the trusted-host allow-list. Required fields: `id`, `label`, `origin`, `subdomain`, `sso_audience` (`src/lib/validation/enterprise-apps.ts:23`).
+- Preconditions and test data: signed in as a manager persona. Have a valid HTTPS origin that is on the trusted-host allow-list. Required fields: `id`, `label`, `origin`, `subdomain`, `sso_audience` (`src/lib/validation/enterprise-apps.ts:24`).
 
 User stories
 
 - UAT-ADMIN-AEK-APPS-NEW-S1 — As an Org Admin, I want to register a new app, so that users in my org can launch it via SSO.
-  - Acceptance criteria: Given valid values, when I submit, then I am redirected to the new app's detail page; given the id is taken, including this deployment's own application id (F-83), then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:204`; form maps it at `_new-enterprise-app-form.tsx:80`).
+  - Acceptance criteria: Given valid values, when I submit, then I am redirected to the new app's detail page; given the id is taken, including this deployment's own application id (F-83), then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:243`; form maps it at `_new-enterprise-app-form.tsx:80`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -137,7 +137,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-NEW-S2 — As an Org Admin, I want the form to stop me submitting a non-HTTPS or untrusted origin, so that SSO redirects stay safe.
-  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, or is this deployment's own origin (F-83), then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:177`; mapped at `_new-enterprise-app-form.tsx:89`).
+  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, or is this deployment's own origin (F-83), then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:198`; mapped at `_new-enterprise-app-form.tsx:91`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -156,29 +156,29 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
-- Validation: required-field markers appear for `Id`, `Label`, `Origin`, `Subdomain`, `SSO audience`; invalid id/subdomain/audience formats are rejected with localized messages (`src/lib/validation/enterprise-apps.ts:25`).
+- Validation: required-field markers appear for `Id`, `Label`, `Origin`, `Subdomain`, `SSO audience`; invalid id/subdomain/audience formats are rejected with localized messages (`src/lib/validation/enterprise-apps.ts:26`).
 - Org-scope: Org Admin submitting with a global/other-org target -> `forbidden` 403 surfaced as a root error.
-- Rate limit (admin mutation): rapid repeated creates hit `admin.apps.create` limiter (`route.ts:146`); expect a friendly failure. `TODO: verify` the exact 429 copy in the create form.
+- Rate limit (admin mutation): rapid repeated creates hit `admin.apps.create` limiter (`route.ts:162`); expect a friendly failure. `TODO: verify` the exact 429 copy in the create form.
 - Loading: the submit button is disabled while submitting.
 
-Accessibility: the form is `noValidate` with schema-driven markers; each control is labelled; the root error is a `role="alert"` region (`_new-enterprise-app-form.tsx:239`).
+Accessibility: the form is `noValidate` with schema-driven markers; each control is labelled; the root error is a `role="alert"` region (`_new-enterprise-app-form.tsx:241`).
 i18n: labels, help text, and the required legend localize in `en` and `uk`.
 
 ### UAT-ADMIN-AEK-APPS-DETAIL - Enterprise application detail
 
 - Route: `/app/administrator/enterprise-apps/[appId]` · Example URL: `/en/app/administrator/enterprise-apps/acme-hub` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/[appId]/page.tsx:22`
 - Purpose: View and edit a single application. The `id` is immutable (referenced by SSO handoff nonces); all other fields are inline-editable by managers.
-- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:28`,`:75`). Read-only callers see the same form disabled.
+- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:37`,`:84`). Read-only callers see the same form disabled.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can view/edit apps their org owns; a foreign or global app returns Not Found (404, not 403) to preserve existence indistinguishability (`[appId]/page.tsx:60`; `[id]/route.ts:61`).
-  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:130`).
+  - Org Admin -> can view/edit apps their org owns; a foreign or global app returns Not Found (404, not 403) to preserve existence indistinguishability (`[appId]/page.tsx:60`; `[id]/route.ts:70`).
+  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:135`).
 - Preconditions and test data: know a valid `appId` your persona can access. For the 404 case, obtain an app id owned by a different org (as Org Admin).
 
 User stories
 
 - UAT-ADMIN-AEK-APPS-DETAIL-S1 — As an Org Admin, I want to change an app's status and label, so that I can disable or rename it without recreating it.
-  - Acceptance criteria: Given valid edits, when I Save, then a success message appears and the values persist after refresh (`_enterprise-app-settings-form.tsx:92`,`:271`).
+  - Acceptance criteria: Given valid edits, when I Save, then a success message appears and the values persist after refresh (`_enterprise-app-settings-form.tsx:92`,`:280`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -190,7 +190,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-DETAIL-S2 — As a read-only admin, I want to inspect an app without being able to change it, so that least privilege holds.
-  - Acceptance criteria: Given I hold `admin.apps.read` but not `.manage`, when I open the detail, then all fields are disabled and there is no Save button and no required legend (`_enterprise-app-settings-form.tsx:123`,`:128`,`:276`).
+  - Acceptance criteria: Given I hold `admin.apps.read` but not `.manage`, when I open the detail, then all fields are disabled and there is no Save button and no required legend (`_enterprise-app-settings-form.tsx:132`,`:137`,`:285`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -210,11 +210,11 @@ User stories
 
 Negative and edge cases
 - Out-of-scope -> Not Found (404) for both foreign and global apps to an Org Admin.
-- Validation: editing keeps `Label`, `Origin`, `Subdomain`, `SSO audience` required (`src/lib/validation/enterprise-apps.ts:72`); bad origin surfaces `invalid_origin`/`origin_not_allowed` on the field.
+- Validation: editing keeps `Label`, `Origin`, `Subdomain`, `SSO audience` required (`src/lib/validation/enterprise-apps.ts:74`); bad origin surfaces `invalid_origin`/`origin_not_allowed` on the field.
 - Invalid id in URL: an id failing `APP_ID_RE` returns Not Found before any DB read (`[appId]/page.tsx:33`).
 - Concurrency: last write wins on PATCH; there is no If-Match on this form. `TODO: verify` whether stale-edit protection is expected here.
 
-Accessibility: disabled state is conveyed via the disabled attribute; error region is `role="alert"`; success is `role="status"` (`_enterprise-app-settings-form.tsx:271`).
+Accessibility: disabled state is conveyed via the disabled attribute; error region is `role="alert"`; success is `role="status"` (`_enterprise-app-settings-form.tsx:280`).
 i18n: status option labels, field labels, and the "Global" org label localize.
 
 ---
@@ -223,19 +223,19 @@ i18n: status option labels, field labels, and the "Global" org label localize.
 
 ### UAT-ADMIN-AEK-EMAIL-OUTBOX - Email outbox
 
-- Route: `/app/administrator/email` · Example URL: `/en/app/administrator/email` · Code: `src/app/[locale]/(secure)/app/administrator/email/page.tsx:20`
-- Purpose: The operator's source of truth for outbound email. **Outbox-first**: every message is recorded in `app_outbox` before any delivery attempt, so rows appear even where no delivery provider is configured (kept as `logged`) (`email/page.tsx:8`; `src/app/api/administrator/email/outbox/route.ts:18`).
-- Guard / who can access: `admin.email.read` to view; the toolbar "Send test email" action additionally needs `admin.email.manage` (`email/page.tsx:26`,`:30`).
+- Route: `/app/administrator/email` · Example URL: `/en/app/administrator/email` · Code: `src/app/[locale]/(secure)/app/administrator/email/page.tsx:23`
+- Purpose: The operator's source of truth for outbound email. **Outbox-first**: every message is recorded in `app_outbox` before any delivery attempt, so rows appear even where no delivery provider is configured (kept as `logged`) (`email/page.tsx:9`; `src/app/api/administrator/email/outbox/route.ts:20`).
+- Guard / who can access: `admin.email.read` to view; the toolbar "Send test email" action additionally needs `admin.email.manage` (`email/page.tsx:29`,`:38`).
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> sees only their own org's mail rows; can send a test email attributed to their org, to their own address only (`outbox/route.ts:57`; test route `src/app/api/administrator/email/test/route.ts`, F-64).
+  - Org Admin -> sees only their own org's mail rows; can send a test email attributed to their org, to their own address only (`outbox/route.ts:64`; test route `src/app/api/administrator/email/test/route.ts`, F-64).
   - Superadmin -> sees every org's mail plus org-less platform/system rows; a test email is a platform (org-less) test, to any address.
 - Preconditions and test data: signed in as the target persona. Trigger at least one email first (e.g. a password reset) so the outbox has rows, or use the Send test email action.
 
 User stories
 
 - UAT-ADMIN-AEK-EMAIL-OUTBOX-S1 — As an Org Admin, I want to see whether the system tried to email a user, so that I can debug delivery.
-  - Acceptance criteria: Given outbox rows exist in my org, when I open the outbox, then I see a grid of Created at, To, Subject, Template, Status, newest first (`_outbox-grid.tsx:58`,`:132`); opening a row shows the full detail including bodies as text.
+  - Acceptance criteria: Given outbox rows exist in my org, when I open the outbox, then I see a grid of Created at, To, Subject, Template, Status, newest first (`_outbox-grid.tsx:74`,`:154`); opening a row shows the full detail including bodies as text.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -258,7 +258,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-EMAIL-OUTBOX-S3 — As a read-only email admin, I want the outbox without the Send action, so that I cannot generate mail.
-  - Acceptance criteria: Given I hold `admin.email.read` but not `.manage`, when I open the outbox, then the Send test email control is absent (`_outbox-grid.tsx:194`).
+  - Acceptance criteria: Given I hold `admin.email.read` but not `.manage`, when I open the outbox, then the Send test email control is absent (`_outbox-grid.tsx:216`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -276,7 +276,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
-- Out-of-scope -> the outbox is org-scoped; an Org Admin never sees other orgs' rows (`outbox/route.ts:57`); a Member/Limited Admin gets 404 at the guard.
+- Out-of-scope -> the outbox is org-scoped; an Org Admin never sees other orgs' rows (`outbox/route.ts:64`); a Member/Limited Admin gets 404 at the guard.
 - Invalid test address -> the email input is `type="email"` and Send is disabled until non-empty; the server validates the address and returns `invalid_body` 400 for a bad one (`test/route.ts`).
 - Another recipient (F-64) -> only a Superadmin types the address. The API refuses an Org Admin's request naming any address but their own with 403 `forbidden`, and the audit explorer shows an `administrator.access.denied` row (reason `cross_org_reach_required`, action `email_test_recipient`).
 - No provider configured -> the message is still recorded as `logged` (outbox-first), proving rendering + wiring.
@@ -295,7 +295,7 @@ i18n: status labels, filter labels, and detail field labels localize in `en` and
   - Visitor / Member / Limited Admin -> Not Found.
   - Org Admin -> can view the catalog (it is platform-global config, no tenant column, so viewing is not a cross-tenant leak) but sees **no Edit links** — editing is superadmin-only (see the edit screen).
   - Superadmin -> can view and edit.
-- Preconditions and test data: signed in as the target persona; templates are seeded (e.g. `password_reset`, `test_email`) (`src/lib/email/templates.ts:46`,`:156`).
+- Preconditions and test data: signed in as the target persona; templates are seeded (e.g. `password_reset`, `test_email`) (`src/lib/email/templates.ts:51`,`:161`).
 
 User stories
 
@@ -329,19 +329,19 @@ i18n: headers, the empty message, and subjects localize; the Locale column shows
 
 ### UAT-ADMIN-AEK-EMAIL-TEMPLATE-EDIT - Edit email template
 
-- Route: `/app/administrator/email/templates/[templateId]` · Example URL: `/en/app/administrator/email/templates/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/email/templates/[templateId]/page.tsx:21`
+- Route: `/app/administrator/email/templates/[templateId]` · Example URL: `/en/app/administrator/email/templates/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/email/templates/[templateId]/page.tsx:27`
 - Purpose: Edit one template's subject, HTML body, text body, and description. `key` and `locale` are shown but immutable (flows send against the key).
 - Guard / who can access: the page requires `admin.email.manage` **and** that the caller be a **Superadmin** (`[templateId]/page.tsx:33`,`:39`) — it matches the authority of the save route it drives (`PUT /api/administrator/email/templates/[id]`, superadmin-only at `src/app/api/administrator/email/templates/[id]/route.ts:75`). Review #73: an Org Admin holding `admin.email.manage` used to reach a form whose every save 403d; the page now answers **Not Found**, the same indistinguishability the rest of the admin tree uses.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
   - Org Admin -> **Not Found** (review #73), even holding `admin.email.manage`; the API refuses the save with `forbidden` 403 for anyone who calls it directly.
   - Superadmin -> can open and save (edits affect every tenant, hence superadmin-only).
-- Preconditions and test data: a valid template UUID; an id failing UUID validation returns Not Found (`[templateId]/page.tsx:31`).
+- Preconditions and test data: a valid template UUID; an id failing UUID validation returns Not Found (`[templateId]/page.tsx:42`).
 
 User stories
 
 - UAT-ADMIN-AEK-EMAIL-TEMPLATE-EDIT-S1 — As a Superadmin, I want to edit a template in a specific locale, so that I can adjust the wording users receive.
-  - Acceptance criteria: Given valid subject + HTML body, when I Save, then I am returned to the templates list and the change persists (`_template-edit-form.tsx:75`; PUT bumps `updated_at` at `[id]/route.ts:112`).
+  - Acceptance criteria: Given valid subject + HTML body, when I Save, then I am returned to the templates list and the change persists (`_template-edit-form.tsx:75`; PUT bumps `updated_at` at `[id]/route.ts:113`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -375,9 +375,9 @@ User stories
 
 Negative and edge cases
 - Superadmin-only save: this is the load-bearing check for this screen — Org Admin can open, cannot save.
-- Injection safety: `{{variable}}` placeholders are substituted and HTML-escaped by the renderer, so an editor cannot produce injectable output via variables (`_template-edit-form.tsx:31`).
-- Invalid/missing template id -> Not Found before edit (`[templateId]/page.tsx:31`).
-- Rate limit: PUT is limited via `admin.email.templates` (`[id]/route.ts:78`). `TODO: verify` the exact 429 copy.
+- Injection safety: `{{variable}}` placeholders are substituted and HTML-escaped by the renderer, so an editor cannot produce injectable output via variables (`_template-edit-form.tsx:29`).
+- Invalid/missing template id -> Not Found before edit (`[templateId]/page.tsx:42`).
+- Rate limit: PUT is limited via `admin.email.templates` (`[id]/route.ts:84`). `TODO: verify` the exact 429 copy.
 
 Accessibility: `noValidate` form with schema-driven markers; body fields are labelled monospace textareas; error region is `role="alert"`.
 i18n: labels, the variables hint, and validation messages localize in `en` and `uk`.
@@ -389,18 +389,18 @@ i18n: labels, the variables hint, and validation messages localize in `en` and `
 ### UAT-ADMIN-AEK-APIKEYS-LIST - API keys governance
 
 - Route: `/app/administrator/api-keys` · Example URL: `/en/app/administrator/api-keys` · Code: `src/app/[locale]/(secure)/app/administrator/api-keys/page.tsx:20`
-- Purpose: The cross-user, cross-org API-key inventory. Read-only admins see the full inventory with a status filter and per-row detail; managers additionally get inline Rotate / Revoke. Secrets are never in list data (`_api-keys-grid.tsx:39`; API never returns the hash, `src/lib/api-auth/api-keys.server.ts:18`).
-- Guard / who can access: `admin.apikeys.read` to view; Rotate/Revoke/Issue are gated on `admin.apikeys.manage` client-side and re-checked on every route (`api-keys/page.tsx:26`,`:30`; API `GET` at `src/app/api/administrator/api-keys/route.ts:59`). The Owner email links to the user page only for a holder of `admin.users.read`, that page's guard; an auditor holding only `admin.apikeys.read` sees it as plain text (F-67).
+- Purpose: The cross-user, cross-org API-key inventory. Read-only admins see the full inventory with a status filter and per-row detail; managers additionally get inline Rotate / Revoke. Secrets are never in list data (`_api-keys-grid.tsx:40`; API never returns the hash, `src/lib/api-auth/api-keys.server.ts:24`).
+- Guard / who can access: `admin.apikeys.read` to view; Rotate/Revoke/Issue are gated on `admin.apikeys.manage` client-side and re-checked on every route (`api-keys/page.tsx:26`,`:30`; API `GET` at `src/app/api/administrator/api-keys/route.ts:71`). The Owner email links to the user page only for a holder of `admin.users.read`, that page's guard; an auditor holding only `admin.apikeys.read` sees it as plain text (F-67).
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> sees only their own org's keys; can rotate/revoke within their org (`route.ts:73`).
+  - Org Admin -> sees only their own org's keys; can rotate/revoke within their org (`route.ts:86`).
   - Superadmin -> sees every org's keys; can act everywhere.
 - Preconditions and test data: at least one API key exists for a user in scope (issue one via the New API key screen first).
 
 User stories
 
 - UAT-ADMIN-AEK-APIKEYS-LIST-S1 — As an Org Admin, I want to review issued keys and their status, so that I can govern machine access.
-  - Acceptance criteria: Given keys exist in my org, when I open the list, then I see Name, Prefix (`drk_..…`), Owner, Scopes count, Status, Last used, Expires, Created, newest first (`_api-keys-grid.tsx:124`,`:263`).
+  - Acceptance criteria: Given keys exist in my org, when I open the list, then I see Name, Prefix (`drk_..…`), Owner, Scopes count, Status, Last used, Expires, Created, newest first (`_api-keys-grid.tsx:127`,`:269`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -412,7 +412,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APIKEYS-LIST-S2 — As an Org Admin, I want to rotate a key, so that I can replace a possibly-leaked secret without disruption.
-  - Acceptance criteria: Given an active key, when I confirm Rotate, then a new secret is revealed exactly once and the old key is immediately revoked (`_api-keys-grid.tsx:99`; rotate route returns the new plaintext once at `src/app/api/administrator/api-keys/[id]/rotate/route.ts:81`; atomic issue+revoke at `api-keys.server.ts:166`).
+  - Acceptance criteria: Given an active key, when I confirm Rotate, then a new secret is revealed exactly once and the old key is immediately revoked (`_api-keys-grid.tsx:102`; rotate route returns the new plaintext once at `src/app/api/administrator/api-keys/[id]/rotate/route.ts:169`; atomic issue+revoke at `api-keys.server.ts:258`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -424,7 +424,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APIKEYS-LIST-S3 — As an Org Admin, I want to revoke a key, so that I can cut off access immediately.
-  - Acceptance criteria: Given an active key, when I confirm Revoke, then the row becomes Revoked; revoking an already-revoked key is a no-op success (`_api-keys-grid.tsx:77`; DELETE idempotent at `src/app/api/administrator/api-keys/[id]/route.ts:133`).
+  - Acceptance criteria: Given an active key, when I confirm Revoke, then the row becomes Revoked; revoking an already-revoked key is a no-op success (`_api-keys-grid.tsx:80`; DELETE idempotent at `src/app/api/administrator/api-keys/[id]/route.ts:132`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -434,7 +434,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APIKEYS-LIST-S4 — As a read-only admin, I want the inventory without destructive controls, so that I can audit without acting.
-  - Acceptance criteria: Given `admin.apikeys.read` but not `.manage`, when I open the list, then rows show only View — no Rotate/Revoke and no New API key button (`_api-keys-grid.tsx:213`; `api-keys/page.tsx:43`).
+  - Acceptance criteria: Given `admin.apikeys.read` but not `.manage`, when I open the list, then rows show only View — no Rotate/Revoke and no New API key button (`_api-keys-grid.tsx:219`; `api-keys/page.tsx:46`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -452,9 +452,9 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
-- Out-of-scope -> org-scoped list; an Org Admin never sees other orgs' keys, and a detail/rotate/revoke by id for a foreign key returns Not Found (404), not 403 (`route.ts:63`; rotate `rotate/route.ts:58`; delete `[id]/route.ts:130`).
-- Idempotent revoke -> revoking an already-revoked key returns success with `alreadyRevoked` and writes no duplicate audit row (`[id]/route.ts:133`). The same holds for a revoke that loses a race: a key a concurrent rotation or revoke retired after the route's read answers `alreadyRevoked`, and no `admin.api_key.revoked` row names this admin (`[id]/route.ts:143`, F-72).
-- Rotate a non-active key -> 409 `api_key_inactive` (`rotate/route.ts:61`); a lost race also yields 409 (`rotate/route.ts:66`); the grid shows a rotate-error alert.
+- Out-of-scope -> org-scoped list; an Org Admin never sees other orgs' keys, and a detail/rotate/revoke by id for a foreign key returns Not Found (404), not 403 (`route.ts:63`; rotate `rotate/route.ts:76`; delete `[id]/route.ts:129`).
+- Idempotent revoke -> revoking an already-revoked key returns success with `alreadyRevoked` and writes no duplicate audit row (`[id]/route.ts:132`). The same holds for a revoke that loses a race: a key a concurrent rotation or revoke retired after the route's read answers `alreadyRevoked`, and no `admin.api_key.revoked` row names this admin (`[id]/route.ts:142`, F-72).
+- Rotate a non-active key -> 409 `api_key_inactive` (`rotate/route.ts:79`); a lost race also yields 409 (`rotate/route.ts:153`); the grid shows a rotate-error alert.
 - Secret exposure -> the reveal dialog is the only place a plaintext is shown; the list/detail never contain it or its hash.
 - Rate limit -> rotate/revoke are limited via `admin.apikeys.rotate` / `admin.apikeys.delete`; abuse yields a friendly failure. `TODO: verify` the exact 429 copy.
 
@@ -463,19 +463,19 @@ i18n: status labels, scope-count text, filter labels, and detail labels localize
 
 ### UAT-ADMIN-AEK-APIKEYS-NEW - Issue an API key on behalf of a user
 
-- Route: `/app/administrator/api-keys/new` · Example URL: `/en/app/administrator/api-keys/new` · Code: `src/app/[locale]/(secure)/app/administrator/api-keys/new/page.tsx:18`
+- Route: `/app/administrator/api-keys/new` · Example URL: `/en/app/administrator/api-keys/new` · Code: `src/app/[locale]/(secure)/app/administrator/api-keys/new/page.tsx:24`
 - Purpose: Mint a key for a specific user, choosing scopes and an optional expiry. The plaintext is revealed exactly once, then you return to the list.
-- Guard / who can access: `admin.apikeys.manage` (page `new/page.tsx:24`; API `POST` at `src/app/api/administrator/api-keys/route.ts:154`).
+- Guard / who can access: `admin.apikeys.manage` (page `new/page.tsx:30`; API `POST` at `src/app/api/administrator/api-keys/route.ts:181`).
 - Access matrix:
   - Visitor / Member / Limited Admin / read-only apikeys admin -> Not Found (the page itself requires `.manage`).
-  - Org Admin -> can issue keys only for a user in their own org; a foreign user is reported as "owner not found" (404) to avoid confirming existence (`route.ts:200`).
+  - Org Admin -> can issue keys only for a user in their own org; a foreign user is reported as "owner not found" (404) to avoid confirming existence (`route.ts:227`).
   - Superadmin -> can issue for any user.
-- Preconditions and test data: the target user's app-user UUID (from the Users area). The requested scopes must be within the OWNER's own authority — you cannot mint a key that out-scopes the user who will wield it (`route.ts:204`).
+- Preconditions and test data: the target user's app-user UUID (from the Users area). The requested scopes must be within the OWNER's own authority — you cannot mint a key that out-scopes the user who will wield it (`route.ts:231`).
 
 User stories
 
 - UAT-ADMIN-AEK-APIKEYS-NEW-S1 — As an Org Admin, I want to issue a scoped key for a user, so that their integration can call the API as themselves.
-  - Acceptance criteria: Given a valid owner UUID and grantable scopes, when I submit, then the new secret is revealed exactly once and closing the dialog returns me to the list (`_new-api-key-form.tsx:73`,`:231`; API returns 201 with the plaintext at `route.ts:243`).
+  - Acceptance criteria: Given a valid owner UUID and grantable scopes, when I submit, then the new secret is revealed exactly once and closing the dialog returns me to the list (`_new-api-key-form.tsx:73`,`:231`; API returns 201 with the plaintext at `route.ts:392`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -488,7 +488,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APIKEYS-NEW-S2 — As an Org Admin, I want clear errors when the owner is wrong or the scopes are too broad, so that I cannot mint an over-privileged key.
-  - Acceptance criteria: Given a missing owner, then the owner field shows "owner not found" (404); given an inactive owner, "owner inactive" (409); given scopes the owner lacks, the scopes group shows which scopes are ungrantable (422 `invalid_scope` with `ungrantableScopes`) (`_new-api-key-form.tsx:78`,`:86`; `route.ts:189`,`:194`,`:206`).
+  - Acceptance criteria: Given a missing owner, then the owner field shows "owner not found" (404); given an inactive owner, "owner inactive" (409); given scopes the owner lacks, the scopes group shows which scopes are ungrantable (422 `invalid_scope` with `ungrantableScopes`) (`_new-api-key-form.tsx:78`,`:86`; `route.ts:216`,`:221`,`:235`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -499,7 +499,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APIKEYS-NEW-S3 — As an Org Admin, I want a foreign-org user to look identical to a missing user, so that cross-tenant existence never leaks.
-  - Acceptance criteria: Given a valid, active user in a DIFFERENT org, when I submit, then I get "owner not found" (404) — the same as a non-existent user (`route.ts:200`).
+  - Acceptance criteria: Given a valid, active user in a DIFFERENT org, when I submit, then I get "owner not found" (404) — the same as a non-existent user (`route.ts:227`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -508,10 +508,10 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
-- Owner validation: bad UUID format is caught client-side by the shared schema (`src/lib/validation/api-keys.ts:18`); missing/inactive/foreign owner is caught server-side (404/409/404).
-- Ungrantable scopes: scopes are validated against the OWNER's authority, never the admin's (`route.ts:204`).
+- Owner validation: bad UUID format is caught client-side by the shared schema (`src/lib/validation/api-keys.ts:17`); missing/inactive/foreign owner is caught server-side (404/409/404).
+- Ungrantable scopes: scopes are validated against the OWNER's authority, never the admin's (`route.ts:231`).
 - Once-only reveal: the secret is returned exactly once; if the tester misses it they must rotate/re-issue. The reveal dialog therefore closes only on **Done**; Esc and a click outside it do nothing (F-122).
-- Rate limit: creation is limited via `admin.apikeys.create` (`route.ts:158`). `TODO: verify` the exact 429 copy.
+- Rate limit: creation is limited via `admin.apikeys.create` (`route.ts:185`). `TODO: verify` the exact 429 copy.
 
 Accessibility: scopes are a labelled `fieldset`/`legend` with checkboxes; the reveal dialog is a focus-trapped modal; root/field errors use `role="alert"` / form messages.
 i18n: labels, help text, and error messages localize in `en` and `uk`.
@@ -524,13 +524,13 @@ i18n: labels, help text, and error messages localize in `en` and `uk`.
 
 - Route: `/app/administrator/audit` · Example URL: `/en/app/administrator/audit` · Code: `src/app/[locale]/(secure)/app/administrator/audit/page.tsx:19`
 - Purpose: A read-only, paginated explorer over `app_audit_events` — the append-only, tamper-evident record of admin/auth/account activity. Filters by event type, outcome, and actor; each row opens a detail panel with the full JSON metadata, IP, user agent, and reason.
-- Guard / who can access: `admin.audit.read` (page `audit/page.tsx:25`; API `GET` at `src/app/api/administrator/audit/route.ts:65`). There is **no** create/update/delete route — the log is append-only and cannot be edited from the console (only `GET` exists at `src/app/api/administrator/audit/route.ts`).
+- Guard / who can access: `admin.audit.read` (page `audit/page.tsx:25`; API `GET` at `src/app/api/administrator/audit/route.ts:67`). There is **no** create/update/delete route — the log is append-only and cannot be edited from the console (only `GET` exists at `src/app/api/administrator/audit/route.ts`).
 - Access matrix:
   - Visitor / Member -> Not Found.
   - Limited Admin (`admin` role) -> **can** open the audit log (it holds `admin.audit.read`), scoped to its org.
-  - Org Admin -> can open; sees only their org's events, which include the actions of the org's own admins and every action on its keys, apps and memberships (F-32; the few platform rows are listed in [admin-manager §12](../admin-manager.md#12-audit-model)); platform events with a null org are superadmin-only (`route.ts:86`).
+  - Org Admin -> can open; sees only their org's events, which include the actions of the org's own admins and every action on its keys, apps and memberships (F-32; the few platform rows are listed in [admin-manager §12](../admin-manager.md#12-audit-model)); platform events with a null org are superadmin-only (`route.ts:89`).
   - Superadmin -> sees every org's events plus org-less platform events.
-- Preconditions and test data: the seed back-dates an audit history (logins plus a spread of admin/account events) (`src/db/seeds/dev-init.ts:20`). Perform a couple of admin actions first (e.g. rotate a key) to generate fresh rows.
+- Preconditions and test data: the seed back-dates an audit history (logins plus a spread of admin/account events) (`src/db/seeds/dev-init.ts:22`). Perform a couple of admin actions first (e.g. rotate a key) to generate fresh rows.
 
 User stories
 
@@ -546,7 +546,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-AUDIT-LOG-S2 — As an Org Admin, I want to filter the log, so that I can find a specific event class or actor.
-  - Acceptance criteria: Given the filter toolbar, when I set Event type / Outcome / Actor, then the grid narrows and the filters are reflected in the URL so a shared link reproduces the view (`_audit-grid.tsx:195`).
+  - Acceptance criteria: Given the filter toolbar, when I set Event type / Outcome / Actor, then the grid narrows and the filters are reflected in the URL so a shared link reproduces the view (`_audit-grid.tsx:184`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -558,7 +558,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-AUDIT-LOG-S3 — As an Org Admin, I want the log confined to my org, so that I never see another tenant's activity.
-  - Acceptance criteria: Given I am an Org Admin, when I browse the log, then only my org's events appear, including what my org's other admins did; ORG B's events and platform (org-less) events are not shown (`route.ts:86`; stamping rule in [admin-manager §12](../admin-manager.md#12-audit-model)).
+  - Acceptance criteria: Given I am an Org Admin, when I browse the log, then only my org's events appear, including what my org's other admins did; ORG B's events and platform (org-less) events are not shown (`route.ts:89`; stamping rule in [admin-manager §12](../admin-manager.md#12-audit-model)).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -607,7 +607,7 @@ Legend: `see` = can open and read · `act` = can perform the screen's mutations 
 | Audit log | 404 | 404 | see (own org) | see (own org) | see (all) |
 
 Notes on the matrix:
-- **Limited Admin** (`admin` seed role) holds only `admin.users.*` + `admin.audit.read`, so of this set it can open **Audit** only; everything else is 404 (`src/db/seeds/dev-init.ts:249`).
+- **Limited Admin** (`admin` seed role) holds only `admin.users.*` + `admin.audit.read`, so of this set it can open **Audit** only; everything else is 404 (`src/db/seeds/dev-init.ts:260`).
 - **The template editor is superadmin-only** — the page guard was raised to match its superadmin-only save, so an Org Admin gets 404 rather than an unsaveable form (`[templateId]/page.tsx:39`, `src/app/api/administrator/email/templates/[id]/route.ts:75`, review #73).
 - Every "act" for an Org Admin is confined to their own org via ADR-0001 org-scoping; out-of-scope ids return 404, not 403.
 
@@ -628,6 +628,6 @@ Notes on the matrix:
 ## TODO: verify
 
 - The exact user-facing message shown on an admin **rate-limit (HTTP 429)** for each mutating action (create/delete app, save template, issue/rotate/revoke key); send test email shows "Too many requests. Please slow down." (F-64). The grids/forms map specific status codes (404/409/422/400/403) explicitly; 429 falls through to the generic error text, but the precise copy was not confirmed from code.
-- **Read-only-in-one-area personas** (e.g. an admin with `admin.apps.read` but not `.manage`, or `admin.email.read` only, or `admin.apikeys.read` only) are **not** in the default seed. Stories that assert "read-only sees no destructive controls" require creating such a role first. Only `admin.platform` (full set) and `admin` (users + audit) exist by default (`src/db/seeds/dev-init.ts:239`).
+- **Read-only-in-one-area personas** (e.g. an admin with `admin.apps.read` but not `.manage`, or `admin.email.read` only, or `admin.apikeys.read` only) are **not** in the default seed. Stories that assert "read-only sees no destructive controls" require creating such a role first. Only `admin.platform` (full set) and `admin` (users + audit) exist by default (`src/db/seeds/dev-init.ts:250`).
 - Enterprise-app **status values**: the create/edit form and grid filter expose `available` and `disabled` only (`src/lib/admin/enterprise-apps.ts:61`), but a `degraded` value is referenced by the launcher and the outbox/audit colour helpers. Confirm whether `degraded` is a still-reachable status for an enterprise app or purely legacy.
 - Enterprise-app detail PATCH has **no If-Match / stale-edit protection**; confirm whether concurrency protection is expected for this form (last-write-wins today).

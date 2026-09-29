@@ -3089,9 +3089,11 @@ The long-term coverage **target** is 90% lines/statements/functions and
 82% branches. The CI gate is implemented as a **ratchet**: thresholds are
 pinned just below the current measured coverage and only ever move up, so
 new code cannot regress the suite while the codebase grows toward the
-target. The enforced values live in `vitest.config.ts` (currently 38 /
-38 / 34 / 36 for lines / statements / functions / branches) — raise them
-whenever coverage climbs, never lower them.
+target. The enforced values live in `vitest.config.ts` and are listed in
+[docs/testing.md §4](docs/testing.md#4-coverage-the-ratchet); the build
+started at the 38 / 38 / 34 / 36 (lines / statements / functions /
+branches) shown below — raise them whenever coverage climbs, never lower
+them.
 
 ```ts
 coverage: {

@@ -264,7 +264,7 @@ To debug cross-subdomain SSO (or any multi-app flow) on one machine, use the **s
 | `403`/`404` on an admin call you expected to work | Tenant scope — a non-superadmin only sees their own org; out-of-scope resources return **404 by design**. |
 | Tables ended up in `public` instead of `auth` | `DB_SEARCH_PATH_VIA_OPTIONS=0` is set locally — a pooler-only setting. Unset it, drop the strays, re-run `pnpm db:reset:reload` (see §9.2). |
 | Locale-parity test fails | A new text key is missing from one of the 8 locale files (en, fr, es, uk, pt, zh, hi, ja). Add it everywhere. |
-| Coverage gate fails but tests pass | New untested code dropped global coverage below the ratchet — add tests (the local sharded runner does **not** compute coverage; run `pnpm test:coverage`). |
+| Coverage gate fails but tests pass | New untested code dropped coverage below the ratchet: globally, or for one floored file (every route file under `src/app`, the security modules), which the `ERROR` line names — add tests (the local sharded runner does **not** compute coverage; run `pnpm test:coverage`). See [Testing §4](./testing.md#4-coverage-the-ratchet). |
 | Flaky/odd test failures with "not a function" | Run the **sharded** runner (`pnpm test`), not a single in-process Vitest run — see [Testing](./testing.md). |
 
 More in [Troubleshooting](./troubleshooting.md).

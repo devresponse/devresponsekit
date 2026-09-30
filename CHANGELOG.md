@@ -69,6 +69,13 @@ For a deployment running 2.0.0.
   registering the real satellite, who then got `409` (I-01). Existing apps
   keep their names.
 
+### Fixed
+
+- **Email.** Invitations and the test email are written in the recipient's
+  language when the recipient belongs to the mail's organization, else in
+  the sending admin's, and an invitation's link opens in the same language,
+  not always `/en` (F-102).
+
 ## [2.0.0] - 2026-09-30
 
 Everything merged to `main` since 1.0.0 (#178 through #488). That is the

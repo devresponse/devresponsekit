@@ -3719,7 +3719,10 @@ The initial schema `0001-initial-schema.sql` includes:
 - The administrator "send test email" action
   (`/api/administrator/email/test`) sends the `test_email` template
   through the full pipeline — the canonical way to verify provider
-  configuration.
+  configuration. It is written in the recipient account's language, which
+  for an org admin is their own; an address with no account gets the
+  sending admin's (F-102, `adminMailLocale` in
+  `src/lib/admin/admin-mail-locale.server.ts`, as for invitations below).
 - Email verification (AUTH-4) is wired through Better Auth's
   `sendVerificationEmail` callback in `src/lib/auth.ts`, which calls
   `sendAppEmail` with the `email_verification` template, after the
@@ -3746,6 +3749,13 @@ The initial schema `0001-initial-schema.sql` includes:
   template from the administrator invite/resend actions
   (`/api/administrator/organizations/[id]/invitations` and `.../resend`);
   the emailed accept link lands on the public `/[locale]/invite` page.
+  The email and its link share one locale (F-102, `adminMailLocale`): the
+  invitee account's `preferred_locale` when the address has an account
+  with a membership, in any status, in the inviting org, else the locale of
+  the admin's page (the request's `Referer`), else the admin's own
+  `preferred_locale`. The outbox row belongs to the inviting org, whose
+  admins read it, so an account that belongs only to other orgs is treated
+  as no account: the row never shows that it exists, or its language.
 
 ### 35.4 Administrator Email workspace
 

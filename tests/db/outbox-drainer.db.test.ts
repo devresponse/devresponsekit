@@ -291,6 +291,7 @@ describe("invitation mail after its invitation dies (DB-backed, F-100)", () => {
       organizationName: "DBTest Drain Org",
       inviterAppUserId: null,
       plaintextToken,
+      locale: "en",
     });
     expect(sent.status).toBe("pending");
     await db

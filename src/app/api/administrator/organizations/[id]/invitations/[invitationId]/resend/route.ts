@@ -12,6 +12,7 @@ import {
   enforceOrgAdminMailBudget,
   enforceRecipientCooldown,
 } from "@/lib/admin/admin-mail-budget.server";
+import { adminMailLocale } from "@/lib/admin/admin-mail-locale.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import type { SendAppEmailResult } from "@/lib/email/send.server";
 import {
@@ -132,6 +133,11 @@ export const POST = withAdminRoute(async function POST(
     });
   }
 
+  // F-102: resolved as on create (the invitee's language if their account is
+  // in this org, else this admin's), and before the rotation, so a failed read
+  // leaves the current link alive.
+  const locale = await adminMailLocale(invitation.email, org.id, request, guard.access);
+
   const rotated = await regenerateInvitationToken({ invitationId, organizationId: org.id });
   if (!rotated) {
     return adminErrorResponse("invitation_not_found", 404, request);
@@ -172,6 +178,7 @@ export const POST = withAdminRoute(async function POST(
     organizationName: org.name,
     inviterAppUserId: guard.access.appUserId,
     plaintextToken: rotated.plaintextToken,
+    locale,
   }).catch(async (err: unknown) => {
     await audit(null);
     throw err;

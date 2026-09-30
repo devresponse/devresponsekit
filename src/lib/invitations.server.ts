@@ -1,6 +1,6 @@
 import "server-only";
 import { sql } from "kysely";
-import { defaultLocale } from "@/config/i18n-config";
+import type { SupportedLocale } from "@/config/i18n-config";
 import { db } from "@/db/database";
 import { userIsGlobalSuperuser, userIsGrantEligible } from "@/lib/admin/access-scope.server";
 import {
@@ -86,24 +86,16 @@ function normalizeEmail(email: string): string {
 }
 
 /**
- * The locale an invitation email is rendered in AND the locale its accept link
- * is anchored to. An invitation is addressed to an email address, not to an
- * account, so no recipient preference is consulted, even when the invitee
- * already has an account. Using one constant for both keeps the link in the
- * language of the email that carries it.
- */
-const INVITATION_EMAIL_LOCALE = defaultLocale;
-
-/**
  * The accept link an invitation email carries. Built on BETTER_AUTH_URL —
  * the same origin the verification-email links already use — and anchored
- * to {@link INVITATION_EMAIL_LOCALE}. The invite page is fully localized once
- * the invitee lands, and its language switcher keeps the `?token=` (F-35), so
- * an invitee who switches language keeps the invitation.
+ * to the `locale` the email is written in (F-102), so the invitee lands on the
+ * invite page in the language of the email that sent them. Its language
+ * switcher keeps the `?token=` (F-35), so an invitee who switches language
+ * keeps the invitation.
  */
-export function buildInvitationAcceptUrl(plaintextToken: string): string {
+export function buildInvitationAcceptUrl(plaintextToken: string, locale: SupportedLocale): string {
   const base = getServerEnv().BETTER_AUTH_URL.replace(/\/$/, "");
-  return `${base}/${INVITATION_EMAIL_LOCALE}/invite?token=${encodeURIComponent(plaintextToken)}`;
+  return `${base}/${locale}/invite?token=${encodeURIComponent(plaintextToken)}`;
 }
 
 /**
@@ -131,6 +123,12 @@ export function buildInvitationAcceptUrl(plaintextToken: string): string {
  * F-104: returns `sendAppEmail`'s outcome. The accept link exists only in this
  * email, so the routes report a provider rejection (`failed`) to the admin and
  * on the audit row instead of answering "sent" regardless.
+ *
+ * F-102: `locale` is the language the routes resolve with `adminMailLocale`
+ * (the invitee's own when the address has an account in the inviting org, else
+ * the inviting admin's). It is stated to `sendAppEmail` AND anchors the link, so the email
+ * and the page it opens are in one language. Every invitation used to go out
+ * in English with an `/en/` link, whoever it was for.
  */
 export async function sendInvitationEmail(input: {
   to: string;
@@ -138,6 +136,7 @@ export async function sendInvitationEmail(input: {
   organizationName: string;
   inviterAppUserId: string | null;
   plaintextToken: string;
+  locale: SupportedLocale;
 }): Promise<SendAppEmailResult> {
   const inviter = input.inviterAppUserId
     ? await db
@@ -151,11 +150,11 @@ export async function sendInvitationEmail(input: {
     to: input.to,
     templateKey: "organization_invitation",
     organizationId: input.organizationId,
-    locale: INVITATION_EMAIL_LOCALE,
+    locale: input.locale,
     variables: {
       inviterName: inviter?.display_name || inviter?.primary_email || "An administrator",
       organizationName: input.organizationName,
-      acceptUrl: buildInvitationAcceptUrl(input.plaintextToken),
+      acceptUrl: buildInvitationAcceptUrl(input.plaintextToken, input.locale),
     },
   });
 }

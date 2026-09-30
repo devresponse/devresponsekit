@@ -99,7 +99,7 @@ A "copy the shell + the consume route" approach breaks on each of these:
 |---|---|---|
 | 1 | `ssoSession.createSsoSession` calls `findUserById(sub)` and throws **"unknown user"** if absent (`src/lib/auth-sso-session.ts`) — it does **not** provision. | The satellite has a **separate DB**, so `sub` won't exist. The consume POST must **upsert the Better Auth `user` (+ a thin `app_users` row) from the token claims** *before* creating the session. |
 | 2 | The nonce is **INSERTed at launch** into the *issuer's* `app_sso_handoff_nonces`; `consumeSsoHandoffNonce` **burns a pre-existing row** (`src/lib/sso.server.ts`). | Cross-DB there is no row to burn → every handoff would 401. Replay protection must be **inverted**: a local `sso_consumed_nonces` table (UNIQUE `jti`); on consume **INSERT the jti** — success = first use, unique-violation = replay → reject. |
-| 3 | The consume route imports `request-id` + `origin-guard` from `src/lib/admin/**` (`src/app/api/sso/consume/route.ts`), which gets stripped. | **Relocate** those two helpers to neutral libs (`src/lib/request-id.server.ts`, `src/lib/origin-guard.server.ts`) *before* deleting `src/lib/admin/`. |
+| 3 | The consume route imports `request-id` + `origin-guard` (`src/app/api/sso/consume/route.ts`). They lived in `src/lib/admin/**`, which gets stripped, until the kit moved them to `src/lib/http/` (I-13). | A fork taken after that move keeps `src/lib/http/` and relocates nothing. An older fork **relocates** those two helpers out of `src/lib/admin/` *before* deleting it. |
 
 **Can a satellite be stateless (no DB)?** No — the jti replay-cache and Better
 Auth session persistence both require storage. So even the leanest handoff-model
@@ -280,7 +280,7 @@ dependency.
 2. `auth-status.ts` / `auth-guard.ts` → collapse `getUserAccessContext` to **"valid session ⇒ `{ email, locale, permissions:['shell.view'] }`"** (read the thin `app_users`; no membership/roles/permission-graph; drop the `userIsGlobalSuperuser` lookup). Keep `requireSecureSession`'s redirect contract.
 3. `api/sso/consume` (POST) → replace `consumeSsoHandoffNonce` with **insert-if-absent** jti replay-check + **upsert Better Auth user + thin `app_users`** from claims, then `createSsoSession`.
 4. `navigation.server.ts` → `DEFAULT_SHELL_MENU` becomes a **static list with no admin entries** (Dashboard + your app pages); keep the icon allow-list.
-5. Relocate `request-id.server.ts` + `origin-guard.server.ts` out of `admin/`; keep a **write-only** `audit.server.ts`. Trim `admin/permissions.ts` to constants only and relocate to `src/lib/permissions.ts`.
+5. Keep `src/lib/http/` (`request-id.server.ts` + `origin-guard.server.ts`; an older fork relocates them out of `admin/` first); keep a **write-only** `audit.server.ts`. Trim `admin/permissions.ts` to constants only and relocate to `src/lib/permissions.ts`.
 6. Add an **unauthenticated bounce** (§7): `(secure)` with no session → redirect to the main app's launch URL for this app id, instead of a local sign-in page. Remove local sign-in/sign-up.
 
 > Under **Option C2** (§3) the auth-rewire is smaller still: delete `api/sso/**`,
@@ -438,8 +438,8 @@ source and honor them (a naive copy breaks each):
    consume, verify sig+aud+exp, then INSERT the jti — success = first use,
    unique-violation = replay → reject. Purge expired rows opportunistically.
 3. src/app/api/sso/consume/route.ts imports request-id + origin-guard from
-   src/lib/admin/**. Relocate those two helpers to src/lib/request-id.server.ts and
-   src/lib/origin-guard.server.ts before deleting src/lib/admin/.
+   src/lib/http/**, which stays. (A fork of a kit older than that move has them in
+   src/lib/admin/**: relocate them out of it before deleting src/lib/admin/.)
 
 ALTERNATIVE AUTH MODEL (Option C — shared auth schema; use ONLY if the side app
 is first-party and co-trusted with devresponsekit, accepting one shared security
@@ -473,8 +473,8 @@ P1 — Strip (delete)
 - Libs: src/lib/api-auth, src/lib/mcp, src/lib/invitations.server.ts,
         src/lib/auth-policy.server.ts, src/lib/provider-organization-resolver.ts,
         src/lib/account (account self-service), enterprise-apps libs.
-- src/lib/admin: FIRST relocate request-id.server.ts + origin-guard.server.ts (and any
-  tiny neutral helper the shell/consume still import) to src/lib/**, then delete the rest.
+- src/lib/admin: FIRST relocate any tiny neutral helper the shell/consume still import
+  to src/lib/** (request-id + origin-guard already live in src/lib/http), then delete the rest.
 - Trim src/lib/validation to just what the shell uses (drop roles/permissions/groups/
   organizations/email-templates/enterprise-apps/auth-policy/invitations).
 - Tests: delete admin/account/v1/mcp suites (tests/**/{admin,administrator,account,api-v1,mcp}*).

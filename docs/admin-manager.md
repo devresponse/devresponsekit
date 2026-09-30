@@ -84,7 +84,7 @@ is plain text, for a viewer without that area's read permission (F-67).
 ### 2.5 Rate limiting of admin mutations
 
 Every Administrator **mutation** (POST / PATCH / PUT / DELETE) is throttled by a
-per-actor in-memory **token bucket** (`src/lib/admin/rate-limit.server.ts`).
+per-actor in-memory **token bucket** (`src/lib/http/rate-limit.server.ts`).
 Read endpoints are unbounded — paging through a grid must never be throttled.
 (The in-memory store is per process; that is deliberate for these
 authenticated per-actor limits. The unauthenticated **pre-auth floors** —
@@ -221,7 +221,7 @@ order — `POST /api/v1/users/[id]/status` applies `canAccessUser` then
 ### 5.1 Error envelope
 
 Every admin route returns errors through `adminErrorResponse`
-(`src/lib/admin/errors.server.ts`). The body is:
+(`src/lib/http/errors.server.ts`). The body is:
 
 ```json
 { "error": "forbidden", "message": "errors.forbidden", "requestId": "5f3c…" }
@@ -246,7 +246,7 @@ captured to Sentry tagged with the request id; 4xx responses are not — they ar
 expected client errors, not incidents.
 
 Every exported handler is wrapped with `withAdminRoute`
-(`src/lib/route-handler.server.ts`, F-29), which mints the request id before the
+(`src/lib/http/route-handler.server.ts`, F-29), which mints the request id before the
 handler runs, stamps `x-request-id` on whatever the handler returns, and turns
 a throw into `adminErrorResponse("internal_error", 500, …, { cause })` carrying
 that same id. So a successful response carries the header even when the

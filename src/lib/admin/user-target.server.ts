@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
   actingOrganizationId,

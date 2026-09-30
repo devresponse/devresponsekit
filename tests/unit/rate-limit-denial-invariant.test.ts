@@ -15,7 +15,7 @@ import { calleeName, parseSource, pathBelow } from "../helpers/handler-scan";
  * limiter, the three `/api/v1/me/api-keys` routes and MCP registration did
  * not, so a flood of them left the documented abuse signal flat, and the key
  * routes answered a fixed `Retry-After: 2` whatever the bucket said. Each surface now has one
- * 429, built on `recordRateLimitDenial` (src/lib/admin/rate-limit.server.ts):
+ * 429, built on `recordRateLimitDenial` (src/lib/http/rate-limit.server.ts):
  *
  *   - admin / first-party: `enforceRateLimit` / `enforceSharedRateLimit` →
  *     `rateLimitDeniedResponse`;

@@ -5,17 +5,17 @@ import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
 import { isSsoHandoffSelfIssuer, isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
-import { DEFAULT_SSO_LAUNCH_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { DEFAULT_SSO_LAUNCH_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/http/rate-limit-shared.server";
 import { clientIpKey } from "@/lib/client-ip";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { logServerError } from "@/lib/observability/logger.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { captureServerError } from "@/lib/observability/server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

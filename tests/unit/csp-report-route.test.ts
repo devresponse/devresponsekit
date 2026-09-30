@@ -18,8 +18,8 @@ vi.mock("@/lib/observability/logger.server", () => ({
 // token-bucket arithmetic, only the store differs. Every consumed key is
 // recorded, so the F-18 case can count what reached the global floor.
 const sharedKeys = vi.hoisted(() => [] as string[]);
-vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
-  const { consumeToken } = await import("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit-shared.server", async () => {
+  const { consumeToken } = await import("@/lib/http/rate-limit.server");
   return {
     consumeSharedToken: async (key: string, options: never, nowMs?: number) => {
       sharedKeys.push(key);

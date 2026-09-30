@@ -2,11 +2,11 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { loadScopedOrg, ORGANIZATION_NOT_ACTIVE_ERROR } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
-import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/http/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/http/rate-limit-shared.server";
 import {
   ADMIN_MAIL_EVENTS,
   enforceOrgAdminMailBudget,
@@ -21,7 +21,7 @@ import {
   sendInvitationEmail,
 } from "@/lib/invitations.server";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

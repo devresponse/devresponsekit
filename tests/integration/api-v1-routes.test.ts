@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 
 /**
@@ -75,7 +75,7 @@ vi.mock("@/lib/auth-status", async () => {
 });
 // The bucket is a spy; the 429 renderers (`rateLimitedProblemResponse`, F-130)
 // are the real ones.
-vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
+vi.mock("@/lib/http/rate-limit.server", async (importOriginal) => ({
   ...(await importOriginal<typeof RateLimitModule>()),
   consumeToken: (...a: unknown[]) => consumeToken(...a),
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
@@ -87,7 +87,7 @@ vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
 // production DB-error FALLBACK — so the 429 case would pass by way of the
 // fail-soft path rather than the contract. Route it through the same
 // recording spy the sibling token suites use.
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   consumeSharedToken: async (...a: unknown[]) => consumeToken(...a),
 }));
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({

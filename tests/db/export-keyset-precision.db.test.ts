@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { sql } from "kysely";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 import type { KeysetCursor } from "@/lib/admin/list-query.server";
 
 /**
@@ -39,8 +39,8 @@ vi.mock("@/lib/auth-status", async () => {
   return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
 });
 // The export budget is 3 per actor per minute; this file runs a dozen exports.
-vi.mock("@/lib/admin/rate-limit.server", async () => {
-  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit.server", async () => {
+  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/http/rate-limit.server");
   return { ...actual, enforceRateLimit: () => null };
 });
 

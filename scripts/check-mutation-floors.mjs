@@ -30,7 +30,7 @@ const FLOORS = {
   "src/lib/safe-return-to.ts": 76,
   "src/lib/admin/list-query.server.ts": 89,
   "src/lib/api-auth/api-key.ts": 97,
-  "src/lib/admin/origin-guard.server.ts": 94,
+  "src/lib/http/origin-guard.server.ts": 94,
   // I-11, measured 2026-09-26 one file at a time (`stryker run --mutate`).
   // trusted-origins.ts rose from 68% (15 of 22) once
   // tests/unit/trusted-origins.test.ts covered the unparsable entries and

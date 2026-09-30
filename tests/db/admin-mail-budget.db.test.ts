@@ -29,7 +29,7 @@ vi.mock("@/lib/audit.server", () => ({
 
 const { db, pgPool } = await import("@/db/database");
 const budget = await import("@/lib/admin/admin-mail-budget.server");
-const { __resetSharedRateLimitForTests } = await import("@/lib/admin/rate-limit-shared.server");
+const { __resetSharedRateLimitForTests } = await import("@/lib/http/rate-limit-shared.server");
 
 const PREFIX = "__dbtest_f64_";
 const RUN = randomUUID().slice(0, 8);

@@ -252,7 +252,7 @@ warrant a comms channel and an owner before deep debugging.
   admin mail budgets keep one budget in Postgres across every instance and
   restart; only the authenticated per-actor and per-credential buckets (admin
   mutations, the v1, account and preference self-service routes, MCP tool calls;
-  `src/lib/admin/rate-limit.server.ts`) are in-memory per instance and reset on
+  `src/lib/http/rate-limit.server.ts`) are in-memory per instance and reset on
   restart. Multi-instance (Vercel) is a supported topology: see
   [deployment.md §5](./deployment.md#5-operations--gotchas), the one statement of
   which limiter lives where (F-107).

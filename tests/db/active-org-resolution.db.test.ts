@@ -43,7 +43,7 @@ const sessionGetter = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: async () => sessionGetter.current }));
 // The accept route's per-user bucket lives in Postgres; its budget is not what
 // this file tests, and a bypass leaves no bucket rows behind.
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   enforceSharedRateLimit: async () => null,
 }));
 // The impersonation reach asks Better Auth whether the impersonator is banned,

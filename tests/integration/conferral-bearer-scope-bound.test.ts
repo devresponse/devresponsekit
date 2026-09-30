@@ -45,7 +45,7 @@ vi.mock("@/lib/admin/access-scope.server", async () => {
   const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
   return { ...actual, canAccessOrg: () => true };
 });
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/http/rate-limit.server", () => ({
   DEFAULT_ADMIN_MUTATION_LIMIT: { capacity: 10, refillMs: 1000 },
   enforceRateLimit: () => undefined,
 }));

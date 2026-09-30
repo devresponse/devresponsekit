@@ -30,8 +30,8 @@ vi.mock("@/lib/auth-guard", () => ({
 // The per-user floor consumes from the SHARED Postgres bucket (review #98);
 // no database here, so it is routed through the in-memory helper, which
 // answers the same 429 envelope.
-vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
-  const { enforceRateLimit } = await import("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit-shared.server", async () => {
+  const { enforceRateLimit } = await import("@/lib/http/rate-limit.server");
   return {
     enforceSharedRateLimit: async (...a: Parameters<typeof enforceRateLimit>) =>
       enforceRateLimit(...a),

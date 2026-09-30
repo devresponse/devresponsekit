@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 /**
  * F-29: every `src/app/api/**` route handler is exported through the
- * request-id wrapper for its surface (`src/lib/route-handler.server.ts`), or
+ * request-id wrapper for its surface (`src/lib/http/route-handler.server.ts`), or
  * its file carries a reviewed reason in EXEMPT.
  *
  * The correlation contract ("every response carries an `x-request-id` that
@@ -65,7 +65,7 @@ function hiddenHandlerExports(source: string): string[] {
   }
   return out;
 }
-const WRAPPER_IMPORT = /from\s+"@\/lib\/route-handler\.server"/;
+const WRAPPER_IMPORT = /from\s+"@\/lib\/http\/route-handler\.server"/;
 
 // Why a route may answer without the wrapper. Keep each reason specific: an
 // entry is a claim that no operator needs this route's id, or that stamping

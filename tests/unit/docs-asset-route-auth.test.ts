@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
-import { __resetRateLimitForTests } from "@/lib/admin/rate-limit.server";
+import { __resetRateLimitForTests } from "@/lib/http/rate-limit.server";
 import { serveSpaceAsset } from "@/lib/docs/asset-route.server";
 import type * as SafePathModule from "@/lib/docs/safe-path.server";
 import { GET as getDocsAsset } from "@/app/api/docs/asset/[...path]/route";

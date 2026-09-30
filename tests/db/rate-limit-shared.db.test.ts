@@ -5,7 +5,7 @@ import {
   consumeSharedToken,
   pruneStaleSharedBuckets,
   SHARED_STALE_AFTER_MS,
-} from "@/lib/admin/rate-limit-shared.server";
+} from "@/lib/http/rate-limit-shared.server";
 
 /**
  * DB-BACKED tests for the shared pre-auth token bucket (review #98).

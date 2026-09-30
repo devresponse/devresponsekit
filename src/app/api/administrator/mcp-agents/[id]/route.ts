@@ -3,14 +3,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { revokeOauthClient, updateOauthClient } from "@/lib/api-auth/oauth-clients.server";
 import { normalizeScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getMcpAgent } from "@/lib/mcp/agents.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 import { isUuid } from "@/lib/uuid";
 
 export const dynamic = "force-dynamic";

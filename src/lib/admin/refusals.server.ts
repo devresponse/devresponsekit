@@ -1,7 +1,7 @@
 import "server-only";
 import type { NextResponse } from "next/server";
 import { actingOrganizationId, type AccessLike } from "@/lib/admin/access-scope.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { AGENT_ACTIVATION_PERMISSION } from "@/lib/admin/service-account";
 import { auditEvent } from "@/lib/audit.server";
 

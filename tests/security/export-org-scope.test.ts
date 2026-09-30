@@ -32,7 +32,7 @@ vi.mock("@/lib/auth-status", async () => {
 });
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMock(...a) }));
 // No-op the limiter so 7 resources × 3 scopes don't exhaust the bucket.
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/http/rate-limit.server", () => ({
   enforceRateLimit: () => null,
   DEFAULT_ADMIN_EXPORT_LIMIT: { capacity: 9999, refillPerSec: 9999 },
 }));

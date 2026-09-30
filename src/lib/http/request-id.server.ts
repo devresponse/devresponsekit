@@ -22,7 +22,7 @@ import { REQUEST_ID_HEADER, normalizeInboundRequestId } from "@/lib/request-id";
  *   - The same id MUST be echoed back via the `x-request-id` response
  *     header AND included in the JSON error body so a UI can surface
  *     it next to a "contact support" link. `withAdminRoute` / `withV1Route`
- *     (`lib/route-handler.server.ts`, F-29) call this first, before the
+ *     (`lib/http/route-handler.server.ts`, F-29) call this first, before the
  *     handler, and stamp the header on every response the handler returns,
  *     a thrown 500 included.
  *   - Calls are memoised per-request (WeakMap keyed on the carrier),

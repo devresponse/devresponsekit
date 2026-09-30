@@ -25,8 +25,8 @@ import {
   targetOutranksActor,
 } from "@/lib/admin/user-target.server";
 import { ifMatchPinsVersion, ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
-import { withV1Route } from "@/lib/route-handler.server";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

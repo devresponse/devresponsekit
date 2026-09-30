@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import {
   impersonateBetterAuthUser,
   stopBetterAuthImpersonating,
@@ -18,12 +18,12 @@ import {
   permissionKeysByActiveOrg,
   permissionKeysHeldInAnyOrg,
 } from "@/lib/admin/grantable-permissions.server";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { checkTrustedOrigin } from "@/lib/http/origin-guard.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { decideSecureAccess } from "@/lib/auth-status";
 import { getImpersonatedAccessContext } from "@/lib/session-access.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import {
   isAgentServiceAccount,
@@ -31,7 +31,7 @@ import {
   SERVICE_ACCOUNT_STATUS,
 } from "@/lib/admin/service-account";
 import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

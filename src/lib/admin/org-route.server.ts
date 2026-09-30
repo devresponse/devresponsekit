@@ -2,7 +2,7 @@ import "server-only";
 import type { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { canAccessOrg, type AccessLike } from "@/lib/admin/access-scope.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export interface ScopedOrg {

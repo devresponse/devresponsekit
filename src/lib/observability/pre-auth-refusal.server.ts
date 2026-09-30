@@ -1,5 +1,5 @@
 import "server-only";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { logger } from "@/lib/observability/logger.server";
 import { preAuthRefusalsTotal } from "@/lib/observability/metrics.server";
 import { normalizeRequestPath } from "@/lib/request-id";

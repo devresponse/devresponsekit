@@ -44,7 +44,7 @@ import ts from "typescript";
  * F-18 added the ORDER: a deployment-wide floor may only be charged for a
  * request its per-source (per-IP) bucket admitted, or one IP spends everyone's
  * budget with requests it is itself refused. The order lives in ONE helper,
- * `consumeSourceThenGlobal` (src/lib/admin/rate-limit-tiered.server.ts), and:
+ * `consumeSourceThenGlobal` (src/lib/http/rate-limit-tiered.server.ts), and:
  *
  *   4. `__global__` is spelled nowhere under `src/` but that helper, so no
  *      route can build a global key and consume it itself, before (or
@@ -54,8 +54,8 @@ import ts from "typescript";
  */
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
 
-const SHARED_MODULE = "@/lib/admin/rate-limit-shared.server";
-const TIERED_FILE = join(SRC_DIR, "lib", "admin", "rate-limit-tiered.server.ts");
+const SHARED_MODULE = "@/lib/http/rate-limit-shared.server";
+const TIERED_FILE = join(SRC_DIR, "lib", "http", "rate-limit-tiered.server.ts");
 
 /**
  * The per-process limiter's entry points, and the positions of the arguments

@@ -65,7 +65,7 @@ The `browser` job in [`ci.yml`](../.github/workflows/ci.yml) turns on what these
   - `src/lib/admin/list-query.server.ts` — admin list-query parsing
   - `src/lib/api-auth/api-key.ts` — the API-key codec
   - `src/lib/trusted-origins.ts` — trusted-origin parsing
-  - `src/lib/admin/origin-guard.server.ts` — the admin origin guard
+  - `src/lib/http/origin-guard.server.ts` — the admin origin guard
   - `src/lib/sso-launch-return.ts` — the signed-out SSO launch return target
   - `src/lib/admin/access-scope.server.ts` — by function: the tenant-boundary predicates (`hasCrossOrgReach`, `resolveOrgScope`, `canAccessOrg`, `canAccessUser`, …) and the pure last-superadmin rule, but not the file's membership and grant queries
 

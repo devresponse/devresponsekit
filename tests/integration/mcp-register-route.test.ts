@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 import { meteredBody } from "../helpers/request-body";
 
 /**
@@ -24,14 +24,14 @@ const registerMcpAgent = vi.fn();
 const auditEvent = vi.fn();
 
 vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
-vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
+vi.mock("@/lib/http/rate-limit.server", async (importOriginal) => ({
   // The real `recordRateLimitDenial` counts the 429 and names its wait (F-130).
   ...(await importOriginal<typeof RateLimitModule>()),
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
 }));
 // The route's floors consume from the SHARED bucket (review #98); the mock
 // keeps the same recording spy so the 429 contract is asserted unchanged.
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   consumeSharedToken: async (...a: unknown[]) => consumeToken(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
@@ -318,7 +318,7 @@ describe("POST /api/mcp/register (Phase 2)", () => {
     beforeEach(async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-09-23T12:00:00Z"));
-      const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+      const actual = await vi.importActual<typeof RateLimitModule>("@/lib/http/rate-limit.server");
       actual.__resetRateLimitForTests();
       consumeToken.mockReset().mockImplementation(actual.consumeToken);
     });

@@ -10,7 +10,7 @@ import {
   type QueryResult,
 } from "kysely";
 import type * as MailBudgetModule from "@/lib/admin/admin-mail-budget.server";
-import type * as SharedModule from "@/lib/admin/rate-limit-shared.server";
+import type * as SharedModule from "@/lib/http/rate-limit-shared.server";
 
 /**
  * F-64 — the budgets on the mail an administrator sends
@@ -59,7 +59,7 @@ vi.mock("@/db/database", () => {
   });
   return { db };
 });
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   consumeSharedToken: (...a: unknown[]) => consumeShared(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({
@@ -90,7 +90,7 @@ beforeEach(async () => {
   auditMock.mockResolvedValue(undefined);
   vi.resetModules();
   mod = await import("@/lib/admin/admin-mail-budget.server");
-  (await import("@/lib/admin/rate-limit.server")).__resetRateLimitForTests();
+  (await import("@/lib/http/rate-limit.server")).__resetRateLimitForTests();
 });
 afterEach(() => vi.resetModules());
 
@@ -210,7 +210,7 @@ describe("enforceRecipientCooldown", () => {
 describe("the shared-bucket budgets", () => {
   it("refill within the shared bucket's prune window, so it accepts them", async () => {
     const shared = await vi.importActual<typeof SharedModule>(
-      "@/lib/admin/rate-limit-shared.server",
+      "@/lib/http/rate-limit-shared.server",
     );
     for (const budget of [mod.ADMIN_TEST_EMAIL_LIMIT, mod.ADMIN_MAIL_RECIPIENT_COOLDOWN]) {
       expect((budget.capacity / budget.refillPerSec) * 1000).toBeLessThanOrEqual(

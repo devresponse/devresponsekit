@@ -142,7 +142,7 @@ beforeEach(async () => {
     expires_at: null,
     plaintext: "drk_live_y.SECRET",
   });
-  const rl = await import("@/lib/admin/rate-limit.server");
+  const rl = await import("@/lib/http/rate-limit.server");
   rl.__resetRateLimitForTests();
 });
 afterEach(() => vi.resetModules());

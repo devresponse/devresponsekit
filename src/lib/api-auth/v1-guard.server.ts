@@ -3,15 +3,15 @@ import type { NextRequest, NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { actingOrganizationId } from "@/lib/admin/access-scope.server";
 import { decideSecureAccess } from "@/lib/auth-status";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { checkTrustedOrigin } from "@/lib/http/origin-guard.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import {
   consumeToken,
   rateLimitKey,
   rateLimitedProblemResponse,
   type RateLimitOptions,
   DEFAULT_ADMIN_MUTATION_LIMIT,
-} from "@/lib/admin/rate-limit.server";
+} from "@/lib/http/rate-limit.server";
 import {
   hasBearerCredential,
   resolveCallerDetailed,
@@ -19,7 +19,7 @@ import {
   type ResolvedCaller,
 } from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
-import { problemResponse } from "@/lib/api-auth/problem";
+import { problemResponse } from "@/lib/http/problem";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 

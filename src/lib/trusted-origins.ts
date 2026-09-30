@@ -4,7 +4,7 @@
  *
  *   1. Better Auth's `trustedOrigins` option (cookie / CSRF checks).
  *   2. The administrator mutation origin guard
- *      (`src/lib/admin/origin-guard.server.ts`).
+ *      (`src/lib/http/origin-guard.server.ts`).
  *
  * The list is the union of:
  *   - `NEXT_PUBLIC_APP_URL` (the deployed app's own origin),

@@ -160,7 +160,7 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
   // (capacity 30) then prove the next call is rejected 429 before any key is
   // minted. The bucket is reset first so prior cases don't skew the count.
   it("429 rate-limits minting once the per-actor burst is exhausted", async () => {
-    const rl = await import("@/lib/admin/rate-limit.server");
+    const rl = await import("@/lib/http/rate-limit.server");
     rl.__resetRateLimitForTests();
     requireApiAccount.mockResolvedValue(
       actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
@@ -188,7 +188,7 @@ describe("POST /api/v1/me/api-keys — the issuance fence (F-10)", () => {
   const mint = () => POST(req({ method: "POST", body: { name: "k", scopes: ["account.read"] } }));
 
   beforeEach(async () => {
-    (await import("@/lib/admin/rate-limit.server")).__resetRateLimitForTests();
+    (await import("@/lib/http/rate-limit.server")).__resetRateLimitForTests();
   });
 
   it("hands the caller's own credential to the repository to re-check behind the fence", async () => {

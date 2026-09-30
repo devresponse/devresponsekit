@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import {
@@ -11,12 +11,12 @@ import {
   enforceOrgAdminMailBudget,
 } from "@/lib/admin/admin-mail-budget.server";
 import { adminMailLocale } from "@/lib/admin/admin-mail-locale.server";
-import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { enforceSharedRateLimit } from "@/lib/http/rate-limit-shared.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { sendAppEmail } from "@/lib/email/send.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { getBrand } from "@/config/brand";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

@@ -7,14 +7,14 @@ import {
   rateLimitKey,
   rateLimitedProblemResponse,
   DEFAULT_ADMIN_MUTATION_LIMIT,
-} from "@/lib/admin/rate-limit.server";
+} from "@/lib/http/rate-limit.server";
 import { getServerEnv } from "@/lib/env";
 import { createApiKey, listApiKeysForUser } from "@/lib/api-auth/api-keys.server";
 import { normalizeScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { IssuingCredentialRevokedError } from "@/lib/api-auth/issuance-fence.server";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
-import { withV1Route } from "@/lib/route-handler.server";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

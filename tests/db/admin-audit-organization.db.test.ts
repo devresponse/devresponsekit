@@ -4,7 +4,7 @@ import { sql } from "kysely";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as AuthAdminModule from "@/lib/admin/auth-admin.server";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 
 /**
  * DB-BACKED test for F-32: an administrator's audit rows name the tenant the
@@ -73,8 +73,8 @@ vi.mock("@/lib/auth-status", async () => {
 });
 // Several mutations and an export per actor inside a minute; the budgets are
 // not what this file tests.
-vi.mock("@/lib/admin/rate-limit.server", async () => {
-  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit.server", async () => {
+  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/http/rate-limit.server");
   return { ...actual, enforceRateLimit: () => null };
 });
 

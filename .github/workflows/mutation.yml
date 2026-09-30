@@ -16,7 +16,7 @@ on:
       - "src/lib/admin/list-query.server.ts"
       - "src/lib/api-auth/api-key.ts"
       - "src/lib/trusted-origins.ts"
-      - "src/lib/admin/origin-guard.server.ts"
+      - "src/lib/http/origin-guard.server.ts"
       - "src/lib/sso-launch-return.ts"
       - "src/lib/admin/access-scope.server.ts"
       - "tests/**"

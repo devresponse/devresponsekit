@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { requireAccountUser } from "@/lib/account/guard.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { auditEvent } from "@/lib/audit.server";
 import { userHasActiveMembership } from "@/lib/active-org.server";
 import { setActiveOrgCookie } from "@/lib/active-org-cookie";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

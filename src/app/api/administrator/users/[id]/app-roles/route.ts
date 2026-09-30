@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import {
   canAccessOrg,
   isSuperadmin,
@@ -24,7 +24,7 @@ import {
 } from "@/lib/admin/grantable-permissions.server";
 import { refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 import { UUID_RE } from "@/lib/uuid";
 
 export const dynamic = "force-dynamic";

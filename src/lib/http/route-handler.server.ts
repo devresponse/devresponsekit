@@ -1,10 +1,10 @@
 import "server-only";
 import { unstable_rethrow } from "next/navigation";
 import { NextResponse } from "next/server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { InvalidListQueryError } from "@/lib/admin/list-query.server";
-import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
-import { problemResponse } from "@/lib/api-auth/problem";
+import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/http/request-id.server";
+import { problemResponse } from "@/lib/http/problem";
 import { RPC_INTERNAL_ERROR, rpcError } from "@/lib/mcp/protocol";
 import { logServerError } from "@/lib/observability/logger.server";
 import { captureServerError } from "@/lib/observability/server";

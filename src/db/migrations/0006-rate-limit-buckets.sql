@@ -2,13 +2,13 @@
 --
 -- Shared token-bucket storage for the PRE-AUTH rate-limit floors (source
 -- review 2026-09-04, #98). The in-process limiter in
--- `src/lib/admin/rate-limit.server.ts` keeps its budget in one Node process's
+-- `src/lib/http/rate-limit.server.ts` keeps its budget in one Node process's
 -- memory, so on Vercel — one lambda per concurrent invocation — the
 -- "deployment-wide" floors on the token endpoint, MCP registration, the CSP
 -- report sink and invitation acceptance were really per-lambda floors, and a
 -- distributed run that fanned out across invocations multiplied every budget
 -- by the instance count. This table is the cluster-wide store those floors
--- now consume from (`src/lib/admin/rate-limit-shared.server.ts`).
+-- now consume from (`src/lib/http/rate-limit-shared.server.ts`).
 --
 -- One row per bucket key: the token balance and the instant it was last
 -- brought up to date. Capacity and refill rate are NOT stored — they are

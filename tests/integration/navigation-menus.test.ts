@@ -98,7 +98,7 @@ describe("GET /api/navigation/applications", () => {
       }),
     );
     // F-129: the body names the id the denial row is written under.
-    const { getOrCreateRequestId } = await import("@/lib/admin/request-id.server");
+    const { getOrCreateRequestId } = await import("@/lib/http/request-id.server");
     const rowId = getOrCreateRequestId(auditMock.mock.calls[0]![0].request);
     expect(await res.json()).toEqual({
       error: "forbidden",

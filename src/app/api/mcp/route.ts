@@ -5,8 +5,8 @@ import {
   recordRateLimitDenial,
   type RateLimitOptions,
   type RateLimitResult,
-} from "@/lib/admin/rate-limit.server";
-import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
+} from "@/lib/http/rate-limit.server";
+import { consumeSharedToken } from "@/lib/http/rate-limit-shared.server";
 import { mintAccessToken } from "@/lib/api-auth/jwt.server";
 import {
   resolveCallerDetailed,
@@ -21,7 +21,7 @@ import { getServerEnv } from "@/lib/env";
 import { handleMcpRequest } from "@/lib/mcp/dispatch.server";
 import { mcpWwwAuthenticate } from "@/lib/mcp/metadata";
 import { effectiveScopeHolder } from "@/lib/mcp/openapi-tools";
-import { withMcpRoute } from "@/lib/route-handler.server";
+import { withMcpRoute } from "@/lib/http/route-handler.server";
 import {
   type JsonRpcId,
   type JsonRpcResponse,

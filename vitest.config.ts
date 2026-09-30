@@ -336,7 +336,7 @@ export default defineConfig({
           functions: 82,
           branches: 90,
         },
-        "**/admin/origin-guard.server.ts": {
+        "**/http/origin-guard.server.ts": {
           lines: 95,
           statements: 95,
           functions: 95,

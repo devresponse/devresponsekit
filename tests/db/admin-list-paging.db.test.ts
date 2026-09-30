@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 
 /**
  * DB-BACKED test for F-41's server side: every OFFSET list orders by a unique
@@ -43,8 +43,8 @@ vi.mock("@/lib/auth-status", async () => {
 });
 vi.mock("@/lib/audit.server", () => ({ auditEvent: vi.fn() }));
 // The export budget is 3 per actor per minute; reruns must not trip it.
-vi.mock("@/lib/admin/rate-limit.server", async () => {
-  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit.server", async () => {
+  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/http/rate-limit.server");
   return { ...actual, enforceRateLimit: () => null };
 });
 

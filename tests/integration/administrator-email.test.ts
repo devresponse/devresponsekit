@@ -50,7 +50,7 @@ vi.mock("@/lib/audit.server", () => ({
 vi.mock("@/lib/email/send.server", () => ({
   sendAppEmail: (...args: unknown[]) => sendMock(...args),
 }));
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   enforceSharedRateLimit: (...args: unknown[]) => sharedLimitMock(...args),
 }));
 vi.mock("@/lib/admin/admin-mail-budget.server", async () => {

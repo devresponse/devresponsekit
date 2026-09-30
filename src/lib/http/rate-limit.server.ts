@@ -1,8 +1,8 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import type { NextResponse } from "next/server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { problemResponse } from "@/lib/api-auth/problem";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { problemResponse } from "@/lib/http/problem";
 import { humanActorFor } from "@/lib/impersonation-attribution.server";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 

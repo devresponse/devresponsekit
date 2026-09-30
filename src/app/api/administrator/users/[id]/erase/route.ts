@@ -3,9 +3,9 @@ import { z } from "zod";
 import { actingOrganizationId, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { mustUseRestore } from "@/lib/admin/deactivated-user";
-import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse, adminJsonResponse } from "@/lib/http/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import {
   isAgentServiceAccount,
@@ -19,7 +19,7 @@ import {
 } from "@/lib/admin/user-erasure.server";
 import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
 import { revokeBearerCredentialsOf } from "@/lib/api-auth/credential-eviction.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

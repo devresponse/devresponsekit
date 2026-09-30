@@ -48,7 +48,7 @@ export default {
     "src/lib/api-auth/api-key.ts",
     // Trusted-origin parsing + the admin origin guard built on it (#229).
     "src/lib/trusted-origins.ts",
-    "src/lib/admin/origin-guard.server.ts",
+    "src/lib/http/origin-guard.server.ts",
     // The signed-out SSO launch return target: an open-redirect surface (I-11).
     "src/lib/sso-launch-return.ts",
     // The tenant boundary (I-11): who may reach which org or user, and the

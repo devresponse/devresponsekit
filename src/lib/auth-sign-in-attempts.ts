@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
-import type { RateLimitOptions, RateLimitResult } from "@/lib/admin/rate-limit.server";
+import type { RateLimitOptions, RateLimitResult } from "@/lib/http/rate-limit.server";
 
 /**
  * F-55: failed email/password sign-ins leave a trace, and one account's
@@ -149,8 +149,8 @@ async function logSignInFailure(
  */
 async function consumeSignInToken(emailHash: string): Promise<RateLimitResult> {
   try {
-    const { consumeSharedToken } = await import("@/lib/admin/rate-limit-shared.server");
-    const { rateLimitKey } = await import("@/lib/admin/rate-limit.server");
+    const { consumeSharedToken } = await import("@/lib/http/rate-limit-shared.server");
+    const { rateLimitKey } = await import("@/lib/http/rate-limit.server");
     return await consumeSharedToken(
       rateLimitKey(SIGN_IN_EMAIL_RATE_LIMIT_SCOPE, emailHash),
       SIGN_IN_EMAIL_LIMIT,

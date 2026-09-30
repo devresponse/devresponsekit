@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/observability/logger.server", () => ({ logServerError: vi.fn() }));
 vi.mock("@/lib/observability/server", () => ({ captureServerError: vi.fn() }));
 
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { logServerError } from "@/lib/observability/logger.server";
 import { captureServerError } from "@/lib/observability/server";
 

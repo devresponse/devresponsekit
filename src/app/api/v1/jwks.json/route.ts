@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { getServerEnv } from "@/lib/env";
 import { getJwks } from "@/lib/api-auth/jwt.server";
-import { problemResponse } from "@/lib/api-auth/problem";
+import { problemResponse } from "@/lib/http/problem";
 
 export const dynamic = "force-dynamic";
 

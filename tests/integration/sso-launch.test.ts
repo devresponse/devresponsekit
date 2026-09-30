@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as LaunchRouteModule from "@/app/api/sso/launch/route";
-import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
+import type * as InMemoryLimiter from "@/lib/http/rate-limit.server";
 import type { NextRequest } from "next/server";
 import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
@@ -69,8 +69,8 @@ const shared = vi.hoisted(() => ({
   keys: [] as string[],
   limiter: undefined as undefined | typeof InMemoryLimiter,
 }));
-vi.mock("@/lib/admin/rate-limit-shared.server", () => {
-  const limiter = async () => (shared.limiter ??= await import("@/lib/admin/rate-limit.server"));
+vi.mock("@/lib/http/rate-limit-shared.server", () => {
+  const limiter = async () => (shared.limiter ??= await import("@/lib/http/rate-limit.server"));
   return {
     consumeSharedToken: async (
       key: string,
@@ -476,7 +476,7 @@ describe("GET /api/sso/launch — signed-out launches use the shared bucket (F-1
     );
     expect((await GET(fromIp("203.0.113.9"))).status).toBe(307);
     expect(shared.keys).toEqual([]);
-    const inMemory = await import("@/lib/admin/rate-limit.server");
+    const inMemory = await import("@/lib/http/rate-limit.server");
     expect(inMemory.__rateLimitBucketKeysForTests()).toContain("sso.launch:ba-1");
   });
 

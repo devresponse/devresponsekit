@@ -42,6 +42,9 @@ const SCANNED = [
   "app/api/administrator",
   "app/api/v1",
   "lib/admin",
+  // The shared HTTP plumbing (I-13): the limiter's `administrator.rate_limited`
+  // sample is written from here.
+  "lib/http",
   "lib/admin-status.server.ts",
   "lib/api-auth/v1-guard.server.ts",
 ] as const;
@@ -95,7 +98,7 @@ const PLATFORM_EVENTS: Readonly<Record<string, Readonly<Record<string, string>>>
       "other refusals in the file stamp the actor's org, and this reason-keyed entry excuses " +
       "none of them)",
   },
-  "lib/admin/rate-limit.server.ts": {
+  "lib/http/rate-limit.server.ts": {
     "administrator.rate_limited":
       "the bucket and its once-a-minute denial sample are keyed on (scope, actor) across every " +
       "org the actor acts in, and the IP-keyed pre-auth floors reach it with no verified caller",

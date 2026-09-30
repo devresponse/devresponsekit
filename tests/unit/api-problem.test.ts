@@ -6,7 +6,7 @@ const { logErr, capErr } = vi.hoisted(() => ({ logErr: vi.fn(), capErr: vi.fn() 
 vi.mock("@/lib/observability/logger.server", () => ({ logServerError: logErr }));
 vi.mock("@/lib/observability/server", () => ({ captureServerError: capErr }));
 
-import { problemResponse } from "@/lib/api-auth/problem";
+import { problemResponse } from "@/lib/http/problem";
 
 /**
  * The RFC 7807 error envelope used by the /api/v1 surface.

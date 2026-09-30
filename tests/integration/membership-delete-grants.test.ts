@@ -42,7 +42,7 @@ vi.mock("@/lib/admin/permissions.server", () => ({
   isAdminPermissionDenial: (result: unknown) =>
     typeof result === "object" && result !== null && "response" in result,
 }));
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/http/rate-limit.server", () => ({
   DEFAULT_ADMIN_MUTATION_LIMIT: { capacity: 10, refillMs: 1000 },
   enforceRateLimit: () => undefined,
 }));

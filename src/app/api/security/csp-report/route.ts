@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/observability/logger.server";
-import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
+import { consumeSourceThenGlobal } from "@/lib/http/rate-limit-tiered.server";
 import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
 import { redactText, stripQuery } from "@/lib/observability/sentry-shared";

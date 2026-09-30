@@ -31,10 +31,10 @@ import {
   resolveOrgScope,
   scopeOrganizationId,
 } from "@/lib/admin/access-scope.server";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
 import { CROSS_ORG_REACH_REQUIRED_REASON } from "@/lib/admin/refusals.server";
 import { auditEvent } from "@/lib/audit.server";
-import { withV1Route } from "@/lib/route-handler.server";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

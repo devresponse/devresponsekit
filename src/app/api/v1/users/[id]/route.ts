@@ -3,9 +3,9 @@ import { db } from "@/db/database";
 import { requireApiPermission } from "@/lib/api-auth/v1-guard.server";
 import { canAccessUser } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
 import { userEtag } from "@/lib/api-auth/etag";
-import { withV1Route } from "@/lib/route-handler.server";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

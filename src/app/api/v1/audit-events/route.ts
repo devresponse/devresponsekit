@@ -11,8 +11,8 @@ import {
 import { requireApiPermission } from "@/lib/api-auth/v1-guard.server";
 import { V1_AUDIT_EVENTS_LIST } from "@/lib/api-auth/v1-list-contract";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
-import { withV1Route } from "@/lib/route-handler.server";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

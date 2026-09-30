@@ -143,6 +143,14 @@ of 2.0.0's list below. Each entry names what to carry over.
   cannot switch span scrubbing off, and the root span's name is scrubbed from
   each envelope's trace header too; the new `queues` collection category is
   closed (R11).
+- **HTTP plumbing in `src/lib/http/`.** The route wrappers, request-id
+  correlation, the first-party and `/api/v1` error envelopes, the origin guard
+  and the three rate limiters moved out of `src/lib/admin/`,
+  `src/lib/api-auth/problem.ts` and `src/lib/route-handler.server.ts` into
+  `src/lib/http/`, with no behaviour change and no shim at the old paths
+  (I-13). Import and mock them by the new paths. A branch or satellite fork
+  that ports a kit file applies the same rewrite
+  ([Architecture §8.1](docs/architecture.md#81-how-it-moved)).
 
 ### Security
 

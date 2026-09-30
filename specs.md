@@ -3896,7 +3896,7 @@ Scope strings are the `admin.*` catalog keys (`ADMIN_PERMISSION_CATALOG`) plus f
 | `POST /api/v1/admin/oauth-clients/{id}/rotate-secret` | POST | Rotate a client secret |
 
 Errors use `application/problem+json` (`type`, `title`, `status`, `code`,
-optional `detail`, `requestId`) from `src/lib/api-auth/problem.ts`.
+optional `detail`, `requestId`) from `src/lib/http/problem.ts`.
 
 ### 37.4 MCP agent gateway (`/api/mcp`)
 

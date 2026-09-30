@@ -113,7 +113,7 @@ describe("logPreAuthRefusal", () => {
   });
 
   it("derives the request id from the request when the caller has none, like the error envelope", async () => {
-    const { getOrCreateRequestId } = await import("@/lib/admin/request-id.server");
+    const { getOrCreateRequestId } = await import("@/lib/http/request-id.server");
     const request = { headers: new Headers() };
     logPreAuthRefusal({
       eventType: "sso.launch.failure",

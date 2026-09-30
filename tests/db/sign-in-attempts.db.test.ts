@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { db, pgPool } from "@/db/database";
-import { __resetSharedRateLimitForTests } from "@/lib/admin/rate-limit-shared.server";
+import { __resetSharedRateLimitForTests } from "@/lib/http/rate-limit-shared.server";
 import {
   SIGN_IN_EMAIL_LIMIT,
   SIGN_IN_EMAIL_RATE_LIMIT_SCOPE,

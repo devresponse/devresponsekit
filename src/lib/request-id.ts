@@ -6,7 +6,7 @@ import { isUuid } from "@/lib/uuid";
  *
  * A request id ties together: the `x-request-id` response header (stamped on
  * every admin, first-party and v1 route response by
- * `lib/route-handler.server.ts`, F-29), the `requestId` of an error envelope,
+ * `lib/http/route-handler.server.ts`, F-29), the `requestId` of an error envelope,
  * the Sentry issue tag, the stdout log line, and `app_audit_events.request_id`.
  * (The "Support ID" a page error boundary shows is the Sentry event id or
  * Next's digest, not this id.) Because those sinks
@@ -30,7 +30,7 @@ import { isUuid } from "@/lib/uuid";
  *
  * This module is deliberately framework-free — no `server-only`, no DB, no
  * `next/*`, no Node built-ins — so both the App Router helper
- * (`lib/admin/request-id.server.ts`) and `instrumentation.ts` (which also runs
+ * (`lib/http/request-id.server.ts`) and `instrumentation.ts` (which also runs
  * on the EDGE runtime) use one implementation, and there is exactly one answer
  * to "is this id trustworthy". Its imports must stay Edge-safe too: it takes
  * the hop counter from `src/lib/forwarded-hops.ts`, not from `client-ip.ts`

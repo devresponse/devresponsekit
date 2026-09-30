@@ -9,9 +9,9 @@ import {
   type Driver,
   type QueryResult,
 } from "kysely";
-import type * as SharedModule from "@/lib/admin/rate-limit-shared.server";
-import type * as InMemoryModule from "@/lib/admin/rate-limit.server";
-import { normalizeBucketKey } from "@/lib/admin/rate-limit.server";
+import type * as SharedModule from "@/lib/http/rate-limit-shared.server";
+import type * as InMemoryModule from "@/lib/http/rate-limit.server";
+import { normalizeBucketKey } from "@/lib/http/rate-limit.server";
 
 /**
  * Unit tests for the Postgres-backed pre-auth limiter (review #98) — the
@@ -99,8 +99,8 @@ beforeEach(async () => {
   script.calls = [];
   warnSpy.mockReset();
   vi.resetModules();
-  mod = await import("@/lib/admin/rate-limit-shared.server");
-  inMemory = await import("@/lib/admin/rate-limit.server");
+  mod = await import("@/lib/http/rate-limit-shared.server");
+  inMemory = await import("@/lib/http/rate-limit.server");
   inMemory.__resetRateLimitForTests();
   mod.__resetSharedRateLimitForTests();
   (await import("@/lib/observability/metrics.server")).__resetMetricsForTests();

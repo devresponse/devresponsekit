@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
 import { requireApiAccount } from "@/lib/account/guard.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
-import { v1JsonResponse } from "@/lib/api-auth/problem";
-import { withV1Route } from "@/lib/route-handler.server";
+import { v1JsonResponse } from "@/lib/http/problem";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

@@ -5,9 +5,9 @@ import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { decideSecureAccess, type UserAccessContext } from "@/lib/auth-status";
 import { getSessionAccessContext } from "@/lib/session-access.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { checkTrustedOrigin } from "@/lib/http/origin-guard.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { REQUEST_PATH_HEADER, normalizeRequestPath } from "@/lib/request-id";
 import {

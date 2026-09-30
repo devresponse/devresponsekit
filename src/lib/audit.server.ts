@@ -8,7 +8,7 @@ import {
   violatedConstraint,
 } from "@/db/pg-errors";
 import type { AppAuditEventsTable, AppDatabase } from "@/db/schema/app-schema";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
 import { attributeAuditActor } from "@/lib/impersonation-attribution.server";
 import { logServerError } from "@/lib/observability/logger.server";

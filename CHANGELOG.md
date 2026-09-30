@@ -125,7 +125,14 @@ of 2.0.0's list below. Each entry names what to carry over.
   to the deprecated `prom-client`: the same metric names and exposition, with
   event-loop utilization added to the defaults (F-113). The `dompurify` and
   `postcss` override floors are raised to their declared versions, so
-  DOMPurify resolves 3.4.16.
+  DOMPurify resolves 3.4.16. Sentry 11.1 (`@sentry/nextjs`, superseding
+  #485): spans stream and no transaction event is sent, so the scrubber reads
+  the streamed span shape, drops the user attributes the SDK copies onto
+  every span, handles header values sent as arrays and fails closed if it
+  throws. The streaming lifecycle is pinned, so `SENTRY_TRACE_LIFECYCLE=static`
+  cannot switch span scrubbing off, and the root span's name is scrubbed from
+  each envelope's trace header too; the new `queues` collection category is
+  closed (R11).
 
 ### Security
 

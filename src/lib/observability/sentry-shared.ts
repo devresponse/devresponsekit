@@ -3,14 +3,16 @@ import type { Breadcrumb, ErrorEvent, Event, EventHint } from "@sentry/nextjs";
 
 /**
  * `@sentry/nextjs` re-exports only a curated subset of `@sentry/core`'s
- * types (no `TransactionEvent` / `SpanJSON` / `DataCollection`), so derive
- * them from the `init` option surface instead of reaching into the
- * transitive `@sentry/core` package.
+ * types (no `StreamedSpanJSON` / `DataCollection`), so derive them from the
+ * `init` option surface instead of reaching into the transitive
+ * `@sentry/core` package. Deriving the span type from `beforeSendSpan` is
+ * deliberate: it is whatever shape the installed SDK hands that hook, so an
+ * SDK that changes the shape again fails the typecheck here.
  */
 type InitOptions = NonNullable<Parameters<typeof Sentry.init>[0]>;
-export type TransactionEvent = Parameters<NonNullable<InitOptions["beforeSendTransaction"]>>[0];
-export type SpanJSON = Parameters<NonNullable<InitOptions["beforeSendSpan"]>>[0];
+export type StreamedSpanJSON = Parameters<NonNullable<InitOptions["beforeSendSpan"]>>[0];
 export type DataCollection = NonNullable<InitOptions["dataCollection"]>;
+type Integration = Extract<InitOptions["integrations"], readonly unknown[]>[number];
 type ReplayOptions = NonNullable<Parameters<typeof Sentry.replayIntegration>[0]>;
 /** A Session Replay recording frame, as `beforeAddRecordingEvent` receives it. */
 export type ReplayFrameEvent = Parameters<NonNullable<ReplayOptions["beforeAddRecordingEvent"]>>[0];
@@ -67,7 +69,7 @@ const SENSITIVE_HEADERS = new Set([
  * configs add it through {@link createSentryScrubbers} (F-23). The old
  * `sendDefaultPii: false` bridge filtered these by name; a `dataCollection`
  * policy replaces that bridge wholesale, so they must be denied here or
- * every sampled server transaction ships the user's IP (review #22).
+ * every sampled server span ships the user's IP (review #22).
  */
 const IP_HEADERS = new Set([
   "x-client-ip",
@@ -89,11 +91,11 @@ const IP_HEADERS = new Set([
 ]);
 
 /**
- * Header-name fragments the SDK's `sendDefaultPii: false` bridge denied
- * (`PII_HEADER_SNIPPETS`). Its deny-list matching is substring-based, so
- * listing them keeps parity with the pre-`dataCollection` behaviour for
- * any proxy header not named above (`x-forwarded-user`, `via`,
- * `remote-addr`, `x-original-forwarded-for`, …).
+ * Header-name fragments Sentry 10's `sendDefaultPii: false` bridge denied
+ * (its `PII_HEADER_SNIPPETS`; Sentry 11 removed both). The SDK's deny-list
+ * matching is substring-based, so listing them keeps parity with the
+ * pre-`dataCollection` behaviour for any proxy header not named above
+ * (`x-forwarded-user`, `via`, `remote-addr`, `x-original-forwarded-for`, …).
  */
 const PII_HEADER_SNIPPETS = ["forwarded", "-ip", "remote-", "via", "-user"];
 
@@ -108,9 +110,11 @@ type ExtraHeaders = ReadonlySet<string>;
 const NO_EXTRA_HEADERS: ExtraHeaders = new Set();
 
 /**
- * Whether a header (event-level spelling `X-Forwarded-For`, or the SDK's
- * span-attribute spelling `x_forwarded_for` — `@sentry/core` rewrites `-`
- * to `_` in attribute keys) must never leave the process.
+ * Whether a header must never leave the process. Matches the event-level
+ * spelling (`X-Forwarded-For`), the span-attribute spelling (Sentry 11 keeps
+ * the dashes: `http.request.header.x-forwarded-for`) and an underscore
+ * spelling (`x_forwarded_for`: what Sentry 10 wrote into attribute keys, and
+ * how `CLIENT_IP_SOURCE` may name a header).
  */
 function isSensitiveHeaderName(name: string, extra: ExtraHeaders = NO_EXTRA_HEADERS): boolean {
   const lower = name.toLowerCase().replace(/_/g, "-");
@@ -124,63 +128,52 @@ function isSensitiveHeaderName(name: string, extra: ExtraHeaders = NO_EXTRA_HEAD
 
 /**
  * Write-time collection policy passed to every `Sentry.init`. The SDK
- * attaches request data to **transactions and spans** as well as error
- * events, and its own `sendDefaultPii: false` bridge still records query
- * strings, cookies, and headers behind a name-based deny list — so we tell
- * it not to record them at all. The `scrub*` hooks below remain the
- * backstop for anything that reaches an event by another path (review #22).
+ * attaches request data to **spans** as well as error events, and records
+ * query strings, cookies, and headers unless told otherwise — so we tell it
+ * not to record them at all. The `scrub*` hooks below remain the backstop
+ * for anything that reaches an event or a span by another path (review #22).
  *
- * NOTE: once `dataCollection` is set the SDK ignores `sendDefaultPii` and
- * builds on its **permissive** defaults (`userInfo: true`, header deny list
- * empty), so every category is spelled out here rather than relying on a
- * default — including the IP-bearing headers the bridge used to deny.
+ * NOTE: `dataCollection` builds on the SDK's **permissive** defaults
+ * (`userInfo: true`, header deny list empty; Sentry 11 removed the
+ * `sendDefaultPii` bridge altogether), so every category is spelled out here
+ * rather than relying on a default — including the IP-bearing headers the
+ * old bridge used to deny.
  */
 export const SENTRY_DATA_COLLECTION: DataCollection = {
   userInfo: false,
   cookies: false,
-  // Sentry 10.74 renamed `queryParams` to `urlQueryParams` and DEFAULTS THE NEW
-  // ONE TO `true`, dropping the old key from the resolved policy entirely
-  // (`ResolvedDataCollection` omits `queryParams`). Setting only the
-  // deprecated name would therefore have silently started shipping
-  // query strings — which on this app carry one-time reset and invite tokens.
-  // Both are set: the new name is what the SDK reads, the old one keeps the
-  // policy correct if a dependency pins an older SDK. `tests/unit/
-  // sentry-scrub.test.ts` pins this against the real SDK so the next rename
-  // fails the build instead of leaking.
-  queryParams: false,
+  // `urlQueryParams` DEFAULTS TO `true`, and query strings on this app carry
+  // one-time reset and invite tokens. Sentry 11 removed the old `queryParams`
+  // spelling (10.74 renamed it), so this is the only name left.
+  // `tests/unit/sentry-scrub.test.ts` pins the policy as the real SDK resolves
+  // it, so the next rename fails the build instead of leaking.
   urlQueryParams: false,
   httpBodies: [],
-  // Sentry 10.75 widened `httpHeaders` from `{ request?, response? }` to
-  // `CollectBehavior | HttpHeadersCollection`, so a bare `{ deny: [...] }` is
-  // now accepted and fanned out to both directions (`resolveHttpHeaders`,
-  // @sentry/core build/cjs/utils/data-collection/
-  // resolveDataCollectionOptions.js:20-31). We deliberately
-  // keep the explicit per-direction form: it resolves identically on 10.75 and
-  // is still correct on 10.74, whereas the bare form on a <10.75 SDK would fall
-  // through to the `{ request: true, response: true }` default and collect every
-  // header with an EMPTY deny list. Same reasoning as the two query-param keys
-  // above — the policy must not depend on which SDK actually gets installed.
-  // The resolved-policy test pins the direction key set, so an SDK that adds a
-  // third direction (which would default to `true`) fails the build.
+  // A bare `{ deny: [...] }` would also be accepted and fanned out to both
+  // directions. The explicit per-direction form is kept so the resolved-policy
+  // test can pin the direction key set: an SDK that adds a third direction
+  // (which would default to `true`) fails the build.
   httpHeaders: {
     request: { deny: HEADER_DENY_LIST },
     response: { deny: HEADER_DENY_LIST },
   },
   genAI: { inputs: false, outputs: false },
-  // The three categories below are inert in this app today — `graphQL` needs a
+  // The four categories below are inert in this app today — `graphQL` needs a
   // GraphQL integration, `databaseQueryData` is read only by the Supabase
-  // integration, and `stackFrameVariables` is read only after
-  // `includeLocalVariables` is enabled — but all three DEFAULT TO `true` under
-  // `dataCollection` (resolveDataCollectionOptions.js:5-16), so leaving them
-  // unset would make the header comment's "every category is spelled out" claim
-  // false and would silently open a channel the day one of those integrations
-  // is added. `databaseQueryData` is also a regression the switch to
-  // `dataCollection` introduced on its own: the old `sendDefaultPii: false`
-  // bridge mapped it to `false` (defaultPiiToCollectionOptions.js:30) while the
-  // `dataCollection` defaults map it to `true` — and DB query values on this app
-  // are hashed credentials, emails and session tokens.
+  // integration, `queues` only by the KafkaJS one, and `stackFrameVariables`
+  // only after `includeLocalVariables` is enabled — but all four DEFAULT TO
+  // `true` under `dataCollection` (resolveDataCollectionOptions.js), so leaving
+  // them unset would make the header comment's "every category is spelled out"
+  // claim false and would silently open a channel the day one of those
+  // integrations is added. `databaseQueryData` is also a regression the switch
+  // to `dataCollection` introduced on its own: the old `sendDefaultPii: false`
+  // bridge mapped it to `false` while the `dataCollection` defaults map it to
+  // `true` — and DB query values on this app are hashed credentials, emails and
+  // session tokens. `queues` is new in Sentry 11 (message arguments of a queue
+  // task) and arrived defaulting to `true` (R11).
   graphQL: { document: false, variables: false },
   databaseQueryData: false,
+  queues: false,
   stackFrameVariables: false,
   // The `sendDefaultPii: false` bridge used 7 (the ContextLines default);
   // the `dataCollection` defaults drop to 5. Keep the stack-context parity.
@@ -246,18 +239,25 @@ function scrubUrl(url: string): string {
 
 /**
  * Span-attribute and breadcrumb-data keys that are always dropped:
- *   - raw query strings (server `RequestData` writes `url.query`;
- *     OTel / Next.js / browser fetch and the server's outgoing-request
- *     breadcrumbs write `http.query`)
+ *   - raw query strings (Sentry 11 writes `url.query` everywhere: the server
+ *     and browser request spans, `RequestData` and the server's
+ *     outgoing-request breadcrumbs; `http.query` is the older OTel / Sentry 10
+ *     spelling)
  *   - URL fragments (`url.fragment` / `http.fragment` — a hash can carry
- *     an OAuth implicit-flow token or a `returnTo`)
- *   - the captured request body (`httpBodies: []` stops it at write time;
- *     this mirrors the event-level `delete request.data` as the backstop)
- *   - the client IP (`http.client_ip` is set **unconditionally** by the
- *     Node http-server span integration from `x-forwarded-for`;
- *     `user.ip_address` / `client.address` / `net.peer.ip` /
- *     `net.sock.peer.addr` / `network.peer.address` are the RequestData /
- *     OTel spellings) — the policy is "no user info", so no IP anywhere.
+ *     an OAuth implicit-flow token or a `returnTo`; the SDK records it
+ *     whatever `dataCollection` says)
+ *   - the captured request body (`httpBodies: []` stops it at write time, but
+ *     `RequestData` copies a body already on the scope onto the root span as
+ *     `http.request.body.data`; this mirrors the event-level
+ *     `delete request.data` as the backstop)
+ *   - the client IP (`client.address` / `network.peer.address` are what the
+ *     Sentry 11 http-server span writes; `http.client_ip` / `net.peer.ip` /
+ *     `net.sock.peer.addr` the older spellings) — the policy is "no user
+ *     info", so no IP anywhere
+ *   - the user attributes Sentry 11 copies from the scope's user onto EVERY
+ *     span (`user.email`, `user.ip_address`, `user.name` = the username;
+ *     captureSpan.js `commonSpanAttributes`), mirroring the event-level
+ *     `event.user` scrub: only the opaque `user.id` is kept (R11).
  */
 const DROPPED_DATA_KEYS = new Set([
   "url.query",
@@ -267,6 +267,8 @@ const DROPPED_DATA_KEYS = new Set([
   "http.request.body.data",
   "http.client_ip",
   "user.ip_address",
+  "user.email",
+  "user.name",
   "client.address",
   "net.peer.ip",
   "net.sock.peer.addr",
@@ -276,8 +278,16 @@ const DROPPED_DATA_KEYS = new Set([
 /**
  * Span-attribute keys that hold a URL which may carry a query string /
  * reset token — re-run through {@link stripQuery} + {@link redactText}.
- * The bare `url` key is what browser fetch / XHR `http.client` spans use
- * for the full request URL (query included).
+ * The bare `url` key is what Sentry 10's browser fetch / XHR `http.client`
+ * spans used for the full request URL (query included).
+ *
+ * `sentry.segment.name` and `next.span_name` are span NAMES, not URLs, and
+ * are scrubbed the way {@link scrubSpan} scrubs a name: Sentry 11 copies the
+ * root span's name onto every span it streams as `sentry.segment.name`
+ * (captureSpan.js `commonSpanAttributes`, before `beforeSendSpan` runs), and
+ * Next's own spans mirror theirs into `next.span_name`. A name that carries a
+ * URL (a span named from the URL when no route matched) would otherwise
+ * travel on in the copy (R11).
  */
 const URL_DATA_KEYS = new Set([
   "url",
@@ -291,6 +301,8 @@ const URL_DATA_KEYS = new Set([
   "http.response.url",
   "next.route",
   "next.page",
+  "next.span_name",
+  "sentry.segment.name",
 ]);
 
 /**
@@ -302,21 +314,23 @@ const SECRET_KEY_RE =
   /(?:^|[._-])(?:password|passwd|token|secret|authorization|cookie|api[._-]?key)(?:$|[._-])/i;
 
 /**
- * `http.request.header.<name>[.<cookie>]` / `http.response.header.<name>`
- * attributes for a sensitive header (cookies are exploded one attribute
- * per cookie name, hence the optional suffix). The SDK writes `<name>`
- * with `_` in place of `-` (`x_forwarded_for`, `set_cookie`);
- * {@link isSensitiveHeaderName} normalises both spellings.
+ * `http.request.header.<name>` / `http.response.header.<name>` attributes for
+ * a sensitive header. Sentry 11 keeps the header's dashes in `<name>`
+ * (`x-forwarded-for`), writes each value as a string ARRAY, and puts every
+ * cookie in one `http.request.header.cookie` array. Sentry 10 wrote `_` for
+ * `-` and exploded cookies into `…header.cookie.<name>`, hence the optional
+ * suffix; {@link isSensitiveHeaderName} normalises both spellings.
  */
 const HEADER_DATA_RE = /^http\.(?:request|response)\.header\.([^.]+)(?:\.|$)/i;
 
 /**
- * Scrubs a span-attribute bag in place: query / fragment / body / IP
+ * Scrubs a span-attribute bag in place: query / fragment / body / IP / user
  * attributes dropped, URL attributes query-stripped, sensitive-header
  * attributes (auth, cookies, referer, IP-bearing proxy headers) dropped,
  * secret-named keys replaced, and every remaining string value pattern-
- * redacted. Exported for the unit tests; callers use {@link scrubSpan} /
- * {@link scrubTransaction}.
+ * redacted — each string of an array value too, since Sentry 11 writes header
+ * values as arrays (R11; a string-only check let every one of them through).
+ * Exported for the unit tests; callers use {@link scrubSpan}.
  */
 export function scrubSpanData(
   data: Record<string, unknown> | undefined,
@@ -338,8 +352,12 @@ export function scrubSpanData(
       data[key] = "[redacted]";
       continue;
     }
-    if (typeof value !== "string") continue;
-    data[key] = URL_DATA_KEYS.has(key) ? stripQuery(redactText(value)) : redactText(value);
+    const scrub = URL_DATA_KEYS.has(key) ? scrubUrl : redactText;
+    if (typeof value === "string") {
+      data[key] = scrub(value);
+    } else if (Array.isArray(value)) {
+      data[key] = value.map((item: unknown) => (typeof item === "string" ? scrub(item) : item));
+    }
   }
 }
 
@@ -368,8 +386,8 @@ function scrubContextsInPlace(contexts: NonNullable<Event["contexts"]>): void {
 
 /**
  * Strips the request / user / message / exception / breadcrumb / context
- * channels and the transaction name, shared by error, transaction **and**
- * Session Replay events.
+ * channels and the transaction name, shared by error **and** Session Replay
+ * events.
  */
 function scrubEventInPlace(event: Event, extra: ExtraHeaders = NO_EXTRA_HEADERS): void {
   const request = event.request;
@@ -438,56 +456,76 @@ export function scrubEvent(event: ErrorEvent, _hint: EventHint): ErrorEvent {
 }
 
 /**
- * `beforeSendTransaction` scrubber (review #22). Sampled transactions carry
- * the same `request` / `user` / breadcrumb channels as error events **plus**
- * the root span's attributes in `contexts.trace.data` and every child span
- * in `spans[]` — where the SDK records `url.full`, `url.query`,
- * `http.request.header.*` (cookies exploded per name) and whatever an
- * instrumentation attached. Everything goes through the same scrubber as
- * error events so there is one implementation to keep honest; the
- * transaction name itself is redacted too (Next.js parameterises routes,
- * but a raw `/reset-password/<token>` would otherwise ship verbatim).
+ * Scrubs one streamed span in place: its attributes (the root span's carry
+ * what a transaction's `request` and `contexts.trace.data` used to:
+ * `url.full`, `url.query`, the request headers, `RequestData`'s body) and its
+ * name, root span included (a span named from the URL when no route matched
+ * would ship it verbatim).
+ *
+ * Fail-closed: Sentry 11 SENDS THE SPAN UNMODIFIED when `beforeSendSpan`
+ * throws (beforeSendSpan.js `applyBeforeSendSpanCallback`), where Sentry 10
+ * dropped the transaction. A span the scrubber cannot finish therefore loses
+ * every attribute and its name instead (R11).
  */
-export function scrubTransaction(event: TransactionEvent, _hint: EventHint): TransactionEvent {
-  scrubTransactionInPlace(event, NO_EXTRA_HEADERS);
-  return event;
-}
-
-function scrubTransactionInPlace(event: TransactionEvent, extra: ExtraHeaders): void {
-  scrubEventInPlace(event, extra);
-  const trace = event.contexts?.trace;
-  if (trace) {
-    scrubSpanData(trace.data as Record<string, unknown> | undefined, extra);
-  }
-  if (event.spans) {
-    for (const span of event.spans) scrubSpanJsonInPlace(span, extra);
-  }
-}
-
-function scrubSpanJsonInPlace(span: SpanJSON, extra: ExtraHeaders = NO_EXTRA_HEADERS): void {
-  scrubSpanData(span.data as Record<string, unknown> | undefined, extra);
-  if (typeof span.description === "string") {
-    span.description = scrubUrl(span.description);
+function scrubSpanInPlace(span: StreamedSpanJSON, extra: ExtraHeaders): void {
+  try {
+    scrubSpanData(span.attributes, extra);
+    if (typeof span.name === "string") span.name = scrubUrl(span.name);
+  } catch {
+    span.attributes = {};
+    span.name = "[redacted]";
   }
 }
 
 /**
- * `beforeSendSpan` scrubber (review #22). Runs per span (root + children)
- * before {@link scrubTransaction} sees the assembled event, so a span that
- * is exported on its own (span streaming, standalone spans) is covered
- * too. Always returns the span — dropping one here would only orphan its
- * children.
+ * `beforeSendSpan` scrubber (review #22, R11). Sentry 11 streams spans
+ * (`traceLifecycle: "stream"`): there are no transaction events, so this hook
+ * is the ONE channel every span leaves by, root and children alike, and it
+ * receives the streamed shape (`name` / `attributes`, where Sentry 10's static
+ * spans had `description` / `data`). It must stay an unwrapped callback: the
+ * SDK silently never calls a `beforeSendSpan` whose shape does not match the
+ * lifecycle, so a `withStaticSpan(...)` wrapper here, or a static lifecycle,
+ * would turn span scrubbing off without an error. Every config therefore pins
+ * `traceLifecycle: "stream"`: left unset, the server and edge SDKs take it from
+ * SENTRY_TRACE_LIFECYCLE. `tests/unit/sentry-config.test.ts` runs each config's
+ * options through a real client, and the server and edge ones through their
+ * runtime's `init` with that variable set to "static", to prove the hook is
+ * called. Always returns the span: the SDK sends the original when the hook
+ * returns null.
  */
-export function scrubSpan(span: SpanJSON): SpanJSON {
-  scrubSpanJsonInPlace(span);
+export function scrubSpan(span: StreamedSpanJSON): StreamedSpanJSON {
+  scrubSpanInPlace(span, NO_EXTRA_HEADERS);
   return span;
 }
 
-/** The write-time policy and the four `before*` hooks, as one runtime passes them to `Sentry.init`. */
+/**
+ * The trace's dynamic sampling context names its root span as `transaction`
+ * (unless the SDK named that span from the URL). It rides in the header of
+ * every envelope the trace sends, errors' included, and in the `baggage`
+ * header of every outgoing request the SDK propagates the trace to, and no
+ * `before*` hook sees it: `scrubSpan` scrubs the name in the span item while
+ * the header carries it raw. So the name is scrubbed as the SDK builds the
+ * context (R11). A context continued from an incoming `baggage` header is the
+ * caller's and is not rebuilt; the browser's reaches the server scrubbed.
+ */
+function scrubDynamicSamplingContext(dsc: { transaction?: string }): void {
+  if (typeof dsc.transaction === "string") dsc.transaction = scrubUrl(dsc.transaction);
+}
+
+/** Installs {@link scrubDynamicSamplingContext}; all three configs pass it in `integrations` (R11). */
+export function scrubDynamicSamplingContextIntegration(): Integration {
+  return {
+    name: "ScrubDynamicSamplingContext",
+    setup(client) {
+      client.on("createDsc", scrubDynamicSamplingContext);
+    },
+  };
+}
+
+/** The write-time policy and the three `before*` hooks, as one runtime passes them to `Sentry.init`. */
 export interface SentryScrubbers {
   readonly dataCollection: DataCollection;
   readonly beforeSend: typeof scrubEvent;
-  readonly beforeSendTransaction: typeof scrubTransaction;
   readonly beforeSendSpan: typeof scrubSpan;
   readonly beforeBreadcrumb: typeof scrubBreadcrumb;
 }
@@ -502,6 +540,10 @@ export interface SentryScrubbers {
  * server and edge configs pass the configured header in. A name the shared
  * rules already deny adds nothing, and with nothing to add this returns the
  * shared {@link SENTRY_DATA_COLLECTION} and `scrub*` hooks themselves.
+ *
+ * There is no `beforeSendTransaction` (R11): Sentry 11 streams spans and never
+ * builds a transaction event, and it only ever called that hook for one. Every
+ * span, the root span included, goes through `beforeSendSpan`.
  */
 export function createSentryScrubbers(extraSensitiveHeaders: readonly string[]): SentryScrubbers {
   const names = extraSensitiveHeaders
@@ -511,7 +553,6 @@ export function createSentryScrubbers(extraSensitiveHeaders: readonly string[]):
     return {
       dataCollection: SENTRY_DATA_COLLECTION,
       beforeSend: scrubEvent,
-      beforeSendTransaction: scrubTransaction,
       beforeSendSpan: scrubSpan,
       beforeBreadcrumb: scrubBreadcrumb,
     };
@@ -529,12 +570,8 @@ export function createSentryScrubbers(extraSensitiveHeaders: readonly string[]):
       scrubEventInPlace(event, extra);
       return event;
     },
-    beforeSendTransaction: (event) => {
-      scrubTransactionInPlace(event, extra);
-      return event;
-    },
     beforeSendSpan: (span) => {
-      scrubSpanJsonInPlace(span, extra);
+      scrubSpanInPlace(span, extra);
       return span;
     },
     // Breadcrumbs carry no request headers.
@@ -547,8 +584,9 @@ function scrubBreadcrumbInPlace(crumb: Breadcrumb): void {
   if (crumb.data && typeof crumb.data === "object") {
     const data = crumb.data as Record<string, unknown>;
     // The server SDK's outgoing-request breadcrumbs (node:http and fetch)
-    // sanitize `url` but copy its query and fragment into `http.query` /
-    // `http.fragment` verbatim, whatever `dataCollection` says (F-23).
+    // sanitize `url` but copy its fragment into `url.fragment` verbatim,
+    // whatever `dataCollection` says, and its query into `url.query` (F-23;
+    // `http.query` / `http.fragment` on Sentry 10).
     for (const key of Object.keys(data)) {
       if (DROPPED_DATA_KEYS.has(key)) delete data[key];
     }

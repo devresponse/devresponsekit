@@ -83,7 +83,7 @@ docker build \
 The builder stage also takes `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE`,
 `NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` and
 `NEXT_PUBLIC_SENTRY_REPLAYS_ERROR_SAMPLE_RATE`, which default to `0.1`, `0`
-and `1`: a tenth of browser transactions traced, no clean session replayed,
+and `1`: a tenth of browser traces sampled, no clean session replayed,
 every session that errors replayed (the other Sentry settings are in
 [configuration.md](configuration.md#observability-opt-in)). A value passed this
 way is fixed in the image, in the server bundle as well as the browser's, so

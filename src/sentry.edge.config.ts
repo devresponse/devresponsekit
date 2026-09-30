@@ -1,6 +1,10 @@
 import * as Sentry from "@sentry/nextjs";
 import { clientIpSource } from "@/lib/client-ip-source";
-import { createSentryScrubbers, parseSampleRate } from "@/lib/observability/sentry-shared";
+import {
+  createSentryScrubbers,
+  parseSampleRate,
+  scrubDynamicSamplingContextIntegration,
+} from "@/lib/observability/sentry-shared";
 
 /**
  * Sentry initialization for the Edge runtime (middleware/`proxy.ts` and
@@ -27,12 +31,18 @@ Sentry.init({
     process.env.NODE_ENV,
   release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
   tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, 0.1),
+  // Pinned (R11): spans stream, so there is no transaction event and no
+  // `beforeSendTransaction`; `beforeSendSpan` below is the one hook every span
+  // passes. The SDK silently skips that hook under the static lifecycle, and on
+  // this runtime it takes an unset lifecycle from SENTRY_TRACE_LIFECYCLE, so an
+  // operator setting that variable would turn span scrubbing off.
+  traceLifecycle: "stream",
   // Never record cookies / query strings / bodies / IPs at write time;
-  // the scrubbers below are the backstop for errors, transactions, AND
-  // spans (review #22).
+  // the scrubbers below are the backstop for errors AND spans (review #22).
   dataCollection: scrubbers.dataCollection,
   beforeSend: scrubbers.beforeSend,
-  beforeSendTransaction: scrubbers.beforeSendTransaction,
   beforeSendSpan: scrubbers.beforeSendSpan,
   beforeBreadcrumb: scrubbers.beforeBreadcrumb,
+  // The trace header names the root span, and no hook above sees it (R11).
+  integrations: [scrubDynamicSamplingContextIntegration()],
 });

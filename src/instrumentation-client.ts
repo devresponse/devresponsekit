@@ -4,11 +4,11 @@ import {
   installReplayRecordingScrubber,
   parseSampleRate,
   scrubBreadcrumb,
+  scrubDynamicSamplingContextIntegration,
   scrubEvent,
   scrubReplayEvent,
   scrubReplayRecordingEvent,
   scrubSpan,
-  scrubTransaction,
 } from "@/lib/observability/sentry-shared";
 
 /**
@@ -61,18 +61,23 @@ Sentry.init({
   ),
   integrations: [
     Sentry.browserTracingIntegration(),
+    // The trace header names the root span, and no `before*` hook sees it (R11).
+    scrubDynamicSamplingContextIntegration(),
     // F-23: rrweb's own events (the page URL each snapshot opens with, every
     // link's `href`) reach no SDK hook, so the scrubber rides in as an rrweb
     // plugin. An SDK that no longer takes one gets no replay at all rather
     // than an unscrubbed one.
     ...(installReplayRecordingScrubber(replay) ? [replay] : []),
   ],
+  // Pinned (R11), as on the server and edge: spans stream, so there is no
+  // transaction event and no `beforeSendTransaction`; `scrubSpan` below is the
+  // one hook every span passes, and the SDK silently skips it under the static
+  // lifecycle.
+  traceLifecycle: "stream",
   // Never record cookies / query strings / bodies / IPs at write time;
-  // the scrubbers below are the backstop for errors, transactions, AND
-  // spans (review #22).
+  // the scrubbers below are the backstop for errors AND spans (review #22).
   dataCollection: SENTRY_DATA_COLLECTION,
   beforeSend: scrubEvent,
-  beforeSendTransaction: scrubTransaction,
   beforeSendSpan: scrubSpan,
   beforeBreadcrumb: scrubBreadcrumb,
 });

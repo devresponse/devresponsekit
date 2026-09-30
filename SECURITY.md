@@ -182,7 +182,7 @@ ships a release that satisfies the floor on its own; the override can then go.
 | `js-yaml@3` | `^3.15.2` | `GHSA-52cp-r559-cp3m`, `GHSA-5p4m-2wfm-xmqj` (high — merge-key / `!!omap` quadratic CPU), `GHSA-h67p-54hq-rp68` (moderate). `gray-matter` declares `^3.13.1`, which 3.15.x satisfies. | **Runtime** (`gray-matter` docs frontmatter — repo-authored input only). Pinned by `tests/unit/docs-frontmatter.test.ts`. | 2026-12-01 |
 | `js-yaml@4` | `^4.3.1` | Same three advisories on the 4.x line. | Dev (`@eslint/eslintrc`, `cosmiconfig` via `kysely-codegen`). | 2026-12-01 |
 | `ajv>fast-uri` | `^3.1.6` | `GHSA-v2hh-gcrm-f6hx`, `GHSA-7p8r-x3mc-p8w7`, `GHSA-5jgf-p345-68v8`, `GHSA-f65p-4m7j-42xc`, `GHSA-fph4-wmhf-6fwf`, `GHSA-jqff-g426-hqxp` (high). | Dev/build (`ajv` under Stryker and webpack's `schema-utils`). | 2026-12-01 |
-| `browserslist` | `^4.28.7` | `GHSA-c83g-rgw3-j3cx`, `GHSA-73wf-gq98-2v4g` (high). | Build/dev (`@babel/helper-compilation-targets`, `webpack` via `@sentry/webpack-plugin`). | 2026-12-01 |
+| `browserslist` | `^4.28.7` | `GHSA-c83g-rgw3-j3cx`, `GHSA-73wf-gq98-2v4g` (high). | Build/dev (`@babel/helper-compilation-targets`, `webpack` via `@sentry/bundler-plugins`). | 2026-12-01 |
 | `brace-expansion@1` | `^1.1.18` | `GHSA-3jxr-9vmj-r5cp`, `GHSA-mh99-v99m-4gvg`, `GHSA-rgw5-rvv9-x895` (high, ReDoS). | Dev (`minimatch@3` under eslint). | 2026-12-01 |
 | `brace-expansion@5` | `^5.0.9` | Same three advisories on the 5.x line. | Dev (`minimatch@10` under Stryker). | 2026-12-01 |
 | `typed-rest-client>qs` | `^6.16.0` | `GHSA-q8mj-m7cp-5q26`, `GHSA-x5fp-wj9c-mxmx`, `GHSA-4mjr-xmp4-gh2g` (moderate). `typed-rest-client` pins `qs@6.15.1` exactly. | Dev (Stryker dashboard client). The direct dev `qs` is `^6.16.0`. | 2026-12-01 |

@@ -5,8 +5,12 @@ quality gates a change must pass.
 
 ## Prerequisites
 
-- **Node 22** (see `.nvmrc` — `nvm use`), **pnpm 10** (`corepack enable`),
-  **Docker** (for local PostgreSQL).
+- **Node 24**, the major `.nvmrc` pins (`nvm use`) and `package.json`
+  `engines.node` names exactly (`24.x`). CI, the Docker image and Vercel run
+  the same major. A failure that only that major shows once passed every
+  check on a CI a major behind and took production sign-in down (#400), so
+  do not develop on another.
+- **pnpm 10** (`corepack enable`), **Docker** (for local PostgreSQL).
 
 ## Local setup
 
@@ -52,6 +56,7 @@ A PR must pass all of these; run them locally before pushing:
 | Format (Prettier, LF endings) | `pnpm format:check` (`pnpm format` to fix) |
 | Unit/component/integration/security | `pnpm test` |
 | Coverage thresholds | `pnpm test:coverage` |
+| DB-backed suites (`tests/db`, local Postgres) | `pnpm test:db` (targets `DATABASE_TEST_URL`, else `DATABASE_URL`; refuses a non-local host) |
 | E2E + accessibility (Playwright + axe) | `pnpm test:e2e` / `pnpm test:a11y` |
 | Dependency audit (hard gate) | `pnpm audit --audit-level high` and `pnpm --dir vercel-cli audit --audit-level high` |
 | Deploy CLI (`vercel-cli/`, its own package) | `pnpm --dir vercel-cli typecheck`, `pnpm --dir vercel-cli test` (builds first) and `pnpm --dir vercel-cli format:check` |
@@ -93,8 +98,10 @@ rejects quoted password literals under `help/` and `scripts/`.
 ## Database changes
 
 `0001-initial-schema.sql` is **frozen**. Add schema changes as new numbered,
-append-only, idempotent forward migrations (`0002-…`, `0003-…`); the runner
-applies and ledgers them. See `src/db/migrations/`.
+append-only, idempotent forward migrations (`NNNN-*.sql`, numbered after the
+highest file in `src/db/migrations/`); the runner applies and ledgers them.
+Production applies a migration by hand **before** the PR that needs it merges
+(see [README → Deployment](README.md#deployment)).
 
 ## Security
 

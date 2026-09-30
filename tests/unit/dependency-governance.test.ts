@@ -269,6 +269,24 @@ describe("dependency governance: Node runtime major", () => {
     const engines = (JSON.parse(read("package.json")) as { engines?: { node?: string } }).engines;
     expect(engines?.node).toBe(`${nodeMajor}.x`);
   });
+
+  // F-134: the setup docs are where a contributor learns which Node to
+  // install, and nothing held them to .nvmrc. CONTRIBUTING.md still said 22
+  // after everything else moved to 24, which is how a contributor brings back
+  // the 22-vs-24 split #400 paid for.
+  it("the setup docs name the same major as their Node prerequisite", () => {
+    const majors = (text: string) =>
+      [...text.matchAll(/\bNode(?:\.js)?\s+(\d+)/g)].map((m) => m[1]);
+    const prerequisites: Record<string, string> = {
+      "CONTRIBUTING.md": sliceAt(read("CONTRIBUTING.md"), "## Prerequisites", "\n## "),
+      "README.md": sliceAt(read("README.md"), "Prerequisites:", "\n"),
+    };
+    for (const [file, text] of Object.entries(prerequisites)) {
+      expect(majors(text).length, file).toBeGreaterThan(0);
+      expect(new Set(majors(text)), file).toEqual(new Set([nodeMajor]));
+    }
+    expect(read("docs/developer-onboarding.md")).toContain(`| **Node.js** | ${nodeMajor}.x |`);
+  });
 });
 
 describe("dependency governance: production image", () => {

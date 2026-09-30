@@ -1019,9 +1019,10 @@
       },
       "namespace": {
         "idHelp": "Las aplicaciones de tu organización se nombran bajo su slug: empieza el ID con {slug} y un punto, por ejemplo {slug}.crm.",
-        "audienceHelp": "La parte que sigue al último «:» debe ser un ID bajo el slug de tu organización, normalmente el ID de esta aplicación (por ejemplo {slug}.crm).",
+        "audienceHelp": "Un prefijo, dos puntos y el ID de esta aplicación, como devresponse-app:{slug}.crm. El inicio de sesión único en la aplicación solo funciona con esa audiencia, así que sigue al ID hasta que la edites.",
+        "audienceRule": "Un prefijo, dos puntos y el ID de esta aplicación, como devresponse-app:{id}. El inicio de sesión único en la aplicación solo funciona con esa audiencia.",
         "idRefused": "Solo un superadministrador puede registrar un ID fuera del slug de tu organización. Empiézalo por {slug} y un punto, seguido de un nombre, como {slug}.crm.",
-        "audienceRefused": "Solo un superadministrador puede registrar una audiencia SSO fuera del slug de tu organización. La parte que sigue al último «:» debe ser un ID bajo ese slug, normalmente el ID de esta aplicación, como devresponse-app:{slug}.crm."
+        "audienceRefused": "La audiencia SSO debe ser un prefijo, dos puntos y el ID de esta aplicación, como devresponse-app:{id}. El inicio de sesión único en la aplicación no funciona con ninguna otra audiencia."
       },
       "status": {
         "available": "Disponible",

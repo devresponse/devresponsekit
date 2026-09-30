@@ -115,35 +115,36 @@ i18n: run in `en` and `uk`; column headers, the Status filter options, the "Glob
 
 - Route: `/app/administrator/enterprise-apps/new` · Example URL: `/en/app/administrator/enterprise-apps/new` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/new/page.tsx:24`
 - Purpose: Create a new enterprise application with a stable text id, HTTPS origin, subdomain, SSO audience, and sort order.
-- Guard / who can access: `admin.apps.manage` (page `new/page.tsx:30`; API `POST` at `src/app/api/administrator/enterprise-apps/route.ts:169`).
+- Guard / who can access: `admin.apps.manage` (page `new/page.tsx:30`; API `POST` at `src/app/api/administrator/enterprise-apps/route.ts:170`).
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can create, but only in their own org and only under its slug: an id `<org-slug>.<name>` and an audience ending in such an id (I-01); the server rejects a global app, another org's app, or any other id or audience with `forbidden` 403 (`route.ts:199`, `route.ts:211`). The form has no organization picker: it sends the Org Admin's active org (resolved on the page with the route's scope rule, `new/page.tsx:37`), prefills the **Id** with `<org-slug>.` and says under **Id** and **SSO audience** that names go under the slug (R14).
-  - Superadmin -> can create in any org and global apps: an **Organization** picker defaults to **Global (all organizations)** and offers every org (`_new-enterprise-app-form.tsx:157`); no prefix or hint.
+  - Org Admin -> can create, but only in their own org, with an id under its slug, `<org-slug>.<name>` (I-01), and an SSO audience its satellite can consume, exactly `<prefix>:<id>` (R15); the server rejects a global app, another org's app, or any other id with `forbidden` 403 (`route.ts:200`, `route.ts:212`), and any other audience with `invalid_body` 400 (`route.ts:224`). The form has no organization picker: it sends the Org Admin's active org (resolved on the page with the route's scope rule, `new/page.tsx:37`), prefills the **Id** with `<org-slug>.` and says under it that ids go under the slug, and proposes the **SSO audience** `devresponse-app:<id>`, which follows the **Id** until you edit it, under a hint that states the rule (R14, R15).
+  - Superadmin -> can create in any org and global apps: an **Organization** picker defaults to **Global (all organizations)** and offers every org (`_new-enterprise-app-form.tsx:173`); no prefix, proposed audience or hint.
 - Preconditions and test data: signed in as a manager persona. Have a valid HTTPS origin that is on the trusted-host allow-list. Required fields: `id`, `label`, `origin`, `subdomain`, `sso_audience` (`src/lib/validation/enterprise-apps.ts:24`).
 
 User stories
 
 - UAT-ADMIN-AEK-APPS-NEW-S1 — As an Org Admin, I want to register a new app, so that users in my org can launch it via SSO.
-  - Acceptance criteria: Given valid values under my org's slug, when I submit, then the app is created in my org (the form sends my active org as `organization_id`, R14) and I am redirected to its detail page; given an id under my org's slug that is already taken, then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:269`; form maps it at `_new-enterprise-app-form.tsx:99`); given an id outside my org's slug (including this deployment's own application id, or the bare prefill `<org-slug>.` with no name after the dot), then the id field shows "Only a superadmin can register an ID outside your organization's slug. Start it with `<org-slug>` and a dot, then a name…"; given an SSO audience whose part after the last `:` is not such an id, then the audience field shows "Only a superadmin can register an SSO audience outside your organization's slug. The part after the last colon must be an ID under it…, such as `devresponse-app:<org-slug>.crm`" (API 403 `forbidden` with an `administrator.access.denied` row, reason `cross_org_reach_required`, action `enterprise_app_global_name`, `route.ts:211`, I-01; mapped at `_new-enterprise-app-form.tsx:119`). As Superadmin, this deployment's own application id shows "id already taken" (API 409 `id_taken`, `route.ts:235`, F-83).
+  - Acceptance criteria: Given valid values under my org's slug, when I submit, then the app is created in my org (the form sends my active org as `organization_id`, R14) and I am redirected to its detail page; given an id under my org's slug that is already taken, then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:274`; form maps it at `_new-enterprise-app-form.tsx:112`); given an id outside my org's slug (including this deployment's own application id, or the bare prefill `<org-slug>.` with no name after the dot), then the id field shows "Only a superadmin can register an ID outside your organization's slug. Start it with `<org-slug>` and a dot, then a name…" (API 403 `forbidden` with an `administrator.access.denied` row, reason `cross_org_reach_required`, action `enterprise_app_global_name`, `route.ts:212`, I-01; mapped at `_new-enterprise-app-form.tsx:143`); given an SSO audience that is not a prefix, a colon and my app's id (no colon, such as `<org-slug>.crm`, or another id, such as `x:<org-slug>.other`), then the audience field shows "The SSO audience must be a prefix, a colon, then this application's ID, such as `devresponse-app:<org-slug>.crm`…" (API 400 `invalid_body` with no audit row, `route.ts:224`, R15; mapped at `_new-enterprise-app-form.tsx:127`). As Superadmin, this deployment's own application id shows "id already taken" (API 409 `id_taken`, `route.ts:240`, F-83).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | As Org Admin of ORG A, open the Apps group and click **New application** | The create form opens with a required-field legend and no **Organization** picker; the **Id** is prefilled with `org-a.`, and the hints under **Id** and **SSO audience** say names go under your org's slug (e.g. `org-a.crm`) |
-    | 2 | Complete the **Id** after the prefix, e.g. `org-a.crm` (lowercase letters, digits, dots, hyphens, underscores) | The field accepts it and lowercases your input |
-    | 3 | Fill **Label**, **Origin** (an allowed `https://...`), **Subdomain**, and **SSO audience** ending in your id, e.g. `devresponse-app:org-a.crm` | Fields accept valid values |
+    | 1 | As Org Admin of ORG A, open the Apps group and click **New application** | The create form opens with a required-field legend and no **Organization** picker; the **Id** is prefilled with `org-a.` under a hint saying ids go under your org's slug (e.g. `org-a.crm`), and the **SSO audience** shows `devresponse-app:org-a.` under a hint saying it is a prefix, a colon, then this application's ID |
+    | 2 | Complete the **Id** after the prefix, e.g. `org-a.crm` (lowercase letters, digits, dots, hyphens, underscores) | The field accepts it and lowercases your input, and the **SSO audience** becomes `devresponse-app:org-a.crm` |
+    | 3 | Fill **Label**, **Origin** (an allowed `https://...`) and **Subdomain**, and leave the proposed **SSO audience** | Fields accept valid values |
     | 4 | Leave **Sort order** at 100 and submit | You are redirected to the new app's detail page; it shows **Organization scope** `org-a` |
     | 5 | Repeat with the same Id | The Id field shows an "already taken" error and no navigation happens |
-    | 6 | Start a new app, replace the **Id** with a global one such as `crm`, use SSO audience `devresponse-app:crm`, and submit | The **Id** shows "Only a superadmin can register an ID outside your organization's slug…" and the **SSO audience** its own rule, "Only a superadmin can register an SSO audience outside your organization's slug. The part after the last colon must be an ID under it…, such as `devresponse-app:org-a.crm`" (API `403 forbidden`), and no app is created; the audit explorer shows an `administrator.access.denied` row (reason `cross_org_reach_required`, action `enterprise_app_global_name`) |
-    | 7 | As Superadmin, open **New application** | The form shows an **Organization** picker set to **Global (all organizations)** and an empty **Id** with no slug hint; creating `crm` with `devresponse-app:crm` makes a global app, and picking ORG A first makes it ORG A's |
+    | 6 | Start a new app, replace the **Id** with a global one such as `crm` (the **SSO audience** follows it to `devresponse-app:crm`), and submit | The **Id** shows "Only a superadmin can register an ID outside your organization's slug…" (API `403 forbidden`), the **SSO audience** shows no error, and no app is created; the audit explorer shows an `administrator.access.denied` row (reason `cross_org_reach_required`, action `enterprise_app_global_name`) |
+    | 7 | Start a new app with **Id** `org-a.crm2`, change the **SSO audience** to `org-a.crm2` (no colon) and submit, then to `x:org-a.other` and submit | Each time the **SSO audience** shows "The SSO audience must be a prefix, a colon, then this application's ID, such as `devresponse-app:org-a.crm2`…" (API `400 invalid_body`), and no app is created (R15) |
+    | 8 | As Superadmin, open **New application** | The form shows an **Organization** picker set to **Global (all organizations)**, an empty **Id** and **SSO audience** with no slug hint, and the audience does not follow the id; creating `crm` with `devresponse-app:crm` makes a global app, and picking ORG A first makes it ORG A's |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-NEW-S2 — As an Org Admin, I want the form to stop me submitting a non-HTTPS or untrusted origin, so that SSO redirects stay safe.
-  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, or is this deployment's own origin (F-83), then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:224`; mapped at `_new-enterprise-app-form.tsx:110`).
+  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, or is this deployment's own origin (F-83), then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:229`; mapped at `_new-enterprise-app-form.tsx:123`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | On the create form, enter `http://example.com` as the Origin and otherwise-valid values (as Org Admin, an Id and SSO audience under your org's slug, as in S1) | On submit, the Origin field shows an invalid-origin error |
+    | 1 | On the create form, enter `http://example.com` as the Origin and otherwise-valid values (as Org Admin, an Id under your org's slug and its proposed SSO audience, as in S1) | On submit, the Origin field shows an invalid-origin error |
     | 2 | Change it to a well-formed `https://` URL that is not a trusted host | On submit, the Origin field shows an "origin not allowed" error |
     | 3 | Clear the required fields one at a time and submit | Each required field (`Id`, `Label`, `Origin`, `Subdomain`, `SSO audience`) shows its `*` marker and a localized required message with a red border |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -160,28 +161,29 @@ User stories
 Negative and edge cases
 - Validation: required-field markers appear for `Id`, `Label`, `Origin`, `Subdomain`, `SSO audience`; invalid id/subdomain/audience formats are rejected with localized messages (`src/lib/validation/enterprise-apps.ts:26`).
 - Org-scope: the form always sends the Org Admin's active org (R14); an API call with a global/other-org target -> `forbidden` 403 (action `enterprise_app_create`), and from the form (e.g. the active org was switched in another tab after the page loaded) a root "forbidden" error.
-- Namespace (I-01): Org Admin submitting an id or audience outside its org's slug (`crm`, `devresponse-app:crm`, `acme-corp.crm` for org `acme`) -> `forbidden` 403 with an `administrator.access.denied` audit row (action `enterprise_app_global_name`), shown on each field outside the slug with that field's own rule; `acme.crm` with `devresponse-app:acme.crm` is accepted. A Superadmin may register any name.
-- Rate limit (admin mutation): rapid repeated creates hit `admin.apps.create` limiter (`route.ts:172`); expect a friendly failure. `TODO: verify` the exact 429 copy in the create form.
+- Namespace (I-01): Org Admin submitting an id outside its org's slug (`crm`, `acme-crm` or `acme-corp.crm` for org `acme`) -> `forbidden` 403 with an `administrator.access.denied` audit row (action `enterprise_app_global_name`), shown on the **Id**; `acme.crm` with `devresponse-app:acme.crm` is accepted. A Superadmin may register any id.
+- Audience (R15): Org Admin submitting an audience that is not `<prefix>:<its id>` (`acme.crm`, `:acme.crm`, `x:acme.other` or `devresponse-app:crm` for app `acme.crm`) -> `invalid_body` 400 with no audit row, shown on the **SSO audience**. A Superadmin may register any audience (e.g. `devresponse-app:docs` for an app `devresponse-docs`), which a satellite consumes only if it is that satellite's `<prefix>:<id>`.
+- Rate limit (admin mutation): rapid repeated creates hit `admin.apps.create` limiter (`route.ts:173`); expect a friendly failure. `TODO: verify` the exact 429 copy in the create form.
 - Loading: the submit button is disabled while submitting.
 
-Accessibility: the form is `noValidate` with schema-driven markers; each control is labelled; the root error is a `role="alert"` region (`_new-enterprise-app-form.tsx:297`).
+Accessibility: the form is `noValidate` with schema-driven markers; each control is labelled; the root error is a `role="alert"` region (`_new-enterprise-app-form.tsx:326`).
 i18n: labels, help text, and the required legend localize in `en` and `uk`.
 
 ### UAT-ADMIN-AEK-APPS-DETAIL - Enterprise application detail
 
 - Route: `/app/administrator/enterprise-apps/[appId]` · Example URL: `/en/app/administrator/enterprise-apps/acme-hub` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/[appId]/page.tsx:22`
 - Purpose: View and edit a single application. The `id` is immutable (referenced by SSO handoff nonces); all other fields are inline-editable by managers.
-- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:40`,`:90`). Read-only callers see the same form disabled.
+- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:40`,`:92`). Read-only callers see the same form disabled.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
   - Org Admin -> can view/edit apps their org owns; a foreign or global app returns Not Found (404, not 403) to preserve existence indistinguishability (`[appId]/page.tsx:60`; `[id]/route.ts:73`).
-  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:150`).
+  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:152`).
 - Preconditions and test data: know a valid `appId` your persona can access. For the 404 case, obtain an app id owned by a different org (as Org Admin).
 
 User stories
 
 - UAT-ADMIN-AEK-APPS-DETAIL-S1 — As an Org Admin, I want to change an app's status and label, so that I can disable or rename it without recreating it.
-  - Acceptance criteria: Given valid edits, when I Save, then a success message appears and the values persist after refresh (`_enterprise-app-settings-form.tsx:100`,`:305`). Saving it as Disabled also signs out every user who reached the app through a launch, on a satellite that shares this deployment's database and carries F-82 (a kit-built satellite, or a fork that has ported it; not today's `devresponseapps` forks), and the audit row counts them in `metadata.endedSsoSessions` (F-82).
+  - Acceptance criteria: Given valid edits, when I Save, then a success message appears and the values persist after refresh (`_enterprise-app-settings-form.tsx:100`,`:302`). Saving it as Disabled also signs out every user who reached the app through a launch, on a satellite that shares this deployment's database and carries F-82 (a kit-built satellite, or a fork that has ported it; not today's `devresponseapps` forks), and the audit row counts them in `metadata.endedSsoSessions` (F-82).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -194,7 +196,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-DETAIL-S2 — As a read-only admin, I want to inspect an app without being able to change it, so that least privilege holds.
-  - Acceptance criteria: Given I hold `admin.apps.read` but not `.manage`, when I open the detail, then all fields are disabled and there is no Save button and no required legend (`_enterprise-app-settings-form.tsx:152`,`:157`,`:310`).
+  - Acceptance criteria: Given I hold `admin.apps.read` but not `.manage`, when I open the detail, then all fields are disabled and there is no Save button and no required legend (`_enterprise-app-settings-form.tsx:151`,`:156`,`:307`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -215,11 +217,11 @@ User stories
 Negative and edge cases
 - Out-of-scope -> Not Found (404) for both foreign and global apps to an Org Admin.
 - Validation: editing keeps `Label`, `Origin`, `Subdomain`, `SSO audience` required (`src/lib/validation/enterprise-apps.ts:96`); bad origin surfaces `invalid_origin`/`origin_not_allowed` on the field.
-- Namespace (I-01): as Org Admin, changing **SSO audience** to one whose last `:` segment is not `<org-slug>.<name>` -> `forbidden` 403 (`[id]/route.ts:161`), shown on the **SSO audience** field as "Only a superadmin can register an SSO audience outside your organization's slug. The part after the last colon must be an ID under it…", under a hint that names the rule (R14; the page passes the slug at `[appId]/page.tsx:95`, mapped at `_enterprise-app-settings-form.tsx:125`); saving other fields of an app named before the rule (its stored audience is re-sent unchanged) still succeeds.
+- Audience (R15): as Org Admin, changing **SSO audience** to anything but a prefix, a colon and the app's id (`org-a.crm`, `x:org-a.other` or `devresponse-app:crm` for app `org-a.crm`) -> `invalid_body` 400 with no audit row (`[id]/route.ts:165`), shown on the **SSO audience** field as "The SSO audience must be a prefix, a colon, then this application's ID, such as `devresponse-app:org-a.crm`…", under a hint that states the rule with the app's id (the page passes `confined` at `[appId]/page.tsx:95`, mapped at `_enterprise-app-settings-form.tsx:120`); `sso:org-a.crm` is accepted, and saving other fields of an app registered before the rule (its stored audience is re-sent unchanged) still succeeds. A Superadmin may set any audience.
 - Invalid id in URL: an id failing `APP_ID_RE` returns Not Found before any DB read (`[appId]/page.tsx:33`).
 - Concurrency: last write wins on PATCH; there is no If-Match on this form. `TODO: verify` whether stale-edit protection is expected here.
 
-Accessibility: disabled state is conveyed via the disabled attribute; error region is `role="alert"`; success is `role="status"` (`_enterprise-app-settings-form.tsx:305`).
+Accessibility: disabled state is conveyed via the disabled attribute; error region is `role="alert"`; success is `role="status"` (`_enterprise-app-settings-form.tsx:302`).
 i18n: status option labels, field labels, and the "Global" org label localize.
 
 ---

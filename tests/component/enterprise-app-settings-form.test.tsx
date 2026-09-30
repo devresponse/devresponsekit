@@ -80,68 +80,70 @@ describe("EnterpriseAppSettingsForm", () => {
 });
 
 /**
- * I-01 / R14: a caller without cross-org reach may move its app's audience only
- * onto a name under its org's slug, and the route refuses anything else with a
- * bare 403 that the form showed as "You don't have permission to view this
- * page." on a page the caller can view. The detail page passes the slug for
- * such a caller; the form hints the rule and puts that 403 on the audience.
+ * R15: a caller without cross-org reach may move its app's audience only onto
+ * one the app's satellite can consume, `<prefix>:<app id>`, and the route
+ * refuses anything else with `400 invalid_body` (I-01 used to judge only the
+ * part after the last colon, so `acme.crm` or `x:acme.other` for app
+ * `acme.crm` got through and every launch failed at the satellite). The
+ * detail page passes `confined` for such a caller; the form states the rule
+ * with the app's id and puts that 400 on the audience.
  */
-describe("EnterpriseAppSettingsForm audience namespace (R14)", () => {
+describe("EnterpriseAppSettingsForm audience rule (R15)", () => {
   const ORG_APP = {
     ...APP,
     id: "acme.crm",
     ssoAudience: "devresponse-app:acme.crm",
     organizationSlug: "acme",
   };
-  const renderConfined = (canManage = true) =>
-    renderWithIntl(
-      <EnterpriseAppSettingsForm app={ORG_APP} canManage={canManage} namespaceSlug="acme" />,
-    );
-  const hint = /must be an ID under your organization's slug.*\(for example acme\.crm\)/;
+  const renderConfined = (canManage = true, app = ORG_APP) =>
+    renderWithIntl(<EnterpriseAppSettingsForm app={app} canManage={canManage} confined />);
+  const hint = /a colon, then this application's ID, such as devresponse-app:acme\.crm\./;
+  const REFUSED =
+    "The SSO audience must be a prefix, a colon, then this application's ID, such as devresponse-app:acme.crm. Single sign-on to the application works with no other audience.";
 
-  it("hints the namespace under the audience for a confined manager only", () => {
+  it("states the rule with the app's id under the audience for a confined manager only", () => {
     renderConfined();
     expect(screen.getByText(hint)).toBeInTheDocument();
   });
 
   it("shows no hint to a superadmin or a read-only viewer", () => {
-    const { unmount } = renderWithIntl(
-      <EnterpriseAppSettingsForm app={ORG_APP} canManage namespaceSlug={null} />,
-    );
+    const { unmount } = renderWithIntl(<EnterpriseAppSettingsForm app={ORG_APP} canManage />);
     expect(screen.queryByText(hint)).not.toBeInTheDocument();
     unmount();
     renderConfined(false);
     expect(screen.queryByText(hint)).not.toBeInTheDocument();
   });
 
-  it("puts the 403 for an audience moved outside the slug on the audience field", async () => {
+  it.each(["acme.crm", "x:acme.other"])(
+    "puts the 400 for an audience moved onto %s on the audience field",
+    async (value) => {
+      const user = userEvent.setup();
+      fetchMock.mockResolvedValue({ status: 400, json: async () => ({ error: "invalid_body" }) });
+      renderConfined();
+      const audience = screen.getByRole("textbox", { name: "SSO audience" });
+      await user.clear(audience);
+      await user.type(audience, value);
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      expect(await screen.findByText(REFUSED)).toBeInTheDocument();
+      expect(audience).toHaveAttribute("aria-invalid", "true");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    },
+  );
+
+  it("keeps a 400 with the stored audience unchanged a root error", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue({ status: 400, json: async () => ({ error: "invalid_body" }) });
+    renderConfined(true, { ...ORG_APP, ssoAudience: "acme.crm" });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The submitted data is invalid.");
+  });
+
+  it("keeps a 403 a root error", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue({ status: 403, json: async () => ({ error: "forbidden" }) });
     renderConfined();
-    const audience = screen.getByRole("textbox", { name: "SSO audience" });
-    await user.clear(audience);
-    await user.type(audience, "devresponse-app:crm");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
-
-    expect(
-      await screen.findByText(
-        "Only a superadmin can register an SSO audience outside your organization's slug. The part after the last colon must be an ID under it, normally this application's ID, such as devresponse-app:acme.crm.",
-      ),
-    ).toBeInTheDocument();
-    expect(audience).toHaveAttribute("aria-invalid", "true");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("keeps a 403 with the stored audience unchanged a root error", async () => {
-    const user = userEvent.setup();
-    fetchMock.mockResolvedValue({ status: 403, json: async () => ({ error: "forbidden" }) });
-    renderWithIntl(
-      <EnterpriseAppSettingsForm
-        app={{ ...ORG_APP, ssoAudience: "devresponse-app:crm" }}
-        canManage
-        namespaceSlug="acme"
-      />,
-    );
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(

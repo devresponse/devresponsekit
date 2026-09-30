@@ -789,9 +789,10 @@ describe("enterprise apps — this deployment is never its own SSO target (F-83)
  * index). An org admin used to register its org's app as `crm` or
  * `devresponse-app:crm`, and the superadmin who then registered the real
  * satellite got 409 and had to rename it. A caller without cross-org reach now
- * claims only names under its org's slug (`acme.crm`); any other name is
- * refused as a superadmin-only action (403 and a denied row, pinned for each
- * route in superadmin-only-refusals-audited.test.ts).
+ * claims only ids under its org's slug (`acme.crm`); any other id is refused
+ * as a superadmin-only action (403 and a denied row, pinned in
+ * superadmin-only-refusals-audited.test.ts). Its audience must end in that id
+ * (R15, below), so it cannot claim another app's audience either.
  */
 describe("enterprise apps — an org admin names its apps under its org's slug (I-01)", () => {
   const ORG = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -843,7 +844,7 @@ describe("enterprise apps — an org admin names its apps under its org's slug (
 
   it.each([
     ["a global id", { id: "crm" }],
-    ["a global audience", { sso_audience: "devresponse-app:crm" }],
+    ["a global id with its own audience", { id: "crm", sso_audience: "devresponse-app:crm" }],
     ["a hyphenated id, not the namespace", { id: "acme-crm" }],
     [
       "names in org acme-corp's namespace",
@@ -873,14 +874,13 @@ describe("enterprise apps — an org admin names its apps under its org's slug (
     expect(res.status).toBe(201);
   });
 
-  it("moves its app's audience within the namespace", async () => {
+  it("moves its app's audience onto another prefix of its own id", async () => {
     selectFirst
       .mockResolvedValueOnce({
         id: "acme.crm",
         organization_id: ORG,
         sso_audience: "devresponse-app:acme.crm",
       }) // existing row
-      .mockResolvedValueOnce({ slug: "acme" }) // the org's slug
       .mockResolvedValueOnce(null); // audience not taken
     const res = await PATCH(idReq("acme.crm", { sso_audience: "sso:acme.crm" }), {
       params: Promise.resolve({ id: "acme.crm" }),
@@ -889,19 +889,19 @@ describe("enterprise apps — an org admin names its apps under its org's slug (
     expect(updateExecute).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses to move its app's audience onto a global name", async () => {
-    selectFirst
-      .mockResolvedValueOnce({
-        id: "acme.crm",
-        organization_id: ORG,
-        sso_audience: "devresponse-app:acme.crm",
-      })
-      .mockResolvedValueOnce({ slug: "acme" });
+  it("refuses to move its app's audience onto a global name (R15: 400, not consumable)", async () => {
+    selectFirst.mockResolvedValueOnce({
+      id: "acme.crm",
+      organization_id: ORG,
+      sso_audience: "devresponse-app:acme.crm",
+    });
     const res = await PATCH(idReq("acme.crm", { sso_audience: "devresponse-app:crm" }), {
       params: Promise.resolve({ id: "acme.crm" }),
     });
-    await expectRefused(res);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
     expect(updateExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("saves an app named before the rule, whose form re-sends its stored audience", async () => {
@@ -921,6 +921,150 @@ describe("enterprise apps — an org admin names its apps under its org's slug (
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.app.updated", outcome: "success" }),
     );
+  });
+});
+
+/**
+ * R15: a satellite consumes only a token whose `aud` is
+ * `<SSO_HANDOFF_AUDIENCE_PREFIX>:<SSO_HANDOFF_APPLICATION_ID>` and whose
+ * `targetApplicationId` (the app's catalog id) is that application id. The
+ * I-01 check took the audience's part after its LAST colon, so a colon-less
+ * `acme.crm`, or `x:acme.other` for app `acme.crm`, passed, and the org admin
+ * registered an app every launch of which fails at the satellite. A caller
+ * without cross-org reach now gives its app an audience `<prefix>:<its id>`,
+ * or gets 400 `invalid_body`; a superadmin is not held to it.
+ */
+describe("enterprise apps — an org admin's audience is one its satellite can consume (R15)", () => {
+  const ORG = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const ACME_ADMIN = { ...ORG_ADMIN(["admin.apps.manage"]), organizationId: ORG };
+  const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
+
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACME_ADMIN);
+    insertExecute.mockResolvedValue(undefined);
+    updateExecute.mockResolvedValue(undefined);
+  });
+
+  const create = (overrides: Record<string, unknown>) =>
+    POST(
+      jsonReq({
+        id: "acme.crm",
+        label: "CRM",
+        origin: "https://crm.example.com",
+        subdomain: "crm",
+        sso_audience: "devresponse-app:acme.crm",
+        organization_id: ORG,
+        ...overrides,
+      }),
+    );
+
+  const existingApp = (overrides: Record<string, unknown> = {}) => ({
+    id: "acme.crm",
+    organization_id: ORG,
+    sso_audience: "devresponse-app:acme.crm",
+    ...overrides,
+  });
+
+  const expectInvalid = async (res: Response) => {
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
+    expect(auditMock).not.toHaveBeenCalled();
+  };
+
+  it("creates acme.crm with devresponse-app:acme.crm", async () => {
+    selectFirst
+      .mockResolvedValueOnce({ slug: "acme" }) // the org's slug
+      .mockResolvedValueOnce(null); // audience not taken
+    const res = await create({});
+    expect(res.status).toBe(201);
+    expect(insertExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["an audience with no colon", "acme.crm"],
+    ["an empty prefix", ":acme.crm"],
+    ["another id in its namespace", "x:acme.other"],
+    ["a global app's audience", "devresponse-app:crm"],
+    ["a prefix holding a colon", "a:b:acme.crm"],
+  ])("refuses %s on create with 400 and writes nothing", async (_label, ssoAudience) => {
+    selectFirst.mockResolvedValueOnce({ slug: "acme" });
+    await expectInvalid(await create({ sso_audience: ssoAudience }));
+    expect(insertExecute).not.toHaveBeenCalled();
+  });
+
+  it("an org-bound superuser credential is held to it too (MACHINE-2)", async () => {
+    accessGetter.mockResolvedValue({
+      ...ACME_ADMIN,
+      permissions: ["admin.apps.manage", "superuser"],
+      orgBound: true,
+    });
+    selectFirst.mockResolvedValueOnce({ slug: "acme" });
+    await expectInvalid(await create({ sso_audience: "x:acme.other" }));
+    expect(insertExecute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a platform app's audience", { id: "devresponse-docs", sso_audience: "devresponse-app:docs" }],
+    ["a colon-less audience", { sso_audience: "acme.crm" }],
+  ])("a superadmin still registers %s", async (_label, overrides) => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue(null); // audience not taken
+    const res = await create(overrides);
+    expect(res.status).toBe(201);
+    expect(insertExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to move the audience onto another id in its namespace", async () => {
+    selectFirst.mockResolvedValueOnce(existingApp());
+    await expectInvalid(
+      await PATCH(idReq("acme.crm", { sso_audience: "x:acme.other" }), ctx("acme.crm")),
+    );
+    expect(updateExecute).not.toHaveBeenCalled();
+  });
+
+  it("refuses to move the audience onto a colon-less one", async () => {
+    selectFirst.mockResolvedValueOnce(existingApp());
+    await expectInvalid(
+      await PATCH(idReq("acme.crm", { sso_audience: "acme.crm" }), ctx("acme.crm")),
+    );
+    expect(updateExecute).not.toHaveBeenCalled();
+  });
+
+  it("an app named before I-01 moves its audience onto another prefix of its own id", async () => {
+    selectFirst
+      .mockResolvedValueOnce(existingApp({ id: "crm", sso_audience: "devresponse-app:crm" }))
+      .mockResolvedValueOnce(null); // audience not taken
+    const res = await PATCH(idReq("crm", { sso_audience: "sso:crm" }), ctx("crm"));
+    expect(res.status).toBe(200);
+    expect(updateExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves an app whose stored audience predates the rule, re-sent unchanged", async () => {
+    selectFirst
+      .mockResolvedValueOnce(existingApp({ sso_audience: "acme.crm" }))
+      .mockResolvedValueOnce(null); // audience owned by no OTHER app
+    const res = await PATCH(
+      idReq("acme.crm", { label: "CRM (renamed)", sso_audience: "acme.crm" }),
+      ctx("acme.crm"),
+    );
+    expect(res.status).toBe(200);
+    expect(updateExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("a superadmin still moves an audience onto one whose last segment is not the id", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst
+      .mockResolvedValueOnce(
+        existingApp({ id: "devresponse-docs", organization_id: null, sso_audience: "x:y" }),
+      )
+      .mockResolvedValueOnce(null); // audience not taken
+    const res = await PATCH(
+      idReq("devresponse-docs", { sso_audience: "devresponse-app:docs" }),
+      ctx("devresponse-docs"),
+    );
+    expect(res.status).toBe(200);
+    expect(updateExecute).toHaveBeenCalledTimes(1);
   });
 });
 

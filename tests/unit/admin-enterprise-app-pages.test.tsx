@@ -11,9 +11,10 @@ import type * as DetailPageModule from "@/app/[locale]/(secure)/app/administrato
  * page now resolves the caller's scope with the route's own rule
  * (`resolveOrgScope`, real here) and hands the form plain data: the picker for
  * a caller with cross-org reach, its own org (id and slug, for the I-01 name
- * prefix) for a confined one. The detail page hands the settings form the
- * app's slug for a confined caller, whose audience the route holds to it. The
- * component suites pin what the forms do with these props.
+ * prefix) for a confined one. The detail page tells the settings form whether
+ * the caller is confined, since the route holds such a caller's audience to
+ * `<prefix>:<app id>` (R15). The component suites pin what the forms do with
+ * these props.
  */
 const NOT_FOUND = "__NOT_FOUND_SENTINEL__";
 const checkAdminPermissionServer = vi.fn();
@@ -151,7 +152,7 @@ describe("new enterprise-app page — the form sends the route's scope (R14)", (
   });
 });
 
-describe("enterprise-app detail page — the audience namespace (R14)", () => {
+describe("enterprise-app detail page — the audience rule (R15)", () => {
   const detailParams = { params: Promise.resolve({ locale: "en", appId: "acme.crm" }) };
   const ROW = {
     id: "acme.crm",
@@ -166,20 +167,20 @@ describe("enterprise-app detail page — the audience namespace (R14)", () => {
     organization_slug: "acme",
   };
 
-  it("hands an org admin's settings form its org's slug", async () => {
+  it("tells an org admin's settings form it is confined", async () => {
     asCaller(ORG_ADMIN);
     selectFirst.mockResolvedValueOnce(ROW);
     expect(propsOf(await DetailPage(detailParams), "EnterpriseAppSettingsForm")).toMatchObject({
       canManage: true,
-      namespaceSlug: "acme",
+      confined: true,
     });
   });
 
-  it("hands a superadmin's settings form no slug", async () => {
+  it("tells a superadmin's settings form it is not confined", async () => {
     asCaller(SUPERADMIN);
     selectFirst.mockResolvedValueOnce(ROW);
     expect(propsOf(await DetailPage(detailParams), "EnterpriseAppSettingsForm")).toMatchObject({
-      namespaceSlug: null,
+      confined: false,
     });
   });
 });

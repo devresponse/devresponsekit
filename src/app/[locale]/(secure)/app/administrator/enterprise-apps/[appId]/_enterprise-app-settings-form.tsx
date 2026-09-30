@@ -16,7 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RequiredLegend } from "@/components/ui/required-legend";
-import { APP_STATUS_VALUES, isOrgNamespacedAudience } from "@/lib/admin/enterprise-apps";
+import { APP_STATUS_VALUES, isConsumableAudienceFor } from "@/lib/admin/enterprise-apps";
 import { useZodForm } from "@/lib/forms/use-zod-form";
 import {
   enterpriseAppSettingsSchema,
@@ -32,10 +32,10 @@ import {
  * HTTPS / trusted-suffix origin checks are server-only and surface as
  * `invalid_origin` / `origin_not_allowed`, mapped onto the origin field.
  *
- * `namespaceSlug` is the app's org slug when the caller has no cross-org
- * reach: the route lets that caller move the audience only onto a name under
- * the slug (I-01), so the field says so and the route's bare 403 for a changed
- * audience outside it lands on the field (R14, as on the create form).
+ * `confined` is true when the caller has no cross-org reach: the route lets
+ * that caller move the audience only onto one the app's satellite can
+ * consume, `<prefix>:<app id>` (R15), so the field states the rule and the
+ * route's 400 for another audience lands on the field, as on the create form.
  */
 export interface EnterpriseAppSettingsValue {
   id: string;
@@ -55,11 +55,11 @@ const SELECT_CLASS =
 export function EnterpriseAppSettingsForm({
   app,
   canManage,
-  namespaceSlug = null,
+  confined = false,
 }: {
   app: EnterpriseAppSettingsValue;
   canManage: boolean;
-  namespaceSlug?: string | null;
+  confined?: boolean;
 }) {
   const t = useTranslations("administrator.enterpriseApps");
   const tErr = useTranslations("administrator.errors");
@@ -117,25 +117,24 @@ export function EnterpriseAppSettingsForm({
           form.setError("origin", { type: "server", message: tErr("invalidOrigin") });
         } else if (body.error === "origin_not_allowed") {
           form.setError("origin", { type: "server", message: tErr("originNotAllowed") });
+        } else if (
+          // R15: only a CHANGED audience is held to `<prefix>:<app id>`.
+          body.error === "invalid_body" &&
+          confined &&
+          ssoAudience !== app.ssoAudience &&
+          !isConsumableAudienceFor(ssoAudience, app.id)
+        ) {
+          form.setError("sso_audience", {
+            type: "server",
+            message: t("namespace.audienceRefused", { id: app.id }),
+          });
         } else {
           form.setError("root", { type: "server", message: tErr("invalidBody") });
         }
         return;
       }
       if (res.status === 403) {
-        // I-01: only a CHANGED audience is held to the namespace.
-        if (
-          namespaceSlug !== null &&
-          ssoAudience !== app.ssoAudience &&
-          !isOrgNamespacedAudience(ssoAudience, namespaceSlug)
-        ) {
-          form.setError("sso_audience", {
-            type: "server",
-            message: t("namespace.audienceRefused", { slug: namespaceSlug }),
-          });
-        } else {
-          form.setError("root", { type: "server", message: tErr("forbidden") });
-        }
+        form.setError("root", { type: "server", message: tErr("forbidden") });
         return;
       }
       if (res.status === 404) {
@@ -228,10 +227,8 @@ export function EnterpriseAppSettingsForm({
               <FormControl>
                 <Input type="text" {...field} disabled={disabled} />
               </FormControl>
-              {canManage && namespaceSlug !== null ? (
-                <FormDescription>
-                  {t("namespace.audienceHelp", { slug: namespaceSlug })}
-                </FormDescription>
+              {canManage && confined ? (
+                <FormDescription>{t("namespace.audienceRule", { id: app.id })}</FormDescription>
               ) : null}
               <FormMessage />
             </FormItem>

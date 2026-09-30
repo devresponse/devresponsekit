@@ -29,9 +29,9 @@ const ORGS = {
   total: 2,
 };
 
-/** The audience field's own namespace refusal for org `acme` (not the id's). */
+/** R15: the audience field's refusal for app `acme.crm`. */
 const AUDIENCE_REFUSED =
-  "Only a superadmin can register an SSO audience outside your organization's slug. The part after the last colon must be an ID under it, normally this application's ID, such as devresponse-app:acme.crm.";
+  "The SSO audience must be a prefix, a colon, then this application's ID, such as devresponse-app:acme.crm. Single sign-on to the application works with no other audience.";
 
 /** Answers the superadmin picker's org search, and the create POST with `post`. */
 function stagePost(post: { status: number; json: () => Promise<unknown> }) {
@@ -62,12 +62,17 @@ const renderSuperadmin = () =>
 const renderOrgAdmin = () =>
   renderWithIntl(<NewEnterpriseAppForm locale="en" showOrgPicker={false} ownOrganization={ACME} />);
 
-/** Fills every required field but the id, and the audience with `audience`. */
+/**
+ * Fills every required field but the id, and the audience with `audience`
+ * (replacing the one an org admin's form proposes, R15).
+ */
 async function fillRest(user: ReturnType<typeof userEvent.setup>, audience: string) {
   await user.type(screen.getByRole("textbox", { name: "Label" }), "Acme");
   await user.type(screen.getByRole("textbox", { name: "Origin" }), "https://acme.com");
   await user.type(screen.getByRole("textbox", { name: "Subdomain" }), "acme");
-  await user.type(screen.getByRole("textbox", { name: "SSO audience" }), audience);
+  const audienceField = screen.getByRole("textbox", { name: "SSO audience" });
+  await user.clear(audienceField);
+  await user.type(audienceField, audience);
 }
 
 async function fillValid(user: ReturnType<typeof userEvent.setup>) {
@@ -151,10 +156,10 @@ describe("NewEnterpriseAppForm", () => {
  * R14: the form sent no `organization_id`, so every create was a global app,
  * which the route refuses to an org admin (403): an org admin could not create
  * any app from the console. It now sends the org the page resolved for a
- * confined caller, and a superadmin chooses a global app or an org. App ids and
- * audiences are global names an org admin may claim only under its org's slug
- * (I-01), so its form prefills and hints the prefix and puts the route's 403 on
- * the field outside it.
+ * confined caller, and a superadmin chooses a global app or an org. App ids are
+ * global names an org admin may claim only under its org's slug (I-01), so its
+ * form prefills and hints the prefix and puts the route's 403 on the id. Its
+ * audience must be one the app's satellite can consume (R15, below).
  */
 describe("NewEnterpriseAppForm scope (R14)", () => {
   it("an org admin gets no picker, the id prefilled with its slug, and a hint on both names", () => {
@@ -166,7 +171,7 @@ describe("NewEnterpriseAppForm scope (R14)", () => {
       screen.getByText(/start the ID with acme and a dot, for example acme\.crm\./),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/must be an ID under your organization's slug.*\(for example acme\.crm\)/),
+      screen.getByText(/a colon, then this application's ID, such as devresponse-app:acme\.crm\./),
     ).toBeInTheDocument();
   });
 
@@ -189,7 +194,7 @@ describe("NewEnterpriseAppForm scope (R14)", () => {
     );
   });
 
-  it("puts the route's namespace 403 on each name outside the slug, not a generic root error", async () => {
+  it("puts the route's namespace 403 on the id, not a generic root error", async () => {
     const user = userEvent.setup();
     stagePost({ status: 403, json: async () => ({ error: "forbidden" }) });
     renderOrgAdmin();
@@ -199,41 +204,21 @@ describe("NewEnterpriseAppForm scope (R14)", () => {
     await fillRest(user, "devresponse-app:crm");
     await user.click(screen.getByRole("button", { name: "Create application" }));
 
-    // Each field states its own rule: the audience is judged by the part after
-    // its last colon, so the id's "start with acme." would mislead there.
     expect(
       await screen.findByText(
         "Only a superadmin can register an ID outside your organization's slug. Start it with acme and a dot, then a name, such as acme.crm.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(AUDIENCE_REFUSED)).toBeInTheDocument();
     expect(id).toHaveAttribute("aria-invalid", "true");
+    // `devresponse-app:crm` is the audience app `crm` consumes: only the id is
+    // outside the rule, so only the id is marked.
     expect(screen.getByRole("textbox", { name: "SSO audience" })).toHaveAttribute(
       "aria-invalid",
-      "true",
+      "false",
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(postedBody()).toMatchObject({ id: "crm", organization_id: ACME.id });
     expect(push).not.toHaveBeenCalled();
-  });
-
-  it("marks only the audience when the id is under the slug", async () => {
-    const user = userEvent.setup();
-    stagePost({ status: 403, json: async () => ({ error: "forbidden" }) });
-    renderOrgAdmin();
-    await user.type(screen.getByRole("textbox", { name: "ID" }), "crm");
-    // Starts with `acme.`, but its last segment `crm` is outside the slug.
-    await fillRest(user, "acme.portal:crm");
-    await user.click(screen.getByRole("button", { name: "Create application" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("textbox", { name: "SSO audience" })).toHaveAttribute(
-        "aria-invalid",
-        "true",
-      ),
-    );
-    expect(screen.getByText(AUDIENCE_REFUSED)).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "ID" })).toHaveAttribute("aria-invalid", "false");
   });
 
   it("tells an org admin who submits the bare prefill that a name must follow the dot", async () => {
@@ -300,5 +285,101 @@ describe("NewEnterpriseAppForm scope (R14)", () => {
 
     await waitFor(() => expect(postCalls()).toHaveLength(1));
     expect(postedBody()).toMatchObject({ id: "crm", organization_id: GLOBEX_ID });
+  });
+});
+
+/**
+ * R15: a satellite consumes only the audience `<prefix>:<its application id>`,
+ * and the route now refuses an org admin any other (400 `invalid_body`): the
+ * I-01 check had let `acme.crm` or `x:acme.other` through for app `acme.crm`,
+ * and every launch of such an app failed at the satellite. So an org admin's
+ * form proposes `devresponse-app:<id>`, keeps it in step with the id until the
+ * admin edits it, states the rule, and puts the route's 400 on the field.
+ */
+describe("NewEnterpriseAppForm audience (R15)", () => {
+  const audience = () => screen.getByRole("textbox", { name: "SSO audience" });
+
+  /** Fills the fields the audience does not depend on, and not the audience. */
+  async function fillOthers(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByRole("textbox", { name: "Label" }), "Acme");
+    await user.type(screen.getByRole("textbox", { name: "Origin" }), "https://acme.com");
+    await user.type(screen.getByRole("textbox", { name: "Subdomain" }), "acme");
+  }
+
+  it("proposes devresponse-app:<id> and keeps it in step with the id until it is edited", async () => {
+    const user = userEvent.setup();
+    renderOrgAdmin();
+    const id = screen.getByRole("textbox", { name: "ID" });
+
+    expect(audience()).toHaveValue("devresponse-app:acme.");
+    await user.type(id, "crm");
+    expect(audience()).toHaveValue("devresponse-app:acme.crm");
+
+    await user.clear(audience());
+    await user.type(audience(), "sso:acme.crm");
+    await user.type(id, "2");
+    expect(id).toHaveValue("acme.crm2");
+    expect(audience()).toHaveValue("sso:acme.crm");
+  });
+
+  it("posts the proposed audience when the admin types only the id", async () => {
+    const user = userEvent.setup();
+    stagePost({ status: 201, json: async () => ({ id: "acme.crm" }) });
+    renderOrgAdmin();
+    await user.type(screen.getByRole("textbox", { name: "ID" }), "crm");
+    await fillOthers(user);
+    await user.click(screen.getByRole("button", { name: "Create application" }));
+
+    await waitFor(() => expect(postCalls()).toHaveLength(1));
+    expect(postedBody()).toMatchObject({
+      id: "acme.crm",
+      sso_audience: "devresponse-app:acme.crm",
+    });
+  });
+
+  it.each([
+    ["no colon", "acme.crm"],
+    ["another id in the namespace", "x:acme.other"],
+  ])(
+    "puts the route's 400 for an audience with %s on the audience field",
+    async (_label, value) => {
+      const user = userEvent.setup();
+      stagePost({ status: 400, json: async () => ({ error: "invalid_body" }) });
+      renderOrgAdmin();
+      await user.type(screen.getByRole("textbox", { name: "ID" }), "crm");
+      await fillRest(user, value);
+      await user.click(screen.getByRole("button", { name: "Create application" }));
+
+      expect(await screen.findByText(AUDIENCE_REFUSED)).toBeInTheDocument();
+      expect(audience()).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("textbox", { name: "ID" })).toHaveAttribute("aria-invalid", "false");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(postedBody()).toMatchObject({ id: "acme.crm", sso_audience: value });
+      expect(push).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a 400 invalid_body with a consumable audience a root error", async () => {
+    const user = userEvent.setup();
+    stagePost({ status: 400, json: async () => ({ error: "invalid_body" }) });
+    renderOrgAdmin();
+    await user.type(screen.getByRole("textbox", { name: "ID" }), "crm");
+    await fillOthers(user);
+    await user.click(screen.getByRole("button", { name: "Create application" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The submitted data is invalid.");
+    expect(audience()).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it("proposes no audience to a superadmin, and does not follow the id", async () => {
+    const user = userEvent.setup();
+    stagePost({ status: 201, json: async () => ({}) });
+    const { container } = renderSuperadmin();
+    await pickerLoaded(container);
+
+    expect(audience()).toHaveValue("");
+    await user.type(screen.getByRole("textbox", { name: "ID" }), "crm");
+    expect(audience()).toHaveValue("");
+    expect(screen.queryByText(/a colon, then this application's ID/)).not.toBeInTheDocument();
   });
 });

@@ -1019,9 +1019,10 @@
       },
       "namespace": {
         "idHelp": "Les applications de votre organisation sont nommées sous son slug : commencez l'ID par {slug} suivi d'un point, par exemple {slug}.crm.",
-        "audienceHelp": "La partie après le dernier « : » doit être un ID sous le slug de votre organisation, normalement l'ID de cette application (par exemple {slug}.crm).",
+        "audienceHelp": "Un préfixe, deux-points, puis l'ID de cette application, comme devresponse-app:{slug}.crm. L'authentification unique vers l'application ne fonctionne qu'avec cette audience, qui suit donc l'ID jusqu'à ce que vous la modifiiez.",
+        "audienceRule": "Un préfixe, deux-points, puis l'ID de cette application, comme devresponse-app:{id}. L'authentification unique vers l'application ne fonctionne qu'avec cette audience.",
         "idRefused": "Seul un super-administrateur peut enregistrer un ID hors du slug de votre organisation. Commencez-le par {slug} suivi d'un point, puis d'un nom, comme {slug}.crm.",
-        "audienceRefused": "Seul un super-administrateur peut enregistrer une audience SSO hors du slug de votre organisation. La partie après le dernier « : » doit être un ID sous ce slug, normalement l'ID de cette application, comme devresponse-app:{slug}.crm."
+        "audienceRefused": "L'audience SSO doit être un préfixe, deux-points, puis l'ID de cette application, comme devresponse-app:{id}. L'authentification unique vers l'application ne fonctionne avec aucune autre audience."
       },
       "status": {
         "available": "Disponible",

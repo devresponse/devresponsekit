@@ -1148,6 +1148,11 @@ CI audits this lockfile too. The kit's `Dependency audit` workflow
 catches what `pnpm audit` misses (the `path-to-regexp@6` row above). Before F-28 neither check
 looked here, so this tree's advisories surfaced only as alerts in the Security tab.
 
+The floors also cover the kit's optional Actions deploy (`.github/workflows/deploy.yml`): it
+installs its Vercel CLI from this lockfile (`pnpm --dir vercel-cli install --frozen-lockfile --prod`),
+so a bump of `vercel` here moves both. It used to run `pnpm add -g vercel@54.14.5`, which resolves
+without these overrides and so installed the exact versions they replace (I-09).
+
 This lockfile has its own advisory allowlist: `pnpm --dir vercel-cli audit` reads
 `pnpm.auditConfig.ignoreGhsas` from this package's `package.json` and never the kit's root
 list, so muting a GHSA at the root does not mute it here. The list is empty. Prefer a floor

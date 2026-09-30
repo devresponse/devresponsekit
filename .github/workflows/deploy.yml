@@ -246,6 +246,9 @@ jobs:
     # Gate behind a GitHub Environment for required reviewers + scoped secrets
     # (docs/deployment.md §3). Remove `environment:` for unattended deploys —
     # but leave it on `preflight`, which needs it to see environment secrets.
+    # The environment's `main`-only branch policy and its reviewers are
+    # repository settings no file can set (SECURITY.md → Repository security
+    # settings, I-09).
     environment: production
 
     # VERCEL_TOKEN is deliberately NOT job-level: it is scoped to the three
@@ -304,8 +307,24 @@ jobs:
 
       # 2) Only after migrations succeed: build with the production env pulled
       #    from Vercel (so NEXT_PUBLIC_* inline correctly) and promote.
-      - name: Install Vercel CLI
-        run: pnpm add -g vercel@54.14.5 # pin for reproducibility; bump deliberately
+      #
+      #    I-09: the CLI is the release vercel-cli/'s lockfile pins, the one
+      #    drk-deploy runs, installed from that lockfile. It used to be
+      #    `pnpm add -g vercel@54.14.5`: five majors behind drk-deploy, and a
+      #    global add resolves the tree afresh without vercel-cli's
+      #    pnpm.overrides. `vercel` and its builders pin exact versions of
+      #    tar, undici and path-to-regexp that carry advisories, so this job
+      #    installed the copies those floors replace, and no audit covered
+      #    it. Now the Dependency audit gate audits what runs here, and a
+      #    bump of `vercel` in vercel-cli/ bumps both. `--prod` leaves
+      #    drk-deploy's compiler and formatter out. The `.bin` directory goes
+      #    on PATH, so the steps below still run `vercel` from the repository
+      #    root, where `vercel pull` writes .vercel/ and `vercel build` builds
+      #    the kit; `pnpm --dir vercel-cli exec` would run them in vercel-cli/.
+      - name: Install Vercel CLI (from vercel-cli's lockfile)
+        run: |
+          pnpm --dir vercel-cli install --frozen-lockfile --prod
+          echo "$GITHUB_WORKSPACE/vercel-cli/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Pull Vercel production environment + project settings
         env:

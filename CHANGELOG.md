@@ -50,6 +50,12 @@ For a deployment running 2.0.0.
      and not (scopes && array['admin.orgs.manage', 'admin.orgs.*', 'admin.*', '*']);
    ```
 
+2. **Repository settings.** From
+   [SECURITY.md → Repository security settings](SECURITY.md#repository-security-settings),
+   require actions pinned to a full-length commit SHA, and restrict the
+   `production` environment's deployment branches to `main`, adding required
+   reviewers with its first secret (I-09).
+
 ### Security fixes the satellite forks must port
 
 Kit fixes since 2.0.0 whose files the `devresponseapps` forks carry, on top
@@ -94,6 +100,9 @@ of 2.0.0's list below. Each entry names what to carry over.
   (a satellite on that database) and expires its handoffs in flight; the audit
   row counts them in `metadata.endedSsoSessions` (F-82). A satellite fork gets
   both only once it ports the change (the fork-port list above).
+- The optional Actions deploy installs its Vercel CLI from `vercel-cli/`'s
+  lockfile, the audited tree `drk-deploy` runs, instead of an unlocked global
+  `vercel@54` (I-09).
 
 ### Fixed
 

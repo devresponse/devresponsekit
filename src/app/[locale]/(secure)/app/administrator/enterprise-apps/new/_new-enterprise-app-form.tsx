@@ -14,11 +14,14 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { RequiredLegend } from "@/components/ui/required-legend";
+import { isOrgNamespacedAppId, isOrgNamespacedAudience } from "@/lib/admin/enterprise-apps";
 import { useZodForm } from "@/lib/forms/use-zod-form";
 import {
+  createEnterpriseAppRequestBody,
   createEnterpriseAppSchema,
   type CreateEnterpriseAppInput,
 } from "@/lib/validation/enterprise-apps";
+import { OrganizationPicker } from "../../_components/organization-picker";
 
 /**
  * Client-side new enterprise application form (docs/admin-manager.md §8.7;
@@ -30,40 +33,56 @@ import {
  * non-HTTPS or untrusted origin comes back as `invalid_origin` /
  * `origin_not_allowed` and is mapped onto the origin field. The app `id` is a
  * stable text primary key (not editable later), so it's chosen carefully here.
+ *
+ * Scope (ADR-0001, R14), as in the new-role form: the form always sends
+ * `organization_id`. It used to send none, so every create was a global app,
+ * which the route refuses to an org admin: an org admin could not create any
+ * app here.
+ *   - a SUPERADMIN picks a global app (the default) or any org in the
+ *     {@link OrganizationPicker};
+ *   - an ORG-CONFINED caller gets no picker and sends `ownOrganization`, the
+ *     org the page resolved with the route's own scope rule. App ids and
+ *     audiences are global names, so the route admits only names under that
+ *     org's slug (I-01): the id is prefilled with `<slug>.`, both fields say
+ *     so, and the route's 403 for a name outside it lands on that field rather
+ *     than as a generic "forbidden".
  */
-export function NewEnterpriseAppForm({ locale }: { locale: string }) {
+export function NewEnterpriseAppForm({
+  locale,
+  showOrgPicker,
+  ownOrganization,
+}: {
+  locale: string;
+  showOrgPicker: boolean;
+  ownOrganization: { id: string; slug: string } | null;
+}) {
   const t = useTranslations("administrator.enterpriseApps");
   const tErr = useTranslations("administrator.errors");
   const router = useRouter();
+  const slug = ownOrganization?.slug ?? null;
 
   const form = useZodForm<CreateEnterpriseAppInput>(createEnterpriseAppSchema, {
     defaultValues: {
-      id: "",
+      id: slug ? `${slug}.` : "",
       label: "",
       description: "",
       origin: "",
       subdomain: "",
       sso_audience: "",
       sort_order: 100,
+      organization_id: ownOrganization?.id ?? null,
     },
   });
 
   const onValid = async (values: CreateEnterpriseAppInput) => {
     form.clearErrors("root");
+    const payload = createEnterpriseAppRequestBody(values);
     try {
       const res = await fetch("/api/administrator/enterprise-apps", {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          id: values.id.trim(),
-          label: values.label.trim(),
-          description: values.description?.trim() ? values.description.trim() : null,
-          origin: values.origin.trim(),
-          subdomain: values.subdomain.trim(),
-          sso_audience: values.sso_audience.trim(),
-          sort_order: values.sort_order,
-        }),
+        body: JSON.stringify(payload),
       });
       if (res.status === 201) {
         const body = (await res.json()) as { id?: string };
@@ -98,7 +117,21 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
         return;
       }
       if (res.status === 403) {
-        form.setError("root", { type: "server", message: tErr("forbidden") });
+        // I-01: the route refuses a confined caller a name outside its org's
+        // slug with a bare 403, so name the field(s) that caused it, each with
+        // its own rule (an audience is judged by its part after the last `:`).
+        const outside: Array<"id" | "sso_audience"> = [];
+        if (slug !== null) {
+          if (!isOrgNamespacedAppId(payload.id, slug)) outside.push("id");
+          if (!isOrgNamespacedAudience(payload.sso_audience, slug)) outside.push("sso_audience");
+          for (const field of outside) {
+            const key = field === "id" ? "namespace.idRefused" : "namespace.audienceRefused";
+            form.setError(field, { type: "server", message: t(key, { slug }) });
+          }
+        }
+        if (outside.length === 0) {
+          form.setError("root", { type: "server", message: tErr("forbidden") });
+        }
         return;
       }
       form.setError("root", { type: "server", message: t("new.errorToast") });
@@ -114,6 +147,23 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
       <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
         <RequiredLegend />
 
+        {showOrgPicker ? (
+          <FormField
+            control={form.control}
+            name="organization_id"
+            render={({ field }) => (
+              // The picker renders its own label and manages a valid value
+              // (an org id or null for Global), so it isn't a FormControl child.
+              <OrganizationPicker
+                id="enterprise-app-organization"
+                includeGlobal
+                value={field.value ?? null}
+                onChange={field.onChange}
+              />
+            )}
+          />
+        ) : null}
+
         <FormField
           control={form.control}
           name="id"
@@ -127,7 +177,10 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
                   onChange={(e) => field.onChange(e.currentTarget.value.toLowerCase())}
                 />
               </FormControl>
-              <FormDescription>{t("fields.idHelp")}</FormDescription>
+              <FormDescription>
+                {t("fields.idHelp")}
+                {slug ? ` ${t("namespace.idHelp", { slug })}` : null}
+              </FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -204,6 +257,9 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
               <FormControl>
                 <Input type="text" {...field} />
               </FormControl>
+              {slug ? (
+                <FormDescription>{t("namespace.audienceHelp", { slug })}</FormDescription>
+              ) : null}
               <FormMessage />
             </FormItem>
           )}

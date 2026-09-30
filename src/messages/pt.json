@@ -1017,6 +1017,12 @@
         "sortOrder": "Ordem",
         "organization": "Âmbito da organização"
       },
+      "namespace": {
+        "idHelp": "As aplicações da sua organização têm nomes sob o slug dela: comece o ID por {slug} e um ponto, por exemplo {slug}.crm.",
+        "audienceHelp": "A parte após o último «:» tem de ser um ID sob o slug da sua organização, normalmente o ID desta aplicação (por exemplo {slug}.crm).",
+        "idRefused": "Só um superadministrador pode registar um ID fora do slug da sua organização. Comece-o por {slug} e um ponto, seguido de um nome, como {slug}.crm.",
+        "audienceRefused": "Só um superadministrador pode registar uma audiência de SSO fora do slug da sua organização. A parte após o último «:» tem de ser um ID sob esse slug, normalmente o ID desta aplicação, como devresponse-app:{slug}.crm."
+      },
       "status": {
         "available": "Disponível",
         "disabled": "Desativada"

@@ -178,6 +178,16 @@ of 2.0.0's list below. Each entry names what to carry over.
   the `409` codes the organization PATCH (`last_superadmin`,
   `organization_is_default`, `slug_taken`) and the invitation create and
   resend (`organization_not_active`) answer (F-09).
+- **Enterprise apps.** An organization admin can create an app from
+  **Administrator → Enterprise apps → New application**. The form sent no
+  `organization_id`, so every create was a global app, which the API refuses
+  to an org admin (`403`). It now sends the admin's active organization,
+  prefills the id with `<org-slug>.`, says under the id and SSO audience that
+  names go under the slug (I-01), and shows a name outside it on its field
+  rather than as "You don't have permission to view this page", on the
+  settings form's audience too. A superadmin picks Global, the default, or an
+  organization. The API is unchanged: an omitted `organization_id` is still a
+  global app (R14).
 - **Email.** Invitations and the test email are written in the recipient's
   language when the recipient belongs to the mail's organization, else in
   the sending admin's, and an invitation's link opens in the same language,

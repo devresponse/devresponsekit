@@ -16,7 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RequiredLegend } from "@/components/ui/required-legend";
-import { APP_STATUS_VALUES } from "@/lib/admin/enterprise-apps";
+import { APP_STATUS_VALUES, isOrgNamespacedAudience } from "@/lib/admin/enterprise-apps";
 import { useZodForm } from "@/lib/forms/use-zod-form";
 import {
   enterpriseAppSettingsSchema,
@@ -31,6 +31,11 @@ import {
  *
  * HTTPS / trusted-suffix origin checks are server-only and surface as
  * `invalid_origin` / `origin_not_allowed`, mapped onto the origin field.
+ *
+ * `namespaceSlug` is the app's org slug when the caller has no cross-org
+ * reach: the route lets that caller move the audience only onto a name under
+ * the slug (I-01), so the field says so and the route's bare 403 for a changed
+ * audience outside it lands on the field (R14, as on the create form).
  */
 export interface EnterpriseAppSettingsValue {
   id: string;
@@ -50,9 +55,11 @@ const SELECT_CLASS =
 export function EnterpriseAppSettingsForm({
   app,
   canManage,
+  namespaceSlug = null,
 }: {
   app: EnterpriseAppSettingsValue;
   canManage: boolean;
+  namespaceSlug?: string | null;
 }) {
   const t = useTranslations("administrator.enterpriseApps");
   const tErr = useTranslations("administrator.errors");
@@ -74,6 +81,7 @@ export function EnterpriseAppSettingsForm({
   const onValid = async (values: EnterpriseAppSettingsInput) => {
     form.clearErrors("root");
     setSaved(false);
+    const ssoAudience = values.sso_audience.trim();
     try {
       const res = await fetch(`/api/administrator/enterprise-apps/${encodeURIComponent(app.id)}`, {
         method: "PATCH",
@@ -84,7 +92,7 @@ export function EnterpriseAppSettingsForm({
           description: values.description?.trim() ? values.description.trim() : null,
           origin: values.origin.trim(),
           subdomain: values.subdomain.trim(),
-          sso_audience: values.sso_audience.trim(),
+          sso_audience: ssoAudience,
           status: values.status,
           sort_order: values.sort_order,
         }),
@@ -115,7 +123,19 @@ export function EnterpriseAppSettingsForm({
         return;
       }
       if (res.status === 403) {
-        form.setError("root", { type: "server", message: tErr("forbidden") });
+        // I-01: only a CHANGED audience is held to the namespace.
+        if (
+          namespaceSlug !== null &&
+          ssoAudience !== app.ssoAudience &&
+          !isOrgNamespacedAudience(ssoAudience, namespaceSlug)
+        ) {
+          form.setError("sso_audience", {
+            type: "server",
+            message: t("namespace.audienceRefused", { slug: namespaceSlug }),
+          });
+        } else {
+          form.setError("root", { type: "server", message: tErr("forbidden") });
+        }
         return;
       }
       if (res.status === 404) {
@@ -208,6 +228,11 @@ export function EnterpriseAppSettingsForm({
               <FormControl>
                 <Input type="text" {...field} disabled={disabled} />
               </FormControl>
+              {canManage && namespaceSlug !== null ? (
+                <FormDescription>
+                  {t("namespace.audienceHelp", { slug: namespaceSlug })}
+                </FormDescription>
+              ) : null}
               <FormMessage />
             </FormItem>
           )}

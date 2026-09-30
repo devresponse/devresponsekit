@@ -20,8 +20,8 @@ importers:
   .:
     dependencies:
       '@vercel/sdk':
-        specifier: 1.28.36
-        version: 1.28.36
+        specifier: 1.28.38
+        version: 1.28.38
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -30,8 +30,8 @@ importers:
         version: 60.1.3(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)
     devDependencies:
       '@types/node':
-        specifier: 26.6.2
-        version: 26.6.2
+        specifier: 26.6.3
+        version: 26.6.3
       prettier:
         specifier: 3.9.9
         version: 3.9.9
@@ -717,8 +717,8 @@ packages:
   '@types/node@20.11.0':
     resolution: {integrity: sha512-o9bjXmDNcF7GbM4CNQpmi+TutCgap/K3w1JyKgxAjqx41zp9qlIAVFi0IhCNsJcXolEqLWhbFbEeL0PvYm4pcQ==}
 
-  '@types/node@26.6.2':
-    resolution: {integrity: sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g==}
+  '@types/node@26.6.3':
+    resolution: {integrity: sha512-dsqMQQoeTLqu9wynDD00q573mNzso3IdQOAfHRJqLCcmCFPoGo9A1bDpUcv/9tnKpErQWv9uKeGfl37EIS02Yg==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -990,8 +990,8 @@ packages:
   '@vercel/sandbox@3.1.0':
     resolution: {integrity: sha512-z124E4rsmNpwGtTnLImiYzEXk972bWniQyhlvkEt35UtwKTdfBAFXcNG2OvqYqwzAsdQaP3B7teQ2pqA9B5Viw==}
 
-  '@vercel/sdk@1.28.36':
-    resolution: {integrity: sha512-A5aAU9DQ24D/sGPmpUmMz5zpt15WBbtiCXBSfin9/Y48FZNe1SovRFiKmyY65Vkm6rVHfjERNayQIPq6KzlqlQ==}
+  '@vercel/sdk@1.28.38':
+    resolution: {integrity: sha512-DofYDwD2EGbwN6gvmxqnhrTQsahHbCw+ylTCZYpyekzHz70GNCcjIUWg98z6ucBV97aimlpiVlHg4K53nxxRfw==}
 
   '@vercel/static-build@13.0.1':
     resolution: {integrity: sha512-AyZFkfjoGxaMUVsPkK0edxOeJqw2kN+A5LqH8U5KxXCW585bDbolVzyZ1uR2oPo+c4aMZVwrlVk8vV+oKghEUg==}
@@ -2264,7 +2264,7 @@ snapshots:
     dependencies:
       undici-types: 5.26.5
 
-  '@types/node@26.6.2':
+  '@types/node@26.6.3':
     dependencies:
       undici-types: 8.9.0
 
@@ -2690,7 +2690,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sdk@1.28.36':
+  '@vercel/sdk@1.28.38':
     dependencies:
       zod: 4.6.5
 

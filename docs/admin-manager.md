@@ -1524,7 +1524,28 @@ session for the sender's account. `POST` refuses the deployment's own id with
 `409 audience_taken` and its own origin (`BETTER_AUTH_URL`) with
 `400 origin_not_allowed`. A row written before this check, or straight into the
 database, is not removed: look for one whose `sso_audience` is the deployment's
-own audience.
+own audience. The two `409`s are what a caller with cross-org reach sees: for an
+org admin the deployment's own id and audience lie outside its org's namespace
+(unless the deployment's id is itself `<org-slug>.<name>`), so it gets the
+namespace `403` below first.
+
+App ids and audiences are **global names** (a primary key and a UNIQUE index),
+so an org admin names its apps under its organization's slug (I-01). A caller
+without cross-org reach (an org admin, or any credential bound to one
+organization) may register an app in its own org only with an id of the form
+`<org-slug>.<name>` (`acme.crm`) and an audience whose last `:` segment is such
+an id (`devresponse-app:acme.crm`, the usual `<prefix>:<applicationId>`), and
+may change an app's audience only to such a value. The separator is a dot
+because a slug never contains one, so org `acme` cannot claim `acme-corp.crm`.
+Every other name is the platform's: `POST` and `PATCH` refuse it with
+`403 forbidden` and an `administrator.access.denied` row (reason
+`cross_org_reach_required`, action `enterprise_app_global_name`). Before this, an
+org admin could register `crm` or `devresponse-app:crm` for its own app, and the
+superadmin who later registered the real satellite got `409` and had to rename
+it. Only a change is checked: an app registered before the rule keeps its name,
+and saving its settings form (which sends the stored audience back) still
+works. A superadmin registers any name, in any org or globally, and only
+superadmins assign slugs.
 
 ### 8.8 API keys
 
@@ -1878,7 +1899,7 @@ same 403 `forbidden`:
 | --- | --- | --- | --- |
 | AUTHZ-3 / REVOKE-1: a grant or revocation carrying a permission the actor cannot confer (a user's role, a group's roles or members from either side, a role's permissions, a role duplicate, an invitation's role) | `refuseUnconferrable` | `admin.permission.conferral_denied` / `unheld_permissions`; `metadata.action` and `metadata.unheldPermissions` (catalog keys only: `roles/[id]/permissions` counts the other strings its body named in `metadata.unknownPermissionKeyCount`) | the resource's |
 | AUTHZ-2: an account-global action on a user shared with another org (password set, ban, unban, soft-delete, restore, profile edit, session revokes; per row in `POST /users/bulk`) | `refuseSharedTarget` | `admin.user.action_denied` / `shared_target_requires_superadmin`; `metadata.action` | the actor's |
-| A superadmin-only action refused to a caller without cross-org reach (the permission catalog, creating, updating or deleting a tenant, the global email templates and sign-up defaults, a global role or app, moving an app between tenants, the Better Auth `admin` role on `POST /users` and `POST /users/[id]/role`) | `refuseWithoutCrossOrgReach` | `administrator.access.denied` / `cross_org_reach_required`; `metadata.action` | the actor's |
+| A superadmin-only action refused to a caller without cross-org reach (the permission catalog, creating, updating or deleting a tenant, the global email templates and sign-up defaults, a global role or app, moving an app between tenants, an app id or SSO audience outside the caller's org namespace (I-01), the Better Auth `admin` role on `POST /users` and `POST /users/[id]/role`) | `refuseWithoutCrossOrgReach` | `administrator.access.denied` / `cross_org_reach_required`; `metadata.action` | the actor's |
 
 A refusal row records what the caller sent within bounds, because the caller
 chooses it and the table is append-only (F-15): a list of ids the body named

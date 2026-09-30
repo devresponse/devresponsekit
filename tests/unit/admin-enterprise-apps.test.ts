@@ -5,6 +5,8 @@ import {
   SSO_AUDIENCE_RE,
   SUBDOMAIN_RE,
   isHttpsOrigin,
+  isOrgNamespacedAppId,
+  isOrgNamespacedAudience,
 } from "@/lib/admin/enterprise-apps.server";
 
 /**
@@ -67,6 +69,47 @@ describe("enterprise-apps validators", () => {
       "not-a-url",
     ])("rejects %s", (s) => {
       expect(isHttpsOrigin(s)).toBe(false);
+    });
+  });
+
+  // I-01: the names an org admin may claim, under its org's slug `acme`.
+  describe("isOrgNamespacedAppId", () => {
+    it.each(["acme.crm", "acme.crm.v2", "acme.a", "acme.x-y_z"])("acme owns %s", (id) => {
+      expect(isOrgNamespacedAppId(id, "acme")).toBe(true);
+    });
+
+    it.each([
+      "crm", // a global name
+      "acme", // the bare slug
+      "acme.", // nothing after the separator
+      "acme-crm", // a hyphen is not the separator
+      "acme-corp.crm", // org `acme-corp`'s namespace, not `acme`'s
+      "acmecorp.crm",
+      "x.acme.crm",
+    ])("acme does not own %s", (id) => {
+      expect(isOrgNamespacedAppId(id, "acme")).toBe(false);
+    });
+
+    it("gives org acme-corp its own namespace", () => {
+      expect(isOrgNamespacedAppId("acme-corp.crm", "acme-corp")).toBe(true);
+      expect(isOrgNamespacedAppId("acme.crm", "acme-corp")).toBe(false);
+    });
+  });
+
+  describe("isOrgNamespacedAudience", () => {
+    it.each(["devresponse-app:acme.crm", "acme.crm", "a:b:acme.crm"])("acme owns %s", (aud) => {
+      expect(isOrgNamespacedAudience(aud, "acme")).toBe(true);
+    });
+
+    it.each([
+      "devresponse-app:crm", // the audience of a global app
+      "crm",
+      "acme.crm:crm", // only the last segment names the app
+      "devresponse-app:acme.",
+      "devresponse-app:acme-corp.crm",
+      "acme:crm",
+    ])("acme does not own %s", (aud) => {
+      expect(isOrgNamespacedAudience(aud, "acme")).toBe(false);
     });
   });
 

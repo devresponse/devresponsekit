@@ -15,6 +15,7 @@ import {
   isSsoAudienceTaken,
   isSsoAudienceUniqueViolation,
 } from "@/lib/admin/enterprise-apps-audience.server";
+import { appNamesOutsideOrgNamespace } from "@/lib/admin/enterprise-apps-namespace.server";
 import {
   likeContains,
   applySortAndPagination,
@@ -154,6 +155,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *   - status: "available" | "disabled" (default "available")
  *   - sort_order: integer (default 100)
  *   - organization_id: optional UUID scope (null = global)
+ *
+ * A caller without cross-org reach names the app under its org's slug: an id
+ * `<slug>.<name>` and an audience whose last `:` segment is such an id, or
+ * 403 `forbidden` (I-01).
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
@@ -193,6 +198,22 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     return refuseWithoutCrossOrgReach(guard, request, "enterprise_app_create", {
       requestedGlobal: targetOrg === null,
     });
+  }
+  // I-01: the id and the audience are global names, so an org admin claims
+  // only names under its org's slug (`acme.crm`, `devresponse-app:acme.crm`);
+  // a global name squatted here would 409 the superadmin who registers the
+  // real satellite. (`targetOrg` is never null here: refused above.)
+  if (!hasCrossOrgReach(guard.access) && targetOrg !== null) {
+    const outside = await appNamesOutsideOrgNamespace(targetOrg, {
+      id: input.id,
+      sso_audience: input.sso_audience,
+    });
+    if (outside.length > 0) {
+      return refuseWithoutCrossOrgReach(guard, request, "enterprise_app_global_name", {
+        applicationId: input.id,
+        ssoAudience: input.sso_audience,
+      });
+    }
   }
 
   if (!isHttpsOrigin(input.origin)) {

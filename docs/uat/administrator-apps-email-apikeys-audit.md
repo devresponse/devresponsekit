@@ -58,12 +58,12 @@ The Administrator layout itself is a defence-in-depth gate: any single `admin.*`
 
 - Route: `/app/administrator/enterprise-apps` · Example URL: `/en/app/administrator/enterprise-apps` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/page.tsx:22`
 - Purpose: A searchable, filterable grid of enterprise applications (the SSO handoff targets). Each row links to its detail page; managers get an inline Delete.
-- Guard / who can access: `admin.apps.read` (re-validated on the page at `enterprise-apps/page.tsx:28`; API `GET /api/administrator/enterprise-apps` re-checks at `src/app/api/administrator/enterprise-apps/route.ts:49`). The "New application" button is hidden unless the caller also holds `admin.apps.manage` (`enterprise-apps/page.tsx:32`).
+- Guard / who can access: `admin.apps.read` (re-validated on the page at `enterprise-apps/page.tsx:28`; API `GET /api/administrator/enterprise-apps` re-checks at `src/app/api/administrator/enterprise-apps/route.ts:50`). The "New application" button is hidden unless the caller also holds `admin.apps.manage` (`enterprise-apps/page.tsx:32`).
 - Access matrix:
   - Visitor -> redirected to sign-in (no access).
   - Member -> Not Found.
   - Limited Admin -> Not Found (no `admin.apps.read`).
-  - Org Admin -> can see; sees only their own org's apps plus nothing global; can act (New/Delete) within their org (`src/app/api/administrator/enterprise-apps/route.ts:79`).
+  - Org Admin -> can see; sees only their own org's apps plus nothing global; can act (New/Delete) within their org (`src/app/api/administrator/enterprise-apps/route.ts:80`).
   - Superadmin -> can see every org's apps and global apps; can act everywhere.
 - Preconditions and test data: signed in as the target persona; at least one seeded enterprise application. Confirm your org owns at least one app for the Org Admin cases.
 
@@ -103,7 +103,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
-- Out-of-scope access -> Not Found: as Org Admin the list simply omits other orgs' and global apps (empty page for a null scope, `src/app/api/administrator/enterprise-apps/route.ts:79`); a Member/Limited Admin hitting the URL gets 404 at the page guard.
+- Out-of-scope access -> Not Found: as Org Admin the list simply omits other orgs' and global apps (empty page for a null scope, `src/app/api/administrator/enterprise-apps/route.ts:80`); a Member/Limited Admin hitting the URL gets 404 at the page guard.
 - Empty state: with no apps in scope the grid renders its empty state (no rows) rather than an error.
 - Delete refused (409 `application_in_use`, only if a future table references the app) -> friendly inline message ("application in use"); non-409 failures show the generic delete-error text (`_enterprise-apps-grid.tsx:83`).
 - Rate limit: repeated deletes are subject to the admin mutation limiter; a limited response yields the generic delete error inline. `TODO: verify` the exact user-facing text on 429 (the grid maps only 409 specially).
@@ -115,33 +115,33 @@ i18n: run in `en` and `uk`; column headers, the Status filter options, the "Glob
 
 - Route: `/app/administrator/enterprise-apps/new` · Example URL: `/en/app/administrator/enterprise-apps/new` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/new/page.tsx:14`
 - Purpose: Create a new enterprise application with a stable text id, HTTPS origin, subdomain, SSO audience, and sort order.
-- Guard / who can access: `admin.apps.manage` (page `new/page.tsx:20`; API `POST` at `src/app/api/administrator/enterprise-apps/route.ts:159`).
+- Guard / who can access: `admin.apps.manage` (page `new/page.tsx:20`; API `POST` at `src/app/api/administrator/enterprise-apps/route.ts:164`).
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can create, but only in their own org; the server rejects a global app or another org's app with `forbidden` 403 (`route.ts:189`).
+  - Org Admin -> can create, but only in their own org and only under its slug: an id `<org-slug>.<name>` and an audience ending in such an id (I-01); the server rejects a global app, another org's app, or any other id or audience with `forbidden` 403 (`route.ts:194`, `route.ts:206`).
   - Superadmin -> can create in any org and global apps.
 - Preconditions and test data: signed in as a manager persona. Have a valid HTTPS origin that is on the trusted-host allow-list. Required fields: `id`, `label`, `origin`, `subdomain`, `sso_audience` (`src/lib/validation/enterprise-apps.ts:24`).
 
 User stories
 
 - UAT-ADMIN-AEK-APPS-NEW-S1 — As an Org Admin, I want to register a new app, so that users in my org can launch it via SSO.
-  - Acceptance criteria: Given valid values, when I submit, then I am redirected to the new app's detail page; given the id is taken, including this deployment's own application id (F-83), then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:243`; form maps it at `_new-enterprise-app-form.tsx:80`).
+  - Acceptance criteria: Given valid values, when I submit, then I am redirected to the new app's detail page; given an id under my org's slug that is already taken, then the id field shows "id already taken" (API 409 `id_taken`, `route.ts:264`; form maps it at `_new-enterprise-app-form.tsx:80`); given any id outside my org's slug, including this deployment's own application id, then the form shows the root "forbidden" error (API 403 `forbidden`, `route.ts:206`, I-01; mapped at `_new-enterprise-app-form.tsx:101`). As Superadmin, this deployment's own application id shows "id already taken" (API 409 `id_taken`, `route.ts:230`, F-83).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | As Org Admin, open the Apps group and click **New application** | The create form opens with a required-field legend |
-    | 2 | Enter a unique lowercase **Id** (letters, digits, dots, hyphens, underscores) | The field accepts it and lowercases your input |
-    | 3 | Fill **Label**, **Origin** (an allowed `https://...`), **Subdomain**, **SSO audience** | Fields accept valid values |
+    | 2 | Enter a unique lowercase **Id** (letters, digits, dots, hyphens, underscores); as Org Admin, under your org's slug, e.g. `org-a.crm` for ORG A (I-01) | The field accepts it and lowercases your input |
+    | 3 | Fill **Label**, **Origin** (an allowed `https://...`), **Subdomain**, **SSO audience** (as Org Admin, ending in your id, e.g. `devresponse-app:org-a.crm`) | Fields accept valid values |
     | 4 | Leave **Sort order** at 100 and submit | You are redirected to the new app's detail page |
     | 5 | Repeat with the same Id | The Id field shows an "already taken" error and no navigation happens |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-NEW-S2 — As an Org Admin, I want the form to stop me submitting a non-HTTPS or untrusted origin, so that SSO redirects stay safe.
-  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, or is this deployment's own origin (F-83), then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:198`; mapped at `_new-enterprise-app-form.tsx:91`).
+  - Acceptance criteria: Given a non-HTTPS origin, when I submit, then the Origin field shows an "invalid origin" error; given an HTTPS origin that is not on the allow-list, or is this deployment's own origin (F-83), then it shows "origin not allowed" (server-only checks; API returns `invalid_origin`/`origin_not_allowed` 400 at `route.ts:219`; mapped at `_new-enterprise-app-form.tsx:91`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | On the create form, enter `http://example.com` as the Origin and otherwise-valid values | On submit, the Origin field shows an invalid-origin error |
+    | 1 | On the create form, enter `http://example.com` as the Origin and otherwise-valid values (as Org Admin, an Id and SSO audience under your org's slug, as in S1) | On submit, the Origin field shows an invalid-origin error |
     | 2 | Change it to a well-formed `https://` URL that is not a trusted host | On submit, the Origin field shows an "origin not allowed" error |
     | 3 | Clear the required fields one at a time and submit | Each required field (`Id`, `Label`, `Origin`, `Subdomain`, `SSO audience`) shows its `*` marker and a localized required message with a red border |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -158,7 +158,8 @@ User stories
 Negative and edge cases
 - Validation: required-field markers appear for `Id`, `Label`, `Origin`, `Subdomain`, `SSO audience`; invalid id/subdomain/audience formats are rejected with localized messages (`src/lib/validation/enterprise-apps.ts:26`).
 - Org-scope: Org Admin submitting with a global/other-org target -> `forbidden` 403 surfaced as a root error.
-- Rate limit (admin mutation): rapid repeated creates hit `admin.apps.create` limiter (`route.ts:162`); expect a friendly failure. `TODO: verify` the exact 429 copy in the create form.
+- Namespace (I-01): Org Admin submitting an id or audience outside its org's slug (`crm`, `devresponse-app:crm`, `acme-corp.crm` for org `acme`) -> `forbidden` 403 with an `administrator.access.denied` audit row (action `enterprise_app_global_name`); `acme.crm` with `devresponse-app:acme.crm` is accepted. A Superadmin may register any name.
+- Rate limit (admin mutation): rapid repeated creates hit `admin.apps.create` limiter (`route.ts:167`); expect a friendly failure. `TODO: verify` the exact 429 copy in the create form.
 - Loading: the submit button is disabled while submitting.
 
 Accessibility: the form is `noValidate` with schema-driven markers; each control is labelled; the root error is a `role="alert"` region (`_new-enterprise-app-form.tsx:241`).
@@ -168,11 +169,11 @@ i18n: labels, help text, and the required legend localize in `en` and `uk`.
 
 - Route: `/app/administrator/enterprise-apps/[appId]` · Example URL: `/en/app/administrator/enterprise-apps/acme-hub` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/[appId]/page.tsx:22`
 - Purpose: View and edit a single application. The `id` is immutable (referenced by SSO handoff nonces); all other fields are inline-editable by managers.
-- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:37`,`:84`). Read-only callers see the same form disabled.
+- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:38`,`:87`). Read-only callers see the same form disabled.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can view/edit apps their org owns; a foreign or global app returns Not Found (404, not 403) to preserve existence indistinguishability (`[appId]/page.tsx:60`; `[id]/route.ts:70`).
-  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:135`).
+  - Org Admin -> can view/edit apps their org owns; a foreign or global app returns Not Found (404, not 403) to preserve existence indistinguishability (`[appId]/page.tsx:60`; `[id]/route.ts:71`).
+  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:147`).
 - Preconditions and test data: know a valid `appId` your persona can access. For the 404 case, obtain an app id owned by a different org (as Org Admin).
 
 User stories
@@ -211,6 +212,7 @@ User stories
 Negative and edge cases
 - Out-of-scope -> Not Found (404) for both foreign and global apps to an Org Admin.
 - Validation: editing keeps `Label`, `Origin`, `Subdomain`, `SSO audience` required (`src/lib/validation/enterprise-apps.ts:74`); bad origin surfaces `invalid_origin`/`origin_not_allowed` on the field.
+- Namespace (I-01): as Org Admin, changing **SSO audience** to one whose last `:` segment is not `<org-slug>.<name>` -> `forbidden` 403 as a root error (`[id]/route.ts:158`); saving other fields of an app named before the rule (its stored audience is re-sent unchanged) still succeeds.
 - Invalid id in URL: an id failing `APP_ID_RE` returns Not Found before any DB read (`[appId]/page.tsx:33`).
 - Concurrency: last write wins on PATCH; there is no If-Match on this form. `TODO: verify` whether stale-edit protection is expected here.
 

@@ -60,6 +60,14 @@ For a deployment running 2.0.0.
   to create a user (#480, #486) is now `admin.users.update` or
   `admin.orgs.manage`, not `admin.orgs.update`. A test now fails when a
   catalog key reaches no guard. See operator action 1.
+- **Enterprise-app names.** App ids and SSO audiences are global names, so an
+  organization admin (or a credential bound to one organization) registers
+  its org's app only under the org's slug, as `<org-slug>.<name>` with an
+  audience ending in an id under the slug (`devresponse-app:acme.crm`), and
+  moves an audience only within it. Any other name is a superadmin's to register
+  (`403`, audited). An org admin could claim `crm` before the superadmin
+  registering the real satellite, who then got `409` (I-01). Existing apps
+  keep their names.
 
 ## [2.0.0] - 2026-09-30
 

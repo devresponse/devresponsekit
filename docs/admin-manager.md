@@ -1678,6 +1678,17 @@ and saving its settings form (which sends the stored audience back) still
 works. A superadmin registers any name, in any org or globally, and only
 superadmins assign slugs.
 
+The console's **New application** form sends `organization_id` explicitly; the
+API does not default it, so an omitted `organization_id` still means a global app
+(R14). The form used to omit it, so every create from the console was a global
+app and an org admin could create none. A caller with cross-org reach now picks
+**Global (all organizations)**, the default, or an org in the form's organization
+picker. An org-confined caller gets no picker: the page sends its active
+organization, resolved with the route's own scope rule, prefills the **Id** with
+`<org-slug>.` and hints the namespace under **Id** and **SSO audience**. A `403`
+for a name outside the slug is shown on that field, as it is for the audience on
+the settings form, rather than as a generic "forbidden".
+
 ### 8.8 API keys
 
 The cookie-session governance console for API keys across all users and orgs.

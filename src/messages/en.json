@@ -1017,6 +1017,12 @@
         "sortOrder": "Sort order",
         "organization": "Organization scope"
       },
+      "namespace": {
+        "idHelp": "Your organization's applications are named under its slug: start the ID with {slug} and a dot, for example {slug}.crm.",
+        "audienceHelp": "The part after the last colon must be an ID under your organization's slug, normally this application's ID (for example {slug}.crm).",
+        "idRefused": "Only a superadmin can register an ID outside your organization's slug. Start it with {slug} and a dot, then a name, such as {slug}.crm.",
+        "audienceRefused": "Only a superadmin can register an SSO audience outside your organization's slug. The part after the last colon must be an ID under it, normally this application's ID, such as devresponse-app:{slug}.crm."
+      },
       "status": {
         "available": "Available",
         "disabled": "Disabled"

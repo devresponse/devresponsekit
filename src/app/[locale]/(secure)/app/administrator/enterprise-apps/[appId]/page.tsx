@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/db/database";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps.server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EnterpriseAppSettingsForm } from "./_enterprise-app-settings-form";
 
@@ -90,6 +90,9 @@ export default async function AdministratorEnterpriseAppDetailPage({
           organizationSlug: row.organization_slug,
         }}
         canManage={canManage}
+        // I-01 / R14: a confined caller moves the audience only under its
+        // org's slug (the route's rule), so its form hints and maps that 403.
+        namespaceSlug={hasCrossOrgReach(guard.access) ? null : row.organization_slug}
       />
     </section>
   );

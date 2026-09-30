@@ -1017,6 +1017,12 @@
         "sortOrder": "排序",
         "organization": "组织作用域"
       },
+      "namespace": {
+        "idHelp": "您组织的应用以其标识为命名空间：ID 须以 {slug} 加一个点开头，例如 {slug}.crm。",
+        "audienceHelp": "最后一个冒号（:）之后的部分必须是您组织标识下的 ID，通常就是此应用的 ID（例如 {slug}.crm）。",
+        "idRefused": "只有超级管理员可以注册您组织标识之外的 ID。请以 {slug} 加一个点开头，后接名称，例如 {slug}.crm。",
+        "audienceRefused": "只有超级管理员可以注册您组织标识之外的 SSO 受众。最后一个冒号（:）之后的部分必须是该标识下的 ID，通常就是此应用的 ID，例如 devresponse-app:{slug}.crm。"
+      },
       "status": {
         "available": "可用",
         "disabled": "已禁用"

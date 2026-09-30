@@ -25,7 +25,8 @@ import { ListLimitNotice } from "./list-limit-notice";
  * for an org-scoped entity:
  *   - a GROUP is always org-scoped     → `includeGlobal={false}` (a real
  *     selection is required);
- *   - a ROLE may be Global or org-scoped → `includeGlobal` offers "Global".
+ *   - a ROLE may be Global or org-scoped → `includeGlobal` offers "Global";
+ *   - so may an ENTERPRISE APP → `includeGlobal` as well (R14).
  *
  * An ORG ADMIN never sees this control — the server forces their own org.
  *

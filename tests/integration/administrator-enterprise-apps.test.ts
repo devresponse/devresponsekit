@@ -4,6 +4,7 @@ import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as LoggerModule from "@/lib/observability/logger.server";
 import type * as AppsRouteModule from "@/app/api/administrator/enterprise-apps/route";
 import type * as AppByIdRouteModule from "@/app/api/administrator/enterprise-apps/[id]/route";
+import { createEnterpriseAppRequestBody } from "@/lib/validation/enterprise-apps";
 import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
@@ -920,6 +921,80 @@ describe("enterprise apps — an org admin names its apps under its org's slug (
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.app.updated", outcome: "success" }),
     );
+  });
+});
+
+/**
+ * R14: the Administrator → Enterprise apps → New form sent no
+ * `organization_id`, so an org admin's create was a global app and the route
+ * refused it (403): an org admin could not create any app from the console.
+ * The form now sends the org its page resolved; these cases post the body the
+ * form builds (`createEnterpriseAppRequestBody`, the form's own builder).
+ */
+describe("enterprise apps — the New form's payload (R14)", () => {
+  const ORG = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const ACME_ADMIN = { ...ORG_ADMIN(["admin.apps.manage"]), organizationId: ORG };
+  const formBody = (id: string, ssoAudience: string, organizationId: string | null) =>
+    createEnterpriseAppRequestBody({
+      id: ` ${id} `,
+      label: "CRM ",
+      description: "",
+      origin: "https://crm.example.com",
+      subdomain: "crm",
+      sso_audience: ssoAudience,
+      sort_order: 100,
+      organization_id: organizationId,
+    });
+
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACME_ADMIN);
+    insertExecute.mockResolvedValue(undefined);
+  });
+
+  it("an org admin's form payload, in its org under its slug, creates the app", async () => {
+    selectFirst
+      .mockResolvedValueOnce({ slug: "acme" }) // the org's slug
+      .mockResolvedValueOnce(null); // audience not taken
+    const body = formBody("acme.crm", "devresponse-app:acme.crm", ORG);
+    expect(body).toMatchObject({ id: "acme.crm", description: null, organization_id: ORG });
+    const res = await POST(jsonReq(body));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ ok: true, id: "acme.crm" });
+    expect(insertExecute).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.app.created", organizationId: ORG }),
+    );
+  });
+
+  it("refuses the same payload with a global id (403, audited, nothing written)", async () => {
+    selectFirst.mockResolvedValueOnce({ slug: "acme" });
+    const res = await POST(jsonReq(formBody("crm", "devresponse-app:crm", ORG)));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "forbidden" });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        reason: "cross_org_reach_required",
+        metadata: expect.objectContaining({ action: "enterprise_app_global_name" }),
+      }),
+    );
+    expect(insertExecute).not.toHaveBeenCalled();
+  });
+
+  it("refuses an org admin's global app, the payload the form used to send", async () => {
+    const res = await POST(jsonReq(formBody("acme.crm", "devresponse-app:acme.crm", null)));
+    expect(res.status).toBe(403);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        metadata: expect.objectContaining({
+          action: "enterprise_app_create",
+          requestedGlobal: true,
+        }),
+      }),
+    );
+    expect(insertExecute).not.toHaveBeenCalled();
   });
 });
 

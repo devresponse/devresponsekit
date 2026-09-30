@@ -30,6 +30,7 @@ vi.mock("@/lib/auth-status", async () => {
 });
 
 const { db, pgPool } = await import("@/db/database");
+const { createEnterpriseAppRequestBody } = await import("@/lib/validation/enterprise-apps");
 const { POST } = await import("@/app/api/administrator/enterprise-apps/route");
 const { PATCH } = await import("@/app/api/administrator/enterprise-apps/[id]/route");
 
@@ -182,5 +183,35 @@ describe("enterprise-app names under the org's slug (DB-backed, I-01)", () => {
       .where("id", "=", OWN_ID)
       .executeTakeFirstOrThrow();
     expect(row.sso_audience).toBe(`sso:${OWN_ID}`);
+  });
+
+  // R14: the New form sent no organization_id, so an org admin's create was a
+  // global app and was refused. It now sends the org the page resolved; this is
+  // the body the form builds, posted to the real route.
+  it("the New form's payload creates an org admin's app in its org", async () => {
+    const formPayload = (organizationId: string | null) =>
+      createEnterpriseAppRequestBody({
+        id: OWN_ID,
+        label: "CRM",
+        description: "",
+        origin: "https://crm.example.com",
+        subdomain: "crm",
+        sso_audience: `devresponse-app:${OWN_ID}`,
+        sort_order: 100,
+        organization_id: organizationId,
+      });
+
+    // The payload the form used to send: a global app, refused.
+    expect((await POST(req("POST", "enterprise-apps", formPayload(null)))).status).toBe(403);
+    expect(await appIds()).toEqual([]);
+
+    const res = await POST(req("POST", "enterprise-apps", formPayload(orgId)));
+    expect(res.status).toBe(201);
+    const row = await db
+      .selectFrom("app_enterprise_applications")
+      .select(["organization_id", "description", "sort_order"])
+      .where("id", "=", OWN_ID)
+      .executeTakeFirstOrThrow();
+    expect(row).toEqual({ organization_id: orgId, description: null, sort_order: 100 });
   });
 });

@@ -43,6 +43,28 @@ export const createEnterpriseAppSchema = z
 export type CreateEnterpriseAppInput = z.input<typeof createEnterpriseAppSchema>;
 
 /**
+ * The body the Administrator → Enterprise apps → New form POSTs: its values
+ * trimmed, an empty description as `null`, and always an `organization_id`
+ * (`null` = a global app). The form used to leave that out, so every create was
+ * a global app and an org admin's was refused with 403 (R14). Shared so the
+ * route suites post exactly what the form sends.
+ */
+export function createEnterpriseAppRequestBody(
+  values: CreateEnterpriseAppInput,
+): CreateEnterpriseAppInput {
+  return {
+    id: values.id.trim(),
+    label: values.label.trim(),
+    description: values.description?.trim() ? values.description.trim() : null,
+    origin: values.origin.trim(),
+    subdomain: values.subdomain.trim(),
+    sso_audience: values.sso_audience.trim(),
+    sort_order: values.sort_order,
+    organization_id: values.organization_id ?? null,
+  };
+}
+
+/**
  * Partial update contract for `PATCH /api/administrator/enterprise-apps/[id]`
  * — the `id` is immutable, every other field optional. (HTTPS/trusted-suffix
  * origin checks stay in the route.)

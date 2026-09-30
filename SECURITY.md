@@ -5,13 +5,16 @@ shell, so we take vulnerability reports seriously and aim to respond quickly.
 
 ## Supported versions
 
-Security fixes land on the latest `1.0.x` release and the `main` branch.
+Security fixes land on the `main` branch, which production deploys from.
+There is no release line beside it yet: no git tag or GitHub release has been
+cut. `package.json` still reads `1.0.0`, the version
+[CHANGELOG.md](CHANGELOG.md) records for 2026-06-18, and every change since,
+security fixes included, is listed under its **Unreleased** section until a
+release is tagged. Report against the commit SHA you tested.
 
 | Version         | Supported          |
 | --------------- | ------------------ |
-| `1.0.x`         | :white_check_mark: |
 | `main` (latest) | :white_check_mark: |
-| `< 1.0`         | :x:                |
 
 ## Reporting a vulnerability
 

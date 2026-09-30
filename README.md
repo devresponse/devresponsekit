@@ -105,23 +105,33 @@ Full detail, and what adopting either would take, is in
 src/
   app/(root)                          # bare "/" → default-locale redirect
   app/[locale]/(public)               # localized marketing landing page (/[locale]) + about, public docs, logged-out
-  app/[locale]/(auth)                 # sign-in, sign-up, forgot/reset password, status pages
+  app/[locale]/(auth)                 # sign-in (+ /[org]), sign-up, email verification, forgot/reset password, invitation accept, SSO confirm, status pages
   app/[locale]/(secure)               # session-gated shell + workspaces
   app/[locale]/(secure)/app/dashboard       # landing workspace
   app/[locale]/(secure)/app/workspace       # nested ApplicationShell example
   app/[locale]/(secure)/app/docs            # in-app Markdown docs viewer (+ /[...slug])
+  app/[locale]/(secure)/app/help            # screenshot walkthrough, served by the same viewer (+ /[...slug])
   app/[locale]/(secure)/app/account         # self-service account (profile, preferences, security, api-keys)
-  app/[locale]/(secure)/app/administrator   # admin console (users, roles, permissions, orgs, memberships, apps, api-keys, audit, email)
+  app/[locale]/(secure)/app/administrator   # admin console (users, roles, groups, permissions, orgs, memberships, apps, api-keys, MCP agents, audit, email)
+  app/api/auth                        # Better Auth catch-all (sign-in, sign-up, sessions, social callbacks)
   app/api/account                     # self-scoped account REST API
   app/api/administrator               # admin REST API (guarded pipeline)
   app/api/v1                          # versioned machine API (API keys, JWT, OAuth clients, JWKS, OpenAPI)
-  app/api/sso                         # JWT handoff launch/consume
+  app/api/mcp                         # MCP agent gateway (+ /register, dynamic client registration)
+  app/api/sso                         # JWT handoff launch/consume + the handoff JWKS
+  app/api/invitations                 # organization invitation accept
   app/api/navigation                  # server-filtered shell menus
   app/api/docs                        # auth-gated docs image assets
-  app/api/preferences                 # locale preference
+  app/api/help                        # auth-gated help screenshot assets
+  app/api/preferences                 # locale and active-organization preferences
+  app/api/health                      # liveness + readiness probes
+  app/api/metrics                     # Prometheus metrics (METRICS_TOKEN bearer; closed while unset)
+  app/api/internal                    # cron routes: outbox drain + retention, MCP registration reaper
+  app/api/security                    # CSP violation report sink
   components/                         # admin, api-keys, app-shell, auth, i18n, navigation, observability, theme, shadcn ui
   lib/                                # auth, guards, audit, SSO, admin, account, email, docs, observability helpers
   lib/api-auth/                       # machine-API auth: API keys, JWT/JWKS, scopes, OAuth clients
+  lib/mcp/                            # MCP gateway: protocol, generated tool surface, registration, reaper
   lib/email/                          # outbox-first sender + Resend/Mailgun providers + templates
   lib/docs/                           # in-app docs reader: source, frontmatter, sanitize-first render pipeline
   db/                                 # Kysely instance, numbered migrations, seeds
@@ -132,19 +142,19 @@ tests/                                # unit / component / integration / securit
 
 The canonical, audience-organized documentation set lives in **[docs/](docs/README.md)** — start there. Direct links:
 
-- [docs/product-overview.md](docs/product-overview.md) — what it is, who it's for, value proposition
-- [docs/product-overview.md](docs/product-overview.md) — product value, feature catalog, user flows, roles & permissions
+- [docs/product-overview.md](docs/product-overview.md) — what it is, who it's for, value proposition, feature catalog, user flows, roles & permissions
 - [docs/architecture.md](docs/architecture.md) — system design, boundaries, auth/authz, data flow, diagrams
 - [docs/developer-onboarding.md](docs/developer-onboarding.md) — **start here as a developer**: install, run, test, structure, conventions
 - [docs/configuration.md](docs/configuration.md) — every environment variable, config files, secrets, local vs production
-- [docs/deployment.md](docs/deployment.md) — deploy model, DB provisioning, CI/CD, post-deploy verification
-- [docs/deployment.md](docs/deployment.md) — build, artifacts, container, release & post-deploy verification
+- [docs/deployment.md](docs/deployment.md) — deploy model, DB provisioning and migrations, CI/CD, release & post-deploy verification
 - [docs/docker.md](docs/docker.md) — container build/run, env, and the migrations init step
 - [docs/api.md](docs/api.md) — HTTP API surface, auth + error model, and typed clients/SDKs for the `/api/v1` surface and the committed admin SDK
+- [docs/api-security.md](docs/api-security.md) — credentials for third parties, the operator playbook, MCP agents, satellite trust boundaries
+- [docs/integration-satellite-apps.md](docs/integration-satellite-apps.md) — standing up a subdomain app that delegates sign-in to the platform
 - [docs/testing.md](docs/testing.md) — test strategy, suites, coverage, manual QA checklist
 - [docs/observability.md](docs/observability.md) — logs, redaction, request-id correlation, audit, Sentry, metrics, health probes, and the roadmap
-- [docs/troubleshooting.md](docs/troubleshooting.md) — incident runbook + common failures and fixes
-- [docs/troubleshooting.md](docs/troubleshooting.md) — common setup, build, runtime, and deployment failures and fixes
+- [docs/troubleshooting.md](docs/troubleshooting.md) — incident runbook, and common setup, build, runtime, and deployment failures and fixes
+- [CHANGELOG.md](CHANGELOG.md) — what changed since 1.0.0, what an operator must do before deploying it, and which fixes the satellite forks must port
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)
 
 ## Security model (summary)
@@ -152,8 +162,13 @@ The canonical, audience-organized documentation set lives in **[docs/](docs/READ
 - `proxy.ts` does an early cookie-presence redirect only; the real
   authorization boundary is `requireSecureSession` (server-side).
 - Administrator routes require explicit permissions via
-  `requireAdminPermission`, which layers origin checks, rate limiting,
-  request-id correlation, and audit logging.
+  `requireAdminPermission`: an origin check for cookie callers, the
+  caller's account and membership status, the permission (intersected with
+  a bearer credential's scopes), and an audit row when the permission is
+  missing. An origin refusal comes before the caller is known, so it is
+  logged and counted rather than audited (F-15). Each mutating handler then
+  applies its own rate limit and audits its change, and `withAdminRoute`
+  stamps an `x-request-id` on every response.
 - The self-service Account app (`/app/account`) is user-level
   (`shell.view`) and **strictly self-scoped**: every read/write targets
   the session user's own row — no id is ever accepted from the client,

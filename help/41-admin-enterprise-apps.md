@@ -30,7 +30,7 @@ Manages the catalog of companion applications that appear in the shell's **Appli
 - Leads to: per-app editor pages (same form pattern as the other editors; not separately captured).
 
 ## Access
-`admin.apps.read`; mutations require `admin.apps.manage`. An organization admin registers apps in its own organization only, under the organization's slug: an id such as `org-a.crm` and an SSO audience ending in an id under the slug (`devresponse-app:org-a.crm`). Any other id or audience, and every Global app, is a superadmin's to register (I-01). For an organization admin the **New application** form creates the app in the active organization and starts the id with `<org-slug>.`; a superadmin picks Global or an organization in the form (R14).
+`admin.apps.read`; mutations require `admin.apps.manage`. An organization admin registers apps in its own organization only, under the organization's slug: an id such as `org-a.crm`. Any other id, and every Global app, is a superadmin's to register (I-01). Its SSO audience must be a prefix, a colon and the app's id (`devresponse-app:org-a.crm`), the only audience the app's satellite accepts; any other is refused (R15). For an organization admin the **New application** form creates the app in the active organization, starts the id with `<org-slug>.`, and proposes the audience `devresponse-app:<id>`, which follows the id until edited; a superadmin picks Global or an organization in the form (R14).
 
 ## Observations
 Apps can be scoped Global or to a single organization, and the subdomain column ties each entry to the SSO handoff (single-use nonce JWTs let users move between subdomains without re-authenticating).

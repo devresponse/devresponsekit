@@ -1,9 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
-import { isOrgNamespacedAppId, isOrgNamespacedAudience } from "./enterprise-apps";
-
-/** A catalog field whose value is a platform-global name. */
-export type AppNameField = "id" | "sso_audience";
+import { isOrgNamespacedAppId } from "./enterprise-apps";
 
 /**
  * I-01 — AN ORG ADMIN NAMES ITS APPS UNDER ITS ORG'S SLUG.
@@ -14,34 +11,23 @@ export type AppNameField = "id" | "sso_audience";
  * `crm` or `devresponse-app:crm`, and the superadmin who later registers the
  * real satellite got `409 id_taken` / `audience_taken` and had to rename it,
  * along with the satellite's `SSO_HANDOFF_APPLICATION_ID`. So a caller without
- * cross-org reach may claim only names in its org's namespace
- * (`isOrgNamespacedAppId`, `isOrgNamespacedAudience`); any other name is the
- * platform's, and the routes refuse it as a superadmin-only action. The
- * routes ask `hasCrossOrgReach` themselves before calling this.
+ * cross-org reach may claim only ids in its org's namespace
+ * (`isOrgNamespacedAppId`); any other id is the platform's, and the routes
+ * refuse it as a superadmin-only action. The routes ask `hasCrossOrgReach`
+ * themselves before calling this.
  *
- * Returns the fields of `names` whose value lies outside the namespace of
- * `organizationId`, so empty when the caller may claim them all. With no org
- * row there is no namespace, and every field named is outside it.
+ * The audience needs no namespace of its own: such a caller must give it the
+ * form `<prefix>:<app id>` (`isConsumableAudienceFor`, R15), so an audience is
+ * in the namespace exactly when its app's id is.
+ *
+ * True when `id` lies in the namespace of `organizationId`. With no org row
+ * there is no namespace, and no id lies in it.
  */
-export async function appNamesOutsideOrgNamespace(
-  organizationId: string,
-  names: { id?: string; sso_audience?: string },
-): Promise<AppNameField[]> {
+export async function isAppIdInOrgNamespace(organizationId: string, id: string): Promise<boolean> {
   const org = await db
     .selectFrom("app_organizations")
     .select(["slug"])
     .where("id", "=", organizationId)
     .executeTakeFirst();
-  const slug = org?.slug;
-  const outside: AppNameField[] = [];
-  if (names.id !== undefined && !(slug && isOrgNamespacedAppId(names.id, slug))) {
-    outside.push("id");
-  }
-  if (
-    names.sso_audience !== undefined &&
-    !(slug && isOrgNamespacedAudience(names.sso_audience, slug))
-  ) {
-    outside.push("sso_audience");
-  }
-  return outside;
+  return org?.slug ? isOrgNamespacedAppId(id, org.slug) : false;
 }

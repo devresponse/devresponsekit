@@ -90,9 +90,9 @@ export default async function AdministratorEnterpriseAppDetailPage({
           organizationSlug: row.organization_slug,
         }}
         canManage={canManage}
-        // I-01 / R14: a confined caller moves the audience only under its
-        // org's slug (the route's rule), so its form hints and maps that 403.
-        namespaceSlug={hasCrossOrgReach(guard.access) ? null : row.organization_slug}
+        // R15: a confined caller moves the audience only onto `<prefix>:<id>`
+        // (the route's rule), so its form hints the rule and maps that 400.
+        confined={!hasCrossOrgReach(guard.access)}
       />
     </section>
   );

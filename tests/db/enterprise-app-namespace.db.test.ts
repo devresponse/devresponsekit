@@ -161,7 +161,19 @@ describe("enterprise-app names under the org's slug (DB-backed, I-01)", () => {
     ]);
   });
 
-  it("an org admin moves its app's audience only within the namespace", async () => {
+  // R15: the I-01 check took an audience's part after its last colon, so a
+  // colon-less one, or another id in the namespace, was registered, and every
+  // launch of the app failed at its satellite.
+  it("an org admin cannot register an audience its satellite cannot consume", async () => {
+    for (const audience of [OWN_ID, `x:${SLUG}.other`]) {
+      const res = await POST(req("POST", "enterprise-apps", createBody(OWN_ID, audience)));
+      expect(res.status).toBe(400);
+    }
+    expect(await appIds()).toEqual([]);
+  });
+
+  // R15: onto `<prefix>:<its own id>` only, which keeps it in the namespace.
+  it("an org admin moves its app's audience only onto one its satellite can consume", async () => {
     expect(
       (await POST(req("POST", "enterprise-apps", createBody(OWN_ID, `devresponse-app:${OWN_ID}`))))
         .status,
@@ -169,11 +181,10 @@ describe("enterprise-app names under the org's slug (DB-backed, I-01)", () => {
     const path = `enterprise-apps/${OWN_ID}`;
     const ctx = { params: Promise.resolve({ id: OWN_ID }) };
 
-    const refused = await PATCH(
-      req("PATCH", path, { sso_audience: `devresponse-app:${GLOBAL_ID}` }),
-      ctx,
-    );
-    expect(refused.status).toBe(403);
+    for (const refusedAudience of [`devresponse-app:${GLOBAL_ID}`, `x:${SLUG}.other`, OWN_ID]) {
+      const refused = await PATCH(req("PATCH", path, { sso_audience: refusedAudience }), ctx);
+      expect(refused.status).toBe(400);
+    }
 
     const moved = await PATCH(req("PATCH", path, { sso_audience: `sso:${OWN_ID}` }), ctx);
     expect(moved.status).toBe(200);

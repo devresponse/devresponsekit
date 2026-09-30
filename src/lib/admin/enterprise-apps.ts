@@ -50,14 +50,31 @@ export function isOrgNamespacedAppId(id: string, orgSlug: string): boolean {
 }
 
 /**
- * I-01: true when the last `:` segment of `audience` is an app id in the
- * namespace of the organization whose slug is `orgSlug`. That is the
- * conventional `<prefix>:<applicationId>` shape (`devresponse-app:acme.crm`)
- * for an app registered under the org's namespace, and it leaves every
- * audience ending in a global id (`devresponse-app:crm`) to the platform.
+ * The `SSO_HANDOFF_AUDIENCE_PREFIX` a kit satellite runs with unless it sets
+ * another (`.env.example`, drk-deploy's `--audience-prefix`), so the audience
+ * the New form proposes for an app (R15).
  */
-export function isOrgNamespacedAudience(audience: string, orgSlug: string): boolean {
-  return isOrgNamespacedAppId(audience.slice(audience.lastIndexOf(":") + 1), orgSlug);
+export const DEFAULT_SSO_AUDIENCE_PREFIX = "devresponse-app";
+
+/**
+ * R15: true when `audience` is one the satellite of app `appId` can consume:
+ * `<prefix>:<appId>`, where the prefix is non-empty and holds no `:` and no
+ * whitespace.
+ *
+ * A satellite's consume route accepts only a token whose `aud` is
+ * `${SSO_HANDOFF_AUDIENCE_PREFIX}:${SSO_HANDOFF_APPLICATION_ID}` and whose
+ * `targetApplicationId`, the app's catalog id, is that same application id
+ * (src/app/api/sso/consume/route.ts). So an app registered under any other
+ * audience (`acme.crm`, or `x:acme.other` for app `acme.crm`) looks healthy in
+ * the console and every launch of it fails at the satellite. Because the last
+ * segment is the app's own id, an org admin's app id under its slug (I-01)
+ * also keeps its audience out of every other name.
+ */
+export function isConsumableAudienceFor(audience: string, appId: string): boolean {
+  const suffix = `:${appId}`;
+  if (appId.length === 0 || !audience.endsWith(suffix)) return false;
+  const prefix = audience.slice(0, -suffix.length);
+  return prefix.length > 0 && !/[:\s]/.test(prefix);
 }
 
 /**

@@ -120,12 +120,11 @@ of 2.0.0's list below. Each entry names what to carry over.
   catalog key reaches no guard. See operator action 1.
 - **Enterprise-app names.** App ids and SSO audiences are global names, so an
   organization admin (or a credential bound to one organization) registers
-  its org's app only under the org's slug, as `<org-slug>.<name>` with an
-  audience ending in an id under the slug (`devresponse-app:acme.crm`), and
-  moves an audience only within it. Any other name is a superadmin's to register
-  (`403`, audited). An org admin could claim `crm` before the superadmin
-  registering the real satellite, who then got `409` (I-01). Existing apps
-  keep their names.
+  its org's app only under the org's slug, as `<org-slug>.<name>`, with the
+  audience `<prefix>:<that id>` (`devresponse-app:acme.crm`, R15 under
+  Fixed). Any other id is a superadmin's to register (`403`, audited). An org
+  admin could claim `crm` before the superadmin registering the real
+  satellite, who then got `409` (I-01). Existing apps keep their names.
 - **Administrator API contract.** A repeated `filter[…]` on an administrator
   list or CSV export matches any of its values, as the admin spec and SDK
   declare; most lists used to drop it and answer every row. `POST
@@ -196,12 +195,24 @@ of 2.0.0's list below. Each entry names what to carry over.
   **Administrator → Enterprise apps → New application**. The form sent no
   `organization_id`, so every create was a global app, which the API refuses
   to an org admin (`403`). It now sends the admin's active organization,
-  prefills the id with `<org-slug>.`, says under the id and SSO audience that
-  names go under the slug (I-01), and shows a name outside it on its field
-  rather than as "You don't have permission to view this page", on the
-  settings form's audience too. A superadmin picks Global, the default, or an
-  organization. The API is unchanged: an omitted `organization_id` is still a
-  global app (R14).
+  prefills the id with `<org-slug>.`, says under the id that ids go under the
+  slug (I-01), and shows an id outside it on the field rather than as "You
+  don't have permission to view this page". A superadmin picks Global, the
+  default, or an organization. The API is unchanged: an omitted
+  `organization_id` is still a global app (R14).
+- **Enterprise-app audiences.** An organization admin (or a credential bound
+  to one organization) could register an app whose single sign-on could never
+  work. A satellite accepts only the audience `<prefix>:<its app id>`, and
+  the I-01 check read only the part after the last colon, so
+  `acme.crm` (no colon) or `x:acme.other` was accepted for app `acme.crm`:
+  the app looked healthy in the console and every launch failed at the
+  satellite. Such a caller's audience must now be exactly `<prefix>:<app id>`
+  (a non-empty prefix with no colon or whitespace), on create and on a
+  `PATCH` that changes it, or the API answers `400 invalid_body`. The New
+  form proposes `devresponse-app:<id>` and keeps it in step with the id until
+  it is edited, both forms state the rule, and the refusal is shown on the
+  audience field. Superadmins, and apps already registered, are unchanged
+  (R15).
 - **Email.** Invitations and the test email are written in the recipient's
   language when the recipient belongs to the mail's organization, else in
   the sending admin's, and an invitation's link opens in the same language,

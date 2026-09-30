@@ -1019,9 +1019,10 @@
       },
       "namespace": {
         "idHelp": "您组织的应用以其标识为命名空间：ID 须以 {slug} 加一个点开头，例如 {slug}.crm。",
-        "audienceHelp": "最后一个冒号（:）之后的部分必须是您组织标识下的 ID，通常就是此应用的 ID（例如 {slug}.crm）。",
+        "audienceHelp": "由前缀、冒号（:）和此应用的 ID 组成，例如 devresponse-app:{slug}.crm。单点登录只能使用该受众进入此应用，因此在您编辑之前，它会随 ID 一起变化。",
+        "audienceRule": "由前缀、冒号（:）和此应用的 ID 组成，例如 devresponse-app:{id}。单点登录只能使用该受众进入此应用。",
         "idRefused": "只有超级管理员可以注册您组织标识之外的 ID。请以 {slug} 加一个点开头，后接名称，例如 {slug}.crm。",
-        "audienceRefused": "只有超级管理员可以注册您组织标识之外的 SSO 受众。最后一个冒号（:）之后的部分必须是该标识下的 ID，通常就是此应用的 ID，例如 devresponse-app:{slug}.crm。"
+        "audienceRefused": "SSO 受众必须由前缀、冒号（:）和此应用的 ID 组成，例如 devresponse-app:{id}。使用其他受众时，单点登录无法进入此应用。"
       },
       "status": {
         "available": "可用",

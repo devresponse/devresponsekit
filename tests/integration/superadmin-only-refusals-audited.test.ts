@@ -9,8 +9,8 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  * Each of these handlers answers an org admin who HOLDS the route's permission
  * with a 403, because the action is platform-wide (the permission catalog, a
  * tenant's lifecycle, the global email templates and sign-up defaults, a global
- * role or app, moving an app between tenants, an app id or SSO audience outside
- * the caller's org namespace, I-01). The permission pipeline had
+ * role or app, moving an app between tenants, an app id outside the caller's
+ * org namespace, I-01). The permission pipeline had
  * already let the caller through, so nothing recorded the attempt. Each now
  * writes one `administrator.access.denied` row (reason
  * `cross_org_reach_required`, the attempted `action` in metadata) under the
@@ -158,28 +158,6 @@ const gates: ReachGate[] = [
     invoke: async () => {
       const { POST } = await import("@/app/api/administrator/enterprise-apps/route");
       return POST(req("enterprise-apps", "POST", { ...APP, organization_id: ORG_A }));
-    },
-  },
-  {
-    // I-01: its own org's app, its audience moved onto a global name.
-    name: "PATCH /enterprise-apps/[id] (audience onto a global name)",
-    permission: "admin.apps.manage",
-    action: "enterprise_app_global_name",
-    metadata: { applicationId: "org-a.crm", ssoAudience: "devresponse-app:crm" },
-    setup: () => {
-      firstRows.app_enterprise_applications = {
-        id: "org-a.crm",
-        organization_id: ORG_A,
-        sso_audience: "devresponse-app:org-a.crm",
-      };
-      firstRows.app_organizations = { slug: "org-a" };
-    },
-    invoke: async () => {
-      const { PATCH } = await import("@/app/api/administrator/enterprise-apps/[id]/route");
-      return PATCH(
-        req("enterprise-apps/org-a.crm", "PATCH", { sso_audience: "devresponse-app:crm" }),
-        idCtx("org-a.crm"),
-      );
     },
   },
   {

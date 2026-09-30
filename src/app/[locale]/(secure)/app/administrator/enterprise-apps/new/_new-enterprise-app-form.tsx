@@ -14,7 +14,11 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { RequiredLegend } from "@/components/ui/required-legend";
-import { isOrgNamespacedAppId, isOrgNamespacedAudience } from "@/lib/admin/enterprise-apps";
+import {
+  DEFAULT_SSO_AUDIENCE_PREFIX,
+  isConsumableAudienceFor,
+  isOrgNamespacedAppId,
+} from "@/lib/admin/enterprise-apps";
 import { useZodForm } from "@/lib/forms/use-zod-form";
 import {
   createEnterpriseAppRequestBody,
@@ -22,6 +26,11 @@ import {
   type CreateEnterpriseAppInput,
 } from "@/lib/validation/enterprise-apps";
 import { OrganizationPicker } from "../../_components/organization-picker";
+
+/** R15: the audience the form proposes for app `id`, under a satellite's default prefix. */
+function proposedAudience(id: string): string {
+  return `${DEFAULT_SSO_AUDIENCE_PREFIX}:${id}`;
+}
 
 /**
  * Client-side new enterprise application form (docs/admin-manager.md §8.7;
@@ -41,11 +50,15 @@ import { OrganizationPicker } from "../../_components/organization-picker";
  *   - a SUPERADMIN picks a global app (the default) or any org in the
  *     {@link OrganizationPicker};
  *   - an ORG-CONFINED caller gets no picker and sends `ownOrganization`, the
- *     org the page resolved with the route's own scope rule. App ids and
- *     audiences are global names, so the route admits only names under that
- *     org's slug (I-01): the id is prefilled with `<slug>.`, both fields say
- *     so, and the route's 403 for a name outside it lands on that field rather
- *     than as a generic "forbidden".
+ *     org the page resolved with the route's own scope rule. App ids are
+ *     global names, so the route admits only ids under that org's slug
+ *     (I-01): the id is prefilled with `<slug>.`, the field says so, and the
+ *     route's 403 for an id outside it lands on the field rather than as a
+ *     generic "forbidden". The route also holds such a caller's audience to
+ *     one the app's satellite can consume, `<prefix>:<id>` (R15), so the
+ *     audience is proposed as `devresponse-app:<id>` and follows the id until
+ *     the admin edits it, its hint states the rule, and the route's 400 for
+ *     another audience lands on the field.
  */
 export function NewEnterpriseAppForm({
   locale,
@@ -68,7 +81,7 @@ export function NewEnterpriseAppForm({
       description: "",
       origin: "",
       subdomain: "",
-      sso_audience: "",
+      sso_audience: slug ? proposedAudience(`${slug}.`) : "",
       sort_order: 100,
       organization_id: ownOrganization?.id ?? null,
     },
@@ -111,25 +124,28 @@ export function NewEnterpriseAppForm({
           form.setError("origin", { type: "server", message: tErr("invalidOrigin") });
         } else if (body.error === "origin_not_allowed") {
           form.setError("origin", { type: "server", message: tErr("originNotAllowed") });
+        } else if (
+          // R15: the route refuses a confined caller's audience that is not
+          // `<prefix>:<id>` with `invalid_body`, so put the rule on the field.
+          body.error === "invalid_body" &&
+          slug !== null &&
+          !isConsumableAudienceFor(payload.sso_audience, payload.id)
+        ) {
+          form.setError("sso_audience", {
+            type: "server",
+            message: t("namespace.audienceRefused", { id: payload.id }),
+          });
         } else {
           form.setError("root", { type: "server", message: tErr("invalidBody") });
         }
         return;
       }
       if (res.status === 403) {
-        // I-01: the route refuses a confined caller a name outside its org's
-        // slug with a bare 403, so name the field(s) that caused it, each with
-        // its own rule (an audience is judged by its part after the last `:`).
-        const outside: Array<"id" | "sso_audience"> = [];
-        if (slug !== null) {
-          if (!isOrgNamespacedAppId(payload.id, slug)) outside.push("id");
-          if (!isOrgNamespacedAudience(payload.sso_audience, slug)) outside.push("sso_audience");
-          for (const field of outside) {
-            const key = field === "id" ? "namespace.idRefused" : "namespace.audienceRefused";
-            form.setError(field, { type: "server", message: t(key, { slug }) });
-          }
-        }
-        if (outside.length === 0) {
+        // I-01: the route refuses a confined caller an id outside its org's
+        // slug with a bare 403, so put the rule on the id field.
+        if (slug !== null && !isOrgNamespacedAppId(payload.id, slug)) {
+          form.setError("id", { type: "server", message: t("namespace.idRefused", { slug }) });
+        } else {
           form.setError("root", { type: "server", message: tErr("forbidden") });
         }
         return;
@@ -174,7 +190,20 @@ export function NewEnterpriseAppForm({
                 <Input
                   type="text"
                   {...field}
-                  onChange={(e) => field.onChange(e.currentTarget.value.toLowerCase())}
+                  onChange={(e) => {
+                    const id = e.currentTarget.value.toLowerCase();
+                    // R15: the audience follows the id while it is still the
+                    // one proposed for the previous id, so until it is edited.
+                    if (
+                      slug !== null &&
+                      form.getValues("sso_audience") === proposedAudience(field.value)
+                    ) {
+                      form.setValue("sso_audience", proposedAudience(id), {
+                        shouldValidate: form.formState.isSubmitted,
+                      });
+                    }
+                    field.onChange(id);
+                  }}
                 />
               </FormControl>
               <FormDescription>

@@ -18,9 +18,9 @@ export {
   APP_STATUS_VALUES,
   SSO_AUDIENCE_RE,
   SUBDOMAIN_RE,
+  isConsumableAudienceFor,
   isHttpsOrigin,
   isOrgNamespacedAppId,
-  isOrgNamespacedAudience,
   type AppStatus,
 } from "./enterprise-apps";
 

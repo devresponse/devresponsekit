@@ -10,13 +10,13 @@ import { adminErrorResponse } from "@/lib/http/errors.server";
 import {
   APP_ID_RE,
   isAllowedEnterpriseOrigin,
+  isConsumableAudienceFor,
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
 import {
   isSsoAudienceTaken,
   isSsoAudienceUniqueViolation,
 } from "@/lib/admin/enterprise-apps-audience.server";
-import { appNamesOutsideOrgNamespace } from "@/lib/admin/enterprise-apps-namespace.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
@@ -83,9 +83,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * Updates mutable fields of an enterprise application. The `id` is a
  * stable primary key referenced by SSO handoff nonces and is therefore
  * not editable here. Caller MUST hold `admin.apps.manage`. A caller without
- * cross-org reach may change `sso_audience` only to one under its org's slug
- * (403 `forbidden`, I-01). Setting `status` to `disabled` also ends the app's
- * SSO handoffs this deployment can see (F-82, `endSsoHandoffsOfApplication`).
+ * cross-org reach may change `sso_audience` only to one the app's satellite
+ * can consume, `<prefix>:<id>` (400 `invalid_body`, R15), so never onto
+ * another app's name (I-01). Setting `status` to `disabled` also ends the
+ * app's SSO handoffs this deployment can see (F-82,
+ * `endSsoHandoffsOfApplication`).
  */
 export const PATCH = withAdminRoute(async function PATCH(
   request: NextRequest,
@@ -152,26 +154,21 @@ export const PATCH = withAdminRoute(async function PATCH(
       applicationId: id,
     });
   }
-  // I-01: the audience is a global name, so an org admin moves it only onto a
-  // name under its org's slug, as on create. Only a CHANGE is checked: the
-  // settings form sends the stored audience with every save, and an app
-  // registered before this rule keeps its name. (`organization_id` is never
-  // null here: `canAccessOrg` gave a confined caller its own org's app.)
+  // R15: an org admin moves the audience only onto one the app's satellite
+  // can consume, `<prefix>:<id>` of this app, as on create; the id cannot
+  // change here. That also leaves it no other app's name to squat (I-01):
+  // the last segment is this app's own id, a primary key no other app holds.
+  // Only a CHANGE is checked: the settings form sends the stored audience
+  // with every save, and an app registered before this rule keeps its
+  // audience. A superadmin is not held to it (platform apps such as
+  // `devresponse-portal` carry `devresponse-app:portal`).
   if (
     input.sso_audience !== undefined &&
     input.sso_audience !== existing.sso_audience &&
     !hasCrossOrgReach(guard.access) &&
-    existing.organization_id !== null
+    !isConsumableAudienceFor(input.sso_audience, id)
   ) {
-    const outside = await appNamesOutsideOrgNamespace(existing.organization_id, {
-      sso_audience: input.sso_audience,
-    });
-    if (outside.length > 0) {
-      return refuseWithoutCrossOrgReach(guard, request, "enterprise_app_global_name", {
-        applicationId: id,
-        ssoAudience: input.sso_audience,
-      });
-    }
+    return adminErrorResponse("invalid_body", 400, request);
   }
   // Review #15: an audience may not be moved onto a value another app owns.
   // F-83: nor onto this deployment's own audience. The id cannot change here,

@@ -51,6 +51,8 @@ models/EmailTemplateListEnvelope.ts
 models/EnterpriseAppDetail.ts
 models/EnterpriseAppItem.ts
 models/EnterpriseAppList.ts
+models/EraseUser200Response.ts
+models/EraseUserRequest.ts
 models/GlobalMembershipItem.ts
 models/GlobalMembershipList.ts
 models/GroupDetailEnvelope.ts
@@ -60,6 +62,7 @@ models/GroupMemberItem.ts
 models/GroupMemberList.ts
 models/GroupRoleIdsRequest.ts
 models/GroupRoles.ts
+models/GroupRolesPatchRequest.ts
 models/GroupRolesResult.ts
 models/GroupRolesRolesInner.ts
 models/IdCreated.ts
@@ -91,6 +94,7 @@ models/OutboxList.ts
 models/PermissionList.ts
 models/PermissionListItem.ts
 models/PermissionsList.ts
+models/PermissionsPatchRequest.ts
 models/PermissionsResult.ts
 models/ProviderBindingItem.ts
 models/ProviderBindingList.ts

@@ -4,6 +4,7 @@ import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { canAccessOrg, hasCrossOrgReach, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { AdminError, loadOrgOrThrow } from "@/lib/admin/orgs.server";
+import { organizationEtag } from "@/lib/admin/record-etag.server";
 import { getDefaultOrganization } from "@/lib/default-organization.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { Badge } from "@/components/ui/badge";
@@ -156,6 +157,7 @@ export default async function AdministratorOrganizationDetailPage({
           isResolvedDefault,
           memberCount: org.member_count,
           bindingCount: org.binding_count,
+          etag: organizationEtag(org),
         }}
         canManage={canManage}
         canUpdate={canUpdate}

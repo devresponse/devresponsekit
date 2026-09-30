@@ -11,6 +11,8 @@ export interface GroupDetailJson {
   key: string;
   name: string;
   description: string | null;
+  /** The group's ETag (F-39), for the Settings form's `If-Match`. */
+  etag: string;
 }
 
 /**
@@ -64,6 +66,7 @@ export function GroupDetailTabs({
           initialKey={group.key}
           initialName={group.name}
           initialDescription={group.description}
+          etag={group.etag}
           canUpdate={canUpdate}
         />
       </TabsContent>

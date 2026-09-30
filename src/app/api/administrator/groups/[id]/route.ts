@@ -15,7 +15,9 @@ import {
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { loadGroupDetail } from "@/lib/admin/groups.server";
+import { GROUP_ETAG_COLUMNS, groupEtag, lockedGroupEtag } from "@/lib/admin/record-etag.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { ifMatchPinsVersion, ifMatchSatisfied } from "@/lib/api-auth/etag";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +29,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  *
  * Group detail + role/member counts. Caller MUST hold `admin.groups.read`.
  * ADR-0001: an org admin reaches only their org's groups (404 otherwise).
+ * The `ETag` is the group's content tag (F-39), which a PATCH may send back
+ * as `If-Match`.
  */
 export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.read");
@@ -39,7 +43,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
   if (!group || !canAccessOrg(guard.access, group.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
   }
-  return NextResponse.json({ group });
+  return NextResponse.json({ group }, { headers: { ETag: groupEtag(group) } });
 });
 
 /**
@@ -47,6 +51,12 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
  *
  * Partial update of name / description. `key` is read-only after creation.
  * Caller MUST hold `admin.groups.update`.
+ *
+ * F-39: an `If-Match` naming a tag other than the group's current one is
+ * refused with 412 `precondition_failed` (carrying the current `ETag`), and
+ * nothing is written; compared under a row lock in the writing transaction,
+ * exactly as the role PATCH does. Without `If-Match` the update is
+ * last-write-wins. A 200 carries the updated group's `ETag`.
  */
 export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.update");
@@ -92,7 +102,33 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
   }
 
   updates.updated_at = new Date();
-  await db.updateTable("app_groups").set(updates).where("id", "=", id).execute();
+  const ifMatch = request.headers.get("if-match");
+  const outcome = await db.transaction().execute(async (trx) => {
+    if (ifMatchPinsVersion(ifMatch)) {
+      const current = await lockedGroupEtag(trx, id);
+      if (current === null) return { kind: "vanished" as const };
+      if (!ifMatchSatisfied(ifMatch, current)) return { kind: "stale" as const, etag: current };
+    }
+    const updated = await trx
+      .updateTable("app_groups")
+      .set(updates)
+      .where("id", "=", id)
+      .returning(GROUP_ETAG_COLUMNS)
+      .executeTakeFirst();
+    return updated
+      ? { kind: "updated" as const, etag: groupEtag(updated) }
+      : { kind: "vanished" as const };
+  });
+  // Deleted by a concurrent request after the read above.
+  if (outcome.kind === "vanished") {
+    return adminErrorResponse("not_found", 404, request);
+  }
+  if (outcome.kind === "stale") {
+    return adminErrorResponse("precondition_failed", 412, request, {
+      requestId: guard.requestId,
+      headers: { ETag: outcome.etag },
+    });
+  }
 
   await auditOrgAction("admin.group.updated", "success", {
     request,
@@ -101,7 +137,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
     metadata: { groupId: id, key: existing.key, fields: Object.keys(updates) },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true }, { headers: { ETag: outcome.etag } });
 });
 
 /**

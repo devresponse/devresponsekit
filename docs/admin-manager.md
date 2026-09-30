@@ -666,14 +666,27 @@ word, and a half-typed form went the same way. The **Members** and
 **Providers** grids still unmount and reload each time they open. Leaving the
 page (a sidebar link, a reload) still drops unsaved edits without a prompt.
 
-Known limitation: the org, role and group PATCH routes have no optimistic
-concurrency. When two admins, or two browser tabs, edit the same record,
-neither sees the other's save, and the later write of a field wins. Changed-only
-bodies limit a stale editor to the fields it actually changed. An ETag plus
-`If-Match` on those routes is a follow-up. `app_roles` has no `updated_at`
-column to derive the ETag from, so it needs a migration, and a new request
-header and a 412 response change the admin OpenAPI spec and the generated
-admin SDK.
+**A stale save is refused, not applied (F-39).** When two admins, or two
+browser tabs, edited the same record, neither saw the other's save, and the
+later write of a field won. `GET /organizations/[id]`, `/roles/[id]` and
+`/groups/[id]` now answer an `ETag`: a weak tag hashed from the fields the
+record's PATCH can change (`src/lib/admin/record-etag.server.ts`). Hashing the
+content needs no `updated_at` column (`app_roles` has none) and so no
+migration, and a member count or other derived field moving does not make a
+rename conflict. The detail page hands the same tag to its Settings form,
+which sends it as `If-Match` (`useIfMatch`). The PATCH re-reads the record
+`FOR UPDATE` inside its writing transaction and answers **412**
+`precondition_failed`, with the current `ETag`, when the tag no longer matches;
+nothing is written. The form then says someone else saved the record, reloads
+the page, and keeps the admin's own edits, so the next save sends only those
+fields against the current tag. A 200 carries the updated record's `ETag`. A
+PATCH without `If-Match` (or with `*`) is last-write-wins, as before, so API
+clients that never read the tag keep working; the admin SDK's `updateOrganization`,
+`updateRole` and `updateGroup` take an optional `ifMatch`. The org PATCH takes
+the record's row lock after the default-flag lock, the last-superuser row
+locks and, when it moves the default, the current default's row
+(`lockOtherDefaultOrganizations`), the order a move takes them in. The
+organization Authentication tab's sign-up policy PATCH is not versioned.
 
 ### 8.0 Overview dashboard
 
@@ -889,7 +902,8 @@ platform's own superuser: `DELETE /users/[id]/app-roles`,
 their grant twin:
 
 - **Conferral symmetry** — `DELETE /users/[id]/app-roles` and
-  `DELETE /roles/[id]/permissions` run the AUTHZ-3 subset test
+  `DELETE /roles/[id]/permissions` (and the `remove` side of its atomic
+  `PATCH`, F-38) run the AUTHZ-3 subset test
   (`conferrablePermissions` + `unheldPermissionKeys`) against the **removed**
   set. A non-superadmin may only revoke what they could confer; a bearer
   credential is bounded by its scopes and never takes the superadmin fast-path
@@ -934,7 +948,7 @@ in one request — including on themselves:
 
 | Path | Where the check lives |
 | --- | --- |
-| `DELETE /users/[id]/app-roles`, `DELETE /roles/[id]/permissions`, `PATCH\|DELETE /users/[id]/memberships`, `PATCH\|DELETE /organizations/[id]/members` | the route handler |
+| `DELETE /users/[id]/app-roles`, `DELETE\|PATCH /roles/[id]/permissions`, `PATCH\|DELETE /users/[id]/memberships`, `PATCH\|DELETE /organizations/[id]/members` | the route handler |
 | `POST /users/[id]/status`, `POST /api/v1/users/[id]/status`, `block`/`suspend` via `POST /users/bulk` | `performAdminStatusChange` (`src/lib/admin-status.server.ts`) — the shared core, so a fourth caller cannot forget it |
 | `DELETE /users/[id]`, `soft_delete` via `POST /users/bulk` | inside the soft-delete transaction; the saga's compensation puts back the ban the soft-delete replaced (F-57), so a refusal leaves the account's ban and records as they were and revokes no credential (I-19). Measured as the ban the soft-delete applies first (`banStripsLastGlobalSuperuser`, F-56) |
 | `POST /users/[id]/ban`, `ban` via `POST /users/bulk` (F-56) | `guardAppliedBan` (`src/lib/admin/user-actions.server.ts`), after the ban: a refusal puts back the ban it replaced, or lifts it when there was none (F-57). The check cannot run first, because Better Auth writes the ban on its own connection and the check locks the target's `user` row, so it reads the grants with that one ban disregarded. A refused ban has already signed the target out |
@@ -1224,7 +1238,7 @@ Manages the tenant entity and its memberships.
 | --- | --- | --- |
 | `GET /organizations` | `admin.orgs.read` | List with member counts; an org admin sees only their own org row |
 | `POST /organizations` | `admin.orgs.create` | **Superadmin-only** (the tenant entity); `admin.organization.created` |
-| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | PATCH and DELETE are **Superadmin-only** (cross-org reach); `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below); `isDefault: true` moves the default here, `isDefault: false` on the current default returns 409 `organization_is_default` and emits `.update_blocked` (on a legacy extra default it clears that flag), and a DELETE of a flagged org returns 409 `organization_is_default` (F-40, see *The default organization* below). A DELETE takes the org's revoked API keys and OAuth clients with it; roles, bindings, apps or an active credential still referencing it return 409 `organization_in_use`, and `.delete_blocked` names the blocking constraint in `metadata.blockedBy` (F-98) |
+| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | PATCH and DELETE are **Superadmin-only** (cross-org reach); `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. GET answers an `ETag`, and a PATCH whose `If-Match` names another tag is 412 `precondition_failed` (F-39, §8 above). A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below); `isDefault: true` moves the default here, `isDefault: false` on the current default returns 409 `organization_is_default` and emits `.update_blocked` (on a legacy extra default it clears that flag), and a DELETE of a flagged org returns 409 `organization_is_default` (F-40, see *The default organization* below). A DELETE takes the org's revoked API keys and OAuth clients with it; roles, bindings, apps or an active credential still referencing it return 409 `organization_in_use`, and `.delete_blocked` names the blocking constraint in `metadata.blockedBy` (F-98) |
 | `…/[id]/members` | `admin.orgs.read` / `admin.orgs.manage` (F-69) | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`). PATCH/DELETE are rank-gated (REVOKE-1, whole batch refused with 403) and may return 409 `last_superadmin` (REVOKE-2). DELETE also deletes each member's roles and group memberships in this org and is conferral-gated on them (F-12, §8.3) |
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.manage` (POST: + **superadmin**) | IdP org links and email-domain routing; creating one is a platform-wide claim, so POST also requires cross-org reach (F-04) and validates the provider, lowercases an `email` domain and refuses consumer mailbox domains; `admin.organization.provider_bound` / `.provider_bind_denied` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy; GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
@@ -1461,70 +1475,61 @@ nullable; `NULL` = a global/platform role, superadmin-only).
 | --- | --- | --- |
 | `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization` (may be repeated, F-154), `scope`, `permission`; `q` matches key, name and the owning org's name (§7.3) |
 | `POST /roles` | `admin.roles.create` | Org admin may create only within their own org; `admin.role.created`. A key already taken in that scope is 409 `key_taken`: `(organization_id, key)` is unique, and a global key is unique across global roles (partial unique index, migration 0007, F-97), so two concurrent creates of one key leave one row |
-| `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete. DELETE is 409 `role_in_use` (`admin.role.delete_blocked`) while any user or group holds the role, counted after locking the role row in the deleting transaction, so a grant committed while the delete runs is refused rather than cascade-deleted (F-97) |
-| `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden` and an `admin.permission.conferral_denied` row, F-58; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
+| `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete. GET answers an `ETag`, and a PATCH whose `If-Match` names another tag is 412 `precondition_failed` (F-39). DELETE is 409 `role_in_use` (`admin.role.delete_blocked`) while any user or group holds the role, counted after locking the role row in the deleting transaction, so a grant committed while the delete runs is refused rather than cascade-deleted (F-97) |
+| `GET/POST/PATCH/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor, which saves through `PATCH { add, remove }` (one transaction, F-38, below); `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden` and an `admin.permission.conferral_denied` row, F-58; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
 | `GET /roles/[id]/members` | `admin.roles.read` | Users carrying the role |
 | `POST /roles/[id]/duplicate` | `admin.roles.create` | Clone a role; 409 `key_taken` when the computed `-copy` key is taken, including by a concurrent create or duplicate (F-97) |
 
-**Dual-list saves are two writes, not one (F-38).** The role's **Permissions**
-editor and the group's **Roles** editor (§8.6) both save through a POST of
-the added items and a DELETE of the removed ones on the same collection
-(`/roles/[id]/permissions`, `/groups/[id]/roles`). Each write is atomic; the
-pair is not, so a save can land half-way. Both editors go through one shared
-client path (`src/lib/admin/dual-list-save.client.ts`) that keeps a partial
-save visible:
+**Dual-list saves are one atomic PATCH (F-38).** The role's **Permissions**
+editor and the group's **Roles** editor (§8.6) used to save through a POST of
+the added items and then a DELETE of the removed ones. The pair was not
+atomic: when the DELETE was refused (REVOKE-1's 403, REVOKE-2's 409) after the
+POST had landed, the editor showed a generic error and kept its old baseline,
+the admin moved the keys back, and the grant the POST had committed stayed
+live, and hidden, for every holder of the role or member of the group.
 
-- **Additions go first, then removals.** The actor's permissions are
-  recomputed on every request from their direct and group-conferred roles, so
-  each committed write changes what the next one is checked against. An
-  addition can only widen the actor's authority. A removal can take away the
-  very permission the next write needs when the actor's own authority comes
-  through the role or group being edited: an org admin whose
-  `admin.groups.assign` comes from role *v1* in group *Org Admins*, swapping
-  *v1* for an identical *v2*, would lose `admin.groups.assign` the moment *v1*
-  is removed, have the POST of *v2* refused, and leave every member of the
-  group without that authority, which they could not restore (AUTHZ-3 forbids
-  conferring what you lack). Sent POST first, that swap succeeds. A refused
-  POST (403 `forbidden` from the AUTHZ-3 subset test) stops the save before
-  the DELETE is sent. The only partial outcome left is "added, not removed"
-  (the DELETE refused by REVOKE-1's 403 or REVOKE-2's 409 `last_superadmin`),
-  and every addition a POST can commit is one AUTHZ-3 lets this actor make on
-  its own, so it is an authorized grant, shown in the editor, which the actor
-  may remove again.
+Both collections now take `PATCH { add, remove }` (`PATCH /roles/[id]/permissions`
+with permission keys, `PATCH /groups/[id]/roles` with role ids; at least one
+item, none on both sides, else 400 `invalid_body`), and both editors save
+through it, via one shared client path (`src/lib/admin/dual-list-save.client.ts`):
+
+- **Every guard runs on both sides before anything is written,** then both
+  sides are applied in one transaction, so a save lands whole or not at all.
+  The AUTHZ-3 / REVOKE-1 subset test runs on `add` and on `remove` exactly as
+  on POST and DELETE (the refusal row names the direction,
+  `role_permissions_add` / `_remove`, `group_roles_add` / `_remove`), a role to
+  add must belong to the group's org (404 `role_not_found`), and detaching
+  `superuser` from the last role that carries it is 409 `last_superadmin`,
+  checked in the writing transaction. A refusal of either side writes nothing.
+- **Both sides are judged against the actor's authority as the request found
+  it,** so a removal cannot take away the authority an addition is judged by:
+  an org admin whose `admin.groups.assign` comes from role *v1* in group *Org
+  Admins* can swap *v1* for an identical *v2* in one save. (The interim
+  POST-then-DELETE editor had to send additions first for the same reason.)
+- **One audit row records the delta applied,** read from `RETURNING` on the
+  insert and the delete: an item already attached is not reported as `added`,
+  one that was never attached is not reported as `removed`, and an item named
+  twice appears once. A request that changes nothing still writes its row, with
+  an empty delta.
 - **The server's set is re-read after every save, success or failure,** and
-  both the lists and the editor's baseline are reset to it before the error is
-  shown. A failed response is not proof that nothing committed, so only a fresh
-  GET is trusted. This is the F-38 fix proper: before it, when the DELETE was
-  refused after the POST had landed, the editor kept its old baseline, the
-  admin moved the keys back, and the grant the POST had committed stayed live
-  and hidden until a reload.
+  both the lists and the editor's baseline are reset to it before any error is
+  shown. A failed response is not proof that nothing committed (a 500 raised
+  after the commit still leaves the rows), so only a fresh GET is trusted.
 - **The refusal is named:** 403 says the actor can only add or remove what they
   hold themselves, 409 `last_superadmin` gives the last-superadmin message the
   user roles and memberships panels use, and anything else keeps the generic
-  error. The route's own permission guard answers 403 `forbidden` too; with
-  additions first a save cannot take that permission away between its own
-  writes, so that 403 only appears when another admin revoked it while the
-  editor was open.
+  error. The route's own permission guard answers 403 `forbidden` too; one
+  request cannot take that permission away part-way, so that 403 only appears
+  when another admin revoked it while the editor was open.
 - Add, Remove, Save and both lists are disabled while a save is in flight. If
   a save fails **and** the re-read fails too, the editor stays locked and asks
   for a page reload rather than letting the admin edit against a guessed
   baseline.
 
-The `admin.role.permissions_changed` and `admin.group.roles_changed` rows
-record the delta each write **applied**, read from `RETURNING` on the insert
-and the delete: an item already attached is not reported as `added`, one that
-was never attached is not reported as `removed`, and an item named twice
-appears once. A request that changes nothing still writes its row, with an
-empty delta, so every successful call leaves exactly one row.
-
-Known limitation: the two writes can still interleave with another admin's
-edit, and a DELETE refused after its POST succeeded leaves the addition in
-place (the editor shows it). A single atomic `PATCH { add, remove }` per
-collection is a follow-up. It would run AUTHZ-3 and REVOKE-2 on both sets
-before writing either, and must judge them against the actor's authority
-**before** the save, so that the swap above (replacing the role or permission
-the actor's own authority comes through) still succeeds. It changes the admin
-API and the generated admin SDK, so it is not part of F-38.
+`POST` and `DELETE` on both collections keep working, with the same guards and
+the same applied-delta audit, for API clients that add or remove on their own.
+Each is atomic on its own; a client that adds and removes in one change should
+use the PATCH (the admin SDK's `updateRolePermissions` / `updateGroupRoles`).
 
 ### 8.5 Permissions
 
@@ -1548,8 +1553,8 @@ permissions directly, so they add zero new authority primitives.
 | --- | --- | --- |
 | `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped); `filter[organization]` may be repeated; `q` matches key, name and the owning org's name (§7.3) |
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
-| `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted`. DELETE carries the AUTHZ-3 subset test against everything the group confers (REVOKE-1, F-11): 403 `forbidden` and an `admin.group.delete_denied` row |
-| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed` (records the applied delta, F-38). A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58). The Roles editor saves POST-then-DELETE, as described in §8.4 |
+| `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted`. GET answers an `ETag`, and a PATCH whose `If-Match` names another tag is 412 `precondition_failed` (F-39). DELETE carries the AUTHZ-3 subset test against everything the group confers (REVOKE-1, F-11): 403 `forbidden` and an `admin.group.delete_denied` row |
+| `GET/POST/PATCH/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed` (records the applied delta, F-38). A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58). The Roles editor saves through one atomic `PATCH { add, remove }`, as described in §8.4 |
 | `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org, the rule every grant path shares (F-154, §8.1); `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1), and a refusal is audited as `admin.permission.conferral_denied` (F-58) |
 
 **Group revocation is bounded by the same guard as the grant (REVOKE-1).** The

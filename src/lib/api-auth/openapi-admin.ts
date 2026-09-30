@@ -189,6 +189,30 @@ const writeErrors = (extra: Record<string, Obj> = {}): Obj => ({
   "429": errRef("RateLimited"),
   ...extra,
 });
+/**
+ * A 409 naming the conflict codes one operation answers, for `writeErrors`'
+ * `extra` (F-09: a client switching on `error` needs to know which to expect).
+ */
+const conflict = (codes: string): Obj => ({
+  description: `Conflict: ${codes}`,
+  ...json(ref("AdminError")),
+});
+
+/**
+ * F-39: the `ETag` an organization, role or group answers on its GET and on a
+ * PATCH's 200, which the next PATCH may send back as `If-Match`.
+ */
+const etagHeaders = (): Obj => ({
+  ETag: {
+    description:
+      "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to " +
+      "have a stale write refused (412) instead of applied.",
+    schema: { type: "string" },
+  },
+});
+const okWithEtag = (schemaName = "Ok"): Obj => ({ ...okResp(schemaName), headers: etagHeaders() });
+/** F-39: the path id plus the optional `If-Match` an ETag-versioned PATCH takes. */
+const ifMatchParams = (): Obj[] => [idParam(), paramRef("IfMatch")];
 
 export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unknown> {
   return {
@@ -334,6 +358,17 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           schema: { type: "string" },
           description: "Case-insensitive search.",
         },
+        // F-39: optimistic concurrency on the organization, role and group PATCH.
+        IfMatch: {
+          name: "If-Match",
+          in: "header",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "The `ETag` the record's GET (or a previous PATCH) answered. When it is not the " +
+            "record's current tag the PATCH writes nothing and answers `412 precondition_failed`. " +
+            "Omitted, or `*`, the write is last-write-wins.",
+        },
       },
       responses: {
         BadRequest: { description: "Invalid request", ...json(ref("AdminError")) },
@@ -353,6 +388,14 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         },
         NotFound: { description: "Not found (or out of org scope)", ...json(ref("AdminError")) },
         Conflict: { description: "Conflict", ...json(ref("AdminError")) },
+        PreconditionFailed: {
+          description:
+            "`precondition_failed`: the `If-Match` tag is not the record's current one, because " +
+            "it was saved since it was read. Nothing was written; re-read the record and reapply " +
+            "the change (F-39).",
+          headers: etagHeaders(),
+          ...json(ref("AdminError")),
+        },
         Unprocessable: {
           description: "Unprocessable — `invalid_scope` with the scopes the caller may not grant",
           ...json(ref("UnprocessableError")),
@@ -835,6 +878,18 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           },
           required: ["ids"],
         },
+        // F-38: the atomic dual-list save. At least one key in all, none on both sides.
+        PermissionsPatchRequest: {
+          type: "object",
+          description:
+            "Permission keys to attach and to detach, applied in one transaction. At least one " +
+            "key in all; a key on both sides, or an empty body, is `400 invalid_body`.",
+          properties: {
+            add: { type: "array", items: { type: "string" }, maxItems: 500 },
+            remove: { type: "array", items: { type: "string" }, maxItems: 500 },
+          },
+          additionalProperties: false,
+        },
         PermissionsResult: {
           type: "object",
           properties: { ok: { type: "boolean", const: true }, permissions: stringArray() },
@@ -941,6 +996,18 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           type: "object",
           properties: { roleIds: { type: "array", items: uuid(), minItems: 1, maxItems: 500 } },
           required: ["roleIds"],
+        },
+        // F-38: the atomic dual-list save. At least one id in all, none on both sides.
+        GroupRolesPatchRequest: {
+          type: "object",
+          description:
+            "Role ids to bundle and to unbundle, applied in one transaction. At least one id in " +
+            "all; an id on both sides, or an empty body, is `400 invalid_body`.",
+          properties: {
+            add: { type: "array", items: uuid(), maxItems: 500 },
+            remove: { type: "array", items: uuid(), maxItems: 500 },
+          },
+          additionalProperties: false,
         },
         GroupRolesResult: {
           type: "object",
@@ -1907,15 +1974,18 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Roles"],
           summary: "Read a role with its permissions",
           parameters: [idParam()],
-          responses: { "200": okResp("RoleDetailEnvelope"), ...readErrors() },
+          responses: { "200": okWithEtag("RoleDetailEnvelope"), ...readErrors() },
         },
         patch: {
           operationId: "updateRole",
           tags: ["Roles"],
           summary: "Update a role",
-          parameters: [idParam()],
+          parameters: ifMatchParams(),
           requestBody: { required: true, ...json(ref("UpdateRoleRequest")) },
-          responses: { "200": okResp(), ...writeErrors() },
+          responses: {
+            "200": okWithEtag(),
+            ...writeErrors({ "412": errRef("PreconditionFailed") }),
+          },
         },
         delete: {
           operationId: "deleteRole",
@@ -1957,6 +2027,23 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           parameters: [idParam()],
           requestBody: { required: true, ...json(ref("IdsRequest")) },
           responses: { "200": okResp("PermissionsResult"), ...writeErrors() },
+        },
+        patch: {
+          operationId: "updateRolePermissions",
+          tags: ["Roles"],
+          summary: "Attach and detach a role's permissions in one transaction",
+          description:
+            "F-38: the permission editor's save. Both sides are checked before anything is " +
+            "written (a key the caller does not hold is `403`; detaching `superuser` from the " +
+            "last role carrying it is `409 last_superadmin`), then applied together, so the " +
+            "save lands whole or not at all. One `admin.role.permissions_changed` row records " +
+            "the keys actually attached and detached.",
+          parameters: [idParam()],
+          requestBody: { required: true, ...json(ref("PermissionsPatchRequest")) },
+          responses: {
+            "200": okResp("PermissionsResult"),
+            ...writeErrors({ "409": conflict("`last_superadmin`") }),
+          },
         },
       },
       "/roles/{id}/members": {
@@ -2027,15 +2114,18 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Groups"],
           summary: "Read a group",
           parameters: [idParam()],
-          responses: { "200": okResp("GroupDetailEnvelope"), ...readErrors() },
+          responses: { "200": okWithEtag("GroupDetailEnvelope"), ...readErrors() },
         },
         patch: {
           operationId: "updateGroup",
           tags: ["Groups"],
           summary: "Update a group",
-          parameters: [idParam()],
+          parameters: ifMatchParams(),
           requestBody: { required: true, ...json(ref("UpdateGroupRequest")) },
-          responses: { "200": okResp(), ...writeErrors() },
+          responses: {
+            "200": okWithEtag(),
+            ...writeErrors({ "412": errRef("PreconditionFailed") }),
+          },
         },
         delete: {
           operationId: "deleteGroup",
@@ -2094,6 +2184,20 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           requestBody: { required: true, ...json(ref("GroupRoleIdsRequest")) },
           responses: { "200": okResp("GroupRolesResult"), ...writeErrors() },
         },
+        patch: {
+          operationId: "updateGroupRoles",
+          tags: ["Groups"],
+          summary: "Attach and detach a group's roles in one transaction",
+          description:
+            "F-38: the Roles editor's save. Both sides are checked before anything is written " +
+            "(a role to attach outside the group's organization is `404 role_not_found`; a role " +
+            "conferring a permission the caller does not hold is `403`), then applied together, " +
+            "so the save lands whole or not at all. One `admin.group.roles_changed` row records " +
+            "the roles actually attached and detached.",
+          parameters: [idParam()],
+          requestBody: { required: true, ...json(ref("GroupRolesPatchRequest")) },
+          responses: { "200": okResp("GroupRolesResult"), ...writeErrors() },
+        },
       },
 
       // ---- Organizations -------------------------------------------------
@@ -2119,15 +2223,27 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Organizations"],
           summary: "Read an organization",
           parameters: [idParam()],
-          responses: { "200": okResp("OrganizationDetail"), ...readErrors() },
+          responses: { "200": okWithEtag("OrganizationDetail"), ...readErrors() },
         },
         patch: {
           operationId: "updateOrganization",
           tags: ["Organizations"],
           summary: "Update an organization (superadmin only)",
-          parameters: [idParam()],
+          parameters: ifMatchParams(),
           requestBody: { required: true, ...json(ref("UpdateOrganizationRequest")) },
-          responses: { "200": okResp(), ...writeErrors() },
+          responses: {
+            "200": okWithEtag(),
+            ...writeErrors({
+              // F-09: moving `status` away from `active` suspends every grant held in
+              // the org, so it is refused when those are the last superuser grants.
+              "409": conflict(
+                "`slug_taken`; `organization_is_default` (`isDefault: false` on the default " +
+                  "organization); `last_superadmin` (a `status` other than `active` would suspend " +
+                  "the platform's last superuser grant)",
+              ),
+              "412": errRef("PreconditionFailed"),
+            }),
+          },
         },
         delete: {
           operationId: "deleteOrganization",
@@ -2210,7 +2326,15 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           summary: "Invite an email address into the organization (sends the accept link)",
           parameters: [idParam()],
           requestBody: { required: true, ...json(ref("CreateInvitationRequest")) },
-          responses: { "201": createdResp("InvitationCreated"), ...writeErrors() },
+          responses: {
+            "201": createdResp("InvitationCreated"),
+            ...writeErrors({
+              "409": conflict(
+                "`organization_not_active` (the organization is not `active`, F-09); " +
+                  "`member_exists`; `invitation_exists`",
+              ),
+            }),
+          },
         },
       },
       "/organizations/{id}/invitations/{invitationId}": {
@@ -2228,7 +2352,15 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Organizations"],
           summary: "Rotate a pending invitation's token + expiry and re-send the email",
           parameters: [idParam(), idParam("invitationId")],
-          responses: { "200": okResp("InvitationResent"), ...writeErrors() },
+          responses: {
+            "200": okResp("InvitationResent"),
+            ...writeErrors({
+              "409": conflict(
+                "`organization_not_active` (the organization is not `active`, F-09); " +
+                  "`invitation_inviter_lacks_standing` (the invitation is voided)",
+              ),
+            }),
+          },
         },
       },
       "/organizations/{id}/auth-settings": {

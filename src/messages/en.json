@@ -702,7 +702,8 @@
       "invitationExists": "A pending invitation for this address already exists.",
       "lastSuperadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform.",
       "organizationNotActive": "This organization is not active. Reactivate it before inviting anyone.",
-      "saveStateUnknown": "The saved state could not be reloaded. Reload the page before making more changes."
+      "saveStateUnknown": "The saved state could not be reloaded. Reload the page before making more changes.",
+      "editConflict": "Someone else saved this record after you opened it, so your changes were not saved. The form now shows their changes and keeps your edits: review them and save again."
     },
     "roles": {
       "title": "Roles",
@@ -1374,6 +1375,7 @@
     "forbidden_while_impersonating": "This action isn't available while impersonating another user.",
     "last_superadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform.",
     "organization_not_active": "This organization is not active. Reactivate it first.",
+    "precondition_failed": "This record was changed after you loaded it. Reload it and try again.",
     "internal_error": "Something went wrong on the server. Quote the request ID when you contact support.",
     "invalid_time_zone": "The time zone is not recognized.",
     "invalid_locale": "This language is not supported.",

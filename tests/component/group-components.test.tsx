@@ -54,8 +54,13 @@ import { GroupDetailTabs } from "@/app/[locale]/(secure)/app/administrator/group
 
 const fetchMock = vi.fn();
 
-function jsonOk(body: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body };
+function jsonOk(body: unknown, status = 200, headers: Record<string, string> = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    json: async () => body,
+  };
 }
 
 beforeEach(() => {
@@ -297,6 +302,7 @@ describe("GroupSettingsForm", () => {
         initialKey="engineering"
         initialName="Engineering"
         initialDescription={null}
+        etag={'W/"g1-v1"'}
         canUpdate
       />,
     );
@@ -325,6 +331,7 @@ describe("GroupSettingsForm", () => {
         initialKey="engineering"
         initialName="Engineering"
         initialDescription="Builds things"
+        etag={'W/"g1-v1"'}
         canUpdate
       />,
     );
@@ -346,6 +353,7 @@ describe("GroupSettingsForm", () => {
         initialKey="engineering"
         initialName="Engineering"
         initialDescription="Builds things"
+        etag={'W/"g1-v1"'}
         canUpdate
       />,
     );
@@ -383,11 +391,9 @@ describe("GroupRolesEditor", () => {
         return Promise.resolve(jsonOk({ group: { id: "g1", organization_id: "o1" } }));
       }
       if (u.includes("/api/administrator/roles")) return Promise.resolve(jsonOk(CATALOG));
-      if (u.includes("/roles") && init?.method === "POST") {
+      // F-38: the editor saves through one PATCH { add, remove }.
+      if (u.includes("/roles") && init?.method === "PATCH") {
         posted = true;
-        return Promise.resolve(jsonOk({ ok: true }));
-      }
-      if (u.includes("/roles") && init?.method === "DELETE") {
         return Promise.resolve(jsonOk({ ok: true }));
       }
       // GET the group's assigned roles (initial + post-save refresh).
@@ -395,7 +401,7 @@ describe("GroupRolesEditor", () => {
     });
   }
 
-  it("loads both columns and saves the diff as a POST", async () => {
+  it("loads both columns and saves the diff as one PATCH (F-38)", async () => {
     routeRoles({ assignedAfterPost: [VIEWER] });
     const user = userEvent.setup();
     renderWithIntl(<GroupRolesEditor groupId="g1" canAssign canReadRoles />);
@@ -424,7 +430,10 @@ describe("GroupRolesEditor", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/administrator/groups/g1/roles",
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ add: ["r1"], remove: [] }),
+        }),
       ),
     );
     expect(await screen.findByRole("status")).toHaveTextContent("Roles updated.");
@@ -461,7 +470,7 @@ describe("GroupRolesEditor", () => {
         return Promise.resolve(jsonOk({ group: { id: "g1", organization_id: "o1" } }));
       }
       if (u.startsWith("/api/administrator/roles")) return Promise.resolve(jsonOk({}, 403));
-      if (init?.method === "DELETE") {
+      if (init?.method === "PATCH") {
         deleted = JSON.parse(init.body ?? "null");
         return Promise.resolve(jsonOk({ ok: true }));
       }
@@ -487,7 +496,7 @@ describe("GroupRolesEditor", () => {
     await user.click(screen.getByRole("button", { name: "Remove" }));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(deleted).toEqual({ roleIds: ["r1"] }));
+    await waitFor(() => expect(deleted).toEqual({ add: [], remove: ["r1"] }));
   });
 });
 
@@ -557,7 +566,13 @@ describe("GroupDetailTabs", () => {
     const user = userEvent.setup();
     renderWithIntl(
       <GroupDetailTabs
-        group={{ id: "g1", key: "engineering", name: "Engineering", description: null }}
+        group={{
+          id: "g1",
+          key: "engineering",
+          name: "Engineering",
+          description: null,
+          etag: 'W/"g1-v1"',
+        }}
         canUpdate
         canAssign
         canReadRoles

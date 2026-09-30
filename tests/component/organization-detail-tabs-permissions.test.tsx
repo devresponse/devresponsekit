@@ -67,6 +67,7 @@ const ORG = {
   isResolvedDefault: false,
   memberCount: 3,
   bindingCount: 1,
+  etag: 'W/"o1-v1"',
 };
 
 async function render(flags: { canManage: boolean; canUpdate: boolean }) {

@@ -86,6 +86,30 @@ export async function lockDefaultOrganizationFlag(trx: Transaction<AppDatabase>)
 }
 
 /**
+ * Row-locks every org flagged default other than `organizationId`, in id
+ * order, under the default-flag lock: the first step of
+ * {@link moveDefaultOrganizationFlag}. The org PATCH also calls it before it
+ * locks the target to check `If-Match` (F-39), so that check takes the
+ * target's row lock after the current defaults', in the order a move takes
+ * them. Locked the other way round, a move and a concurrent write holding the
+ * default org could each wait for the other's row.
+ */
+export async function lockOtherDefaultOrganizations(
+  trx: Transaction<AppDatabase>,
+  organizationId: string,
+): Promise<void> {
+  await lockDefaultOrganizationFlag(trx);
+  await trx
+    .selectFrom("app_organizations")
+    .select(["id"])
+    .where("is_default", "=", true)
+    .where("id", "<>", organizationId)
+    .orderBy("id")
+    .forUpdate()
+    .execute();
+}
+
+/**
  * Makes `organizationId` THE default: under the default-flag lock, clears the
  * flag on every other org and sets it on this one, in the caller's
  * transaction. Returns the ids of the orgs that lost the flag (for the audit
@@ -98,19 +122,11 @@ export async function moveDefaultOrganizationFlag(
   trx: Transaction<AppDatabase>,
   organizationId: string,
 ): Promise<string[] | null> {
-  await lockDefaultOrganizationFlag(trx);
   // Row locks: the current default(s) FIRST, then the target. That is the
   // order the last-superuser check and the membership and role writers take
   // them in (the org holding the superuser grants, by default the default org,
   // then the org being written), so a move cannot deadlock against those.
-  await trx
-    .selectFrom("app_organizations")
-    .select(["id"])
-    .where("is_default", "=", true)
-    .where("id", "<>", organizationId)
-    .orderBy("id")
-    .forUpdate()
-    .execute();
+  await lockOtherDefaultOrganizations(trx, organizationId);
   // The target is locked before anything is cleared, so a target deleted since
   // the route's existence check changes nothing (null) rather than leaving the
   // old default cleared and nothing set. The org DELETE takes the default-flag

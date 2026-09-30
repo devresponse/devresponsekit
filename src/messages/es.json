@@ -702,7 +702,8 @@
       "invitationExists": "Ya existe una invitación pendiente para esta dirección.",
       "lastSuperadmin": "Es el último superadministrador de la plataforma; el cambio dejaría la plataforma sin nadie que pueda administrarla.",
       "organizationNotActive": "Esta organización no está activa. Reactívela antes de invitar a nadie.",
-      "saveStateUnknown": "No se pudo volver a cargar el estado guardado. Recargue la página antes de hacer más cambios."
+      "saveStateUnknown": "No se pudo volver a cargar el estado guardado. Recargue la página antes de hacer más cambios.",
+      "editConflict": "Otra persona guardó este registro después de que usted lo abriera, por lo que sus cambios no se guardaron. El formulario muestra ahora los cambios de esa persona y conserva sus ediciones: revíselos y vuelva a guardar."
     },
     "roles": {
       "title": "Roles",
@@ -1374,6 +1375,7 @@
     "forbidden_while_impersonating": "Esta acción no está disponible mientras suplantas a otro usuario.",
     "last_superadmin": "Es el último superadministrador de la plataforma; el cambio dejaría la plataforma sin nadie que pueda administrarla.",
     "organization_not_active": "Esta organización no está activa. Reactívela primero.",
+    "precondition_failed": "Este registro cambió después de que lo cargara. Vuelva a cargarlo e inténtelo de nuevo.",
     "internal_error": "Se produjo un error en el servidor. Indique el ID de solicitud al contactar con soporte.",
     "invalid_time_zone": "No se reconoce la zona horaria.",
     "invalid_locale": "Este idioma no es compatible.",

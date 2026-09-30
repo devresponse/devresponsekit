@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ifMatchPinsVersion, ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
+import { contentEtag, ifMatchPinsVersion, ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
+import { groupEtag, organizationEtag, roleEtag } from "@/lib/admin/record-etag.server";
 
 describe("etag / If-Match", () => {
   it("derives a stable weak tag from a timestamp", () => {
@@ -39,5 +40,42 @@ describe("review #44: ifMatchPinsVersion decides whether a write is a CAS", () =
     expect(ifMatchPinsVersion(" * ")).toBe(false);
     // A list containing the wildcard matches any entity, so it pins nothing.
     expect(ifMatchPinsVersion(`${tag}, *`)).toBe(false);
+  });
+});
+
+describe("F-39: content ETags for the organization, role and group records", () => {
+  const role = {
+    id: "r1",
+    organization_id: "o1",
+    key: "support",
+    name: "Support",
+    description: null,
+  };
+
+  it("is a stable weak tag of the parts, in order", () => {
+    expect(contentEtag(["a", 1, null])).toBe(contentEtag(["a", 1, null]));
+    expect(contentEtag(["a", 1, null])).toMatch(/^W\/"[A-Za-z0-9_-]{43}"$/);
+    expect(contentEtag(["a", 1])).not.toBe(contentEtag([1, "a"]));
+  });
+
+  it("changes when any field a PATCH can write changes, and only then", () => {
+    const tag = roleEtag(role);
+    expect(roleEtag({ ...role })).toBe(tag);
+    expect(roleEtag({ ...role, name: "Support Team" })).not.toBe(tag);
+    expect(roleEtag({ ...role, description: "" })).not.toBe(tag);
+    const org = { id: "o1", slug: "acme", name: "Acme", status: "active", is_default: false };
+    expect(organizationEtag({ ...org, status: "suspended" })).not.toBe(organizationEtag(org));
+    expect(organizationEtag({ ...org, is_default: true })).not.toBe(organizationEtag(org));
+  });
+
+  it("never matches across record kinds, even for the same fields", () => {
+    const group = { ...role, organization_id: "o1" };
+    expect(groupEtag(group)).not.toBe(roleEtag(role));
+  });
+
+  it("is compared exactly by ifMatchSatisfied (a stale tag fails)", () => {
+    const tag = roleEtag(role);
+    expect(ifMatchSatisfied(tag, tag)).toBe(true);
+    expect(ifMatchSatisfied(roleEtag({ ...role, name: "Old" }), tag)).toBe(false);
   });
 });

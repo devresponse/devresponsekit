@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RequiredLegend } from "@/components/ui/required-legend";
+import { useIfMatch } from "@/lib/forms/use-if-match";
 import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 import { groupSettingsSchema, type GroupSettingsInput } from "@/lib/validation/groups";
 
@@ -33,19 +34,24 @@ function toGroupPatch(values: GroupSettingsInput) {
  * F-39: saves through `useSavedFormBaseline`, exactly as the role Settings tab
  * does: only the changed fields are sent (an empty PATCH is a 400
  * `no_changes`, so nothing is sent), and a successful save moves the baseline
- * and refreshes the page.
+ * and refreshes the page. The PATCH carries the group's `etag` as `If-Match`,
+ * so a group saved elsewhere since the page loaded answers 412 and the form
+ * names the conflict and reloads, as the role Settings tab does.
  */
 export function GroupSettingsForm({
   groupId,
   initialKey,
   initialName,
   initialDescription,
+  etag,
   canUpdate,
 }: {
   groupId: string;
   initialKey: string;
   initialName: string;
   initialDescription: string | null;
+  /** The group's ETag (F-39), sent back as `If-Match`. */
+  etag: string;
   canUpdate: boolean;
 }) {
   const t = useTranslations("administrator.groups.settings");
@@ -61,6 +67,7 @@ export function GroupSettingsForm({
     { name: initialName, description: initialDescription ?? "" },
     toGroupPatch,
   );
+  const ifMatch = useIfMatch(etag);
 
   const onValid = async (values: GroupSettingsInput) => {
     form.clearErrors("root");
@@ -75,12 +82,21 @@ export function GroupSettingsForm({
       const res = await fetch(`/api/administrator/groups/${groupId}`, {
         method: "PATCH",
         credentials: "same-origin",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...ifMatch.headers() },
         body: JSON.stringify(changes),
       });
       if (res.ok) {
+        ifMatch.adopt(res);
         commitSaved(values);
         setSaved(true);
+        return;
+      }
+      if (res.status === 412) {
+        // F-39: the group was saved elsewhere since this form read it, so
+        // nothing was written. Name the conflict and reload the page: the form
+        // takes the other save and keeps this admin's edits for the next one.
+        form.setError("root", { type: "server", message: tErr("editConflict") });
+        ifMatch.reload();
         return;
       }
       if (res.status === 400) {

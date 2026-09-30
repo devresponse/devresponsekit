@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as OrgsRouteModule from "@/app/api/administrator/organizations/route";
 import type * as OrgByIdRouteModule from "@/app/api/administrator/organizations/[id]/route";
+import { organizationEtag } from "@/lib/admin/record-etag.server";
 import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
 
@@ -95,8 +96,16 @@ vi.mock("@/db/database", () => {
   // stays the org DELETE alone and a rejection staged on it models that
   // statement's FK violation, not the purge's.
   const trx = {
-    // The PATCH's update runs on the handle too (F-40), answering updateExecute.
-    updateTable: () => ({ set: () => ({ where: () => ({ execute: () => updateExecute() }) }) }),
+    // The PATCH's update runs on the handle too (F-40), answering updateExecute,
+    // and returns the columns the org's ETag hashes (F-39).
+    updateTable: () => ({
+      set: () => ({
+        where: () => ({
+          execute: () => updateExecute(),
+          returning: () => ({ executeTakeFirst: () => updateExecute() }),
+        }),
+      }),
+    }),
     deleteFrom: (table: string) =>
       table === "app_organizations"
         ? {
@@ -313,6 +322,27 @@ describe("GET /api/administrator/organizations/:id", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body).toMatchObject({ error: "invalid_id" });
+  });
+
+  it("F-39: answers the organization's ETag, the tag a PATCH may send back as If-Match", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
+    const row = {
+      id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      slug: "acme",
+      name: "Acme",
+      status: "active",
+      is_default: false,
+      created_at: new Date("2026-01-01T00:00:00Z"),
+      updated_at: new Date("2026-01-02T00:00:00Z"),
+    };
+    selectFirst.mockResolvedValue(row);
+    const res = await GET_BY_ID(idReq("GET", row.id), {
+      params: Promise.resolve({ id: row.id }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("etag")).toBe(organizationEtag(row));
+    await expectResponseMatchesSpec(res, "admin", "get", "/organizations/{id}");
   });
 
   it("returns 404 when org not found", async () => {

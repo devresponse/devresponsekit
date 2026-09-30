@@ -702,7 +702,8 @@
       "invitationExists": "该地址已有待处理的邀请。",
       "lastSuperadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。",
       "organizationNotActive": "此组织未处于活跃状态。请先重新激活该组织，再发送邀请。",
-      "saveStateUnknown": "无法重新加载已保存的状态。请先重新加载页面，再进行其他更改。"
+      "saveStateUnknown": "无法重新加载已保存的状态。请先重新加载页面，再进行其他更改。",
+      "editConflict": "在您打开此记录后，其他人保存了它，因此您的更改未保存。表单现在显示对方的更改，并保留了您的编辑：请检查后再次保存。"
     },
     "roles": {
       "title": "角色",
@@ -1374,6 +1375,7 @@
     "forbidden_while_impersonating": "在模拟其他用户期间无法执行此操作。",
     "last_superadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。",
     "organization_not_active": "此组织未处于活跃状态。请先重新激活该组织。",
+    "precondition_failed": "此记录在您加载后已被更改。请重新加载后再试。",
     "internal_error": "服务器出现问题。联系支持团队时请提供请求 ID。",
     "invalid_time_zone": "无法识别该时区。",
     "invalid_locale": "不支持此语言。",

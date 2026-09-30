@@ -28,6 +28,7 @@ const render = ({
       initialStatus="active"
       initialIsDefault={isDefault}
       isResolvedDefault={isResolvedDefault}
+      etag={'W/"o1-v1"'}
       canUpdate
     />,
   );
@@ -72,7 +73,12 @@ describe("OrganizationSettingsForm", () => {
 
   it("PATCHes and shows the saved confirmation", async () => {
     const user = userEvent.setup();
-    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+    });
     render();
     await user.type(screen.getByRole("textbox", { name: "Name" }), " Corp");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
@@ -116,7 +122,12 @@ describe("OrganizationSettingsForm", () => {
 
     it("a legacy EXTRA flag (flagged, but not where sign-ups resolve) says so and can be unticked", async () => {
       const user = userEvent.setup();
-      fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({ ok: true }),
+      });
       render({ isDefault: true, isResolvedDefault: false });
       expect(checkbox()).toBeChecked();
       expect(checkbox()).toBeEnabled();

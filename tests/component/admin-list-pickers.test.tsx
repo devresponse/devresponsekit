@@ -633,9 +633,12 @@ function servePermissionsEditor(assigned: Set<string>, opts: { totalSkew?: numbe
         return json(listAnswer(PERMISSIONS, url, { searchable: ["key"], ...opts }));
       }
       if (url.pathname === "/api/administrator/roles/r1/permissions") {
-        const ids = (JSON.parse(init?.body ?? "{}") as { ids?: string[] }).ids ?? [];
-        if (method === "POST") for (const id of ids) assigned.add(id);
-        if (method === "DELETE") for (const id of ids) assigned.delete(id);
+        // F-38: the editor saves through one PATCH { add, remove }.
+        if (method === "PATCH") {
+          const body = JSON.parse(init?.body ?? "{}") as { add?: string[]; remove?: string[] };
+          for (const id of body.add ?? []) assigned.add(id);
+          for (const id of body.remove ?? []) assigned.delete(id);
+        }
         return json(method === "GET" ? { permissions: [...assigned].sort() } : { ok: true });
       }
       throw new Error(`unrouted fetch: ${method} ${url.pathname}`);

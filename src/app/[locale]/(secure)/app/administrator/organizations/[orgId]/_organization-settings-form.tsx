@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RequiredLegend } from "@/components/ui/required-legend";
+import { useIfMatch } from "@/lib/forms/use-if-match";
 import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 import {
   ORGANIZATION_STATUSES,
@@ -72,7 +73,10 @@ function toOrganizationPatch(values: OrganizationSettingsInput) {
  * fields the admin changed, and a successful save moves the form's baseline
  * and refreshes the page, so a form rebuilt from the page's props (a tab switch
  * did that before F-158) can neither show nor re-send the pre-save status or
- * name.
+ * name. The PATCH carries the organization's `etag` as `If-Match`
+ * (`useIfMatch`): an org saved elsewhere since the page loaded (another
+ * superadmin, another tab) answers 412, and the form names the conflict and
+ * reloads instead of overwriting that save.
  */
 export function OrganizationSettingsForm({
   orgId,
@@ -81,6 +85,7 @@ export function OrganizationSettingsForm({
   initialStatus,
   initialIsDefault,
   isResolvedDefault,
+  etag,
   canUpdate,
 }: {
   orgId: string;
@@ -91,6 +96,8 @@ export function OrganizationSettingsForm({
   initialIsDefault: boolean;
   /** Whether this is THE default, the org unmapped sign-ups resolve to. */
   isResolvedDefault: boolean;
+  /** The organization's ETag (F-39), sent back as `If-Match`. */
+  etag: string;
   canUpdate: boolean;
 }) {
   const t = useTranslations("administrator.orgs.settings");
@@ -111,6 +118,7 @@ export function OrganizationSettingsForm({
     },
     toOrganizationPatch,
   );
+  const ifMatch = useIfMatch(etag);
 
   const onValid = async (values: OrganizationSettingsInput) => {
     form.clearErrors("root");
@@ -127,12 +135,21 @@ export function OrganizationSettingsForm({
       const res = await fetch(`/api/administrator/organizations/${orgId}`, {
         method: "PATCH",
         credentials: "same-origin",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...ifMatch.headers() },
         body: JSON.stringify(changes),
       });
       if (res.ok) {
+        ifMatch.adopt(res);
         commitSaved(values);
         setSaved(true);
+        return;
+      }
+      if (res.status === 412) {
+        // F-39: the organization was saved elsewhere since this form read it, so
+        // nothing was written. Name the conflict and reload the page: the form
+        // takes the other save and keeps this admin's edits for the next one.
+        form.setError("root", { type: "server", message: tErr("editConflict") });
+        ifMatch.reload();
         return;
       }
       if (res.status === 409) {

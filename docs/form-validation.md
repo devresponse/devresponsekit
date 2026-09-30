@@ -184,6 +184,18 @@ the same rules: it calls `router.refresh()` after every save and takes a new
 `initialAssigned` when it has no unsaved moves. `serverValues` must be plain
 JSON, because it is compared by its JSON text.
 
+The organization, role and group **Settings** forms also send the record's
+`ETag` as `If-Match`, through `useIfMatch(etag)`
+(`src/lib/forms/use-if-match.ts`); the detail page passes the tag in, computed
+from the row it renders. When the record was saved elsewhere since the form
+read it (another admin, another tab), the PATCH answers 412 and writes
+nothing. The form shows `administrator.errors.editConflict` and refreshes the
+page; the second rule then moves its baseline to the other save while keeping
+the fields this admin edited, so their next save sends only those, against the
+refreshed tag. After a successful save the form uses the tag the PATCH
+answered, so a second save sent before the refresh lands is not refused for
+the first one (F-39).
+
 ### The primitives — `src/components/ui/form.tsx`
 
 The shadcn React Hook Form wrapper (`Form`, `FormField`, `FormItem`,
@@ -287,6 +299,8 @@ reset-password (the `sign-in` / `sign-up` wrappers compose these).
   containers through save → tab switch → refresh for every form on
   `useSavedFormBaseline` and for the role Permissions editor (F-39), and
   pins that a tab switch keeps an unsaved edit in each of them (F-158).
+  `tests/component/settings-form-if-match.test.tsx` pins the `If-Match`
+  round trip and the 412 conflict path for the three Settings forms (F-39).
 - **Security:** the shared Zod schemas are exercised at the API boundary
   (`tests/security/handler-input-validation.test.ts`) to reject unknown keys,
   oversized, and malformed input — the same schemas the forms use.

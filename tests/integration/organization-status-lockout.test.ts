@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as OrgByIdRouteModule from "@/app/api/administrator/organizations/[id]/route";
+import { organizationEtag } from "@/lib/admin/record-etag.server";
 
 /**
  * F-09 + REVOKE-2 — `PATCH /api/administrator/organizations/:id` may not
@@ -25,15 +26,19 @@ const accessGetter = vi.fn();
 const auditMock = vi.fn();
 
 const state: {
-  /** The org row the route's existence check reads. */
-  org: { id: string; slug: string } | undefined;
+  /** The org row the route's existence check (and F-39's locked tag read) reads. */
+  org: { id: string; slug: string; name: string; status: string; is_default: boolean } | undefined;
   /** What `activeGlobalSuperuserGrants` reads inside the transaction. */
   grants: Array<{ app_user_id: string; organization_id: string; role_id: string }>;
   /** Which executor the grant read ran on (must be the transaction). */
   grantReadOn: "db" | "trx" | null;
   /** Every UPDATE the handler issued, in order. */
   updates: Array<{ values: Record<string, unknown>; where: unknown[][] }>;
-  /** F-40 lock order: "lock" (default-flag lock) and "grants" (row-locking read), in order. */
+  /**
+   * Lock order: "lock" (default-flag lock, F-40), "grants" (row-locking read),
+   * "defaults" (the current defaults' row locks) and "row" (the org's own row
+   * lock for its If-Match check, F-39), in order.
+   */
   order: string[];
 } = { org: undefined, grants: [], grantReadOn: null, updates: [], order: [] };
 
@@ -55,6 +60,9 @@ vi.mock("@/lib/default-organization.server", () => ({
   lockDefaultOrganizationFlag: (...a: unknown[]) => {
     state.order.push("lock");
     return lockDefaultMock(...a);
+  },
+  lockOtherDefaultOrganizations: async () => {
+    state.order.push("defaults");
   },
   moveDefaultOrganizationFlag: (...a: unknown[]) => moveDefaultMock(...a),
   clearDefaultOrganizationFlag: (...a: unknown[]) => clearDefaultMock(...a),
@@ -80,6 +88,12 @@ vi.mock("@/db/database", () => {
           if (prop === "executeTakeFirst") {
             return async () => (table === "app_organizations" ? state.org : undefined);
           }
+          if (prop === "forUpdate" && table === "app_organizations" && on === "trx") {
+            return () => {
+              state.order.push("row");
+              return proxy;
+            };
+          }
           return () => proxy;
         },
       },
@@ -99,6 +113,19 @@ vi.mock("@/db/database", () => {
           state.updates.push({ values, where });
           return [];
         },
+        // The org row's UPDATE returns the columns its ETag hashes (F-39).
+        returning: () => ({
+          executeTakeFirst: async () => {
+            state.updates.push({ values, where });
+            return {
+              id: ORG_ID,
+              slug: "default",
+              name: "Default",
+              status: "active",
+              is_default: false,
+            };
+          },
+        }),
       };
       return chain;
     },
@@ -135,10 +162,12 @@ const SUPERADMIN = {
   orgBound: false,
 };
 
-function patchReq(body: unknown): NextRequest {
+function patchReq(body: unknown, ifMatch?: string): NextRequest {
+  const headers = new Headers({ "content-type": "application/json" });
+  if (ifMatch !== undefined) headers.set("if-match", ifMatch);
   return {
     nextUrl: new URL(`http://test.local/api/administrator/organizations/${ORG_ID}`),
-    headers: new Headers({ "content-type": "application/json" }),
+    headers,
     json: async () => body,
   } as unknown as NextRequest;
 }
@@ -152,7 +181,13 @@ beforeEach(async () => {
   auditMock.mockReset();
   sessionGetter.mockResolvedValue({ user: { id: "ba-super" } });
   accessGetter.mockResolvedValue(SUPERADMIN);
-  state.org = { id: ORG_ID, slug: "default" };
+  state.org = {
+    id: ORG_ID,
+    slug: "default",
+    name: "Default",
+    status: "active",
+    is_default: false,
+  };
   // The seeded shape: the platform's ONLY superuser grant lives in this org.
   state.grants = [{ app_user_id: "u-super", organization_id: ORG_ID, role_id: "r-superuser" }];
   state.grantReadOn = null;
@@ -392,5 +427,72 @@ describe("PATCH /organizations/:id — status away from active vs the last super
     expect(res.status).toBe(403);
     expect(state.grantReadOn).toBeNull();
     expect(state.updates).toEqual([]);
+  });
+});
+
+/**
+ * F-39: optimistic concurrency on the org PATCH. A stale `If-Match` is 412 and
+ * writes nothing; the org's row lock for the comparison is taken after the
+ * locks F-40 and REVOKE-2 take, and on a move after the current defaults', the
+ * order a move takes them in (`lockOtherDefaultOrganizations`). The
+ * compare-and-swap itself is pinned against Postgres in
+ * tests/db/record-etag.db.test.ts.
+ */
+describe("PATCH /organizations/:id — If-Match (F-39)", () => {
+  const current = () => organizationEtag(state.org!);
+  const surviving = () =>
+    state.grants.push({
+      app_user_id: "u-other-super",
+      organization_id: OTHER_ORG_ID,
+      role_id: "r-superuser-2",
+    });
+
+  it("a stale tag is 412 precondition_failed, carrying the current tag; nothing is written or moved", async () => {
+    const res = await PATCH(patchReq({ name: "Mine", isDefault: true }, 'W/"stale"'), ctx());
+
+    expect(res.status).toBe(412);
+    expect(await res.json()).toMatchObject({ error: "precondition_failed" });
+    expect(res.headers.get("etag")).toBe(current());
+    expect(state.updates).toEqual([]);
+    expect(moveDefaultMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("the current tag is applied, and the 200 carries the updated row's tag", async () => {
+    const res = await PATCH(patchReq({ name: "Renamed" }, current()), ctx());
+
+    expect(res.status).toBe(200);
+    expect(state.updates).toHaveLength(1);
+    expect(res.headers.get("etag")).toBe(
+      organizationEtag({
+        id: ORG_ID,
+        slug: "default",
+        name: "Default",
+        status: "active",
+        is_default: false,
+      }),
+    );
+    expect(state.order).toEqual(["row"]);
+  });
+
+  it("lock order on a move: flag lock, grant rows, current defaults, THEN the org's row, then the move", async () => {
+    surviving();
+    moveDefaultMock.mockImplementation(async () => {
+      state.order.push("move");
+      return [];
+    });
+
+    const res = await PATCH(patchReq({ status: "suspended", isDefault: true }, current()), ctx());
+
+    expect(res.status).toBe(200);
+    expect(state.order).toEqual(["lock", "grants", "defaults", "row", "move"]);
+  });
+
+  it("`*` and an absent If-Match take no row lock (last-write-wins, as before)", async () => {
+    for (const ifMatch of ["*", undefined]) {
+      state.order = [];
+      expect((await PATCH(patchReq({ name: "Renamed" }, ifMatch), ctx())).status).toBe(200);
+      expect(state.order).toEqual([]);
+    }
   });
 });

@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as ListRoute from "@/app/api/administrator/roles/route";
 import type * as IdRoute from "@/app/api/administrator/roles/[id]/route";
+import { roleEtag } from "@/lib/admin/record-etag.server";
 import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
@@ -18,7 +19,15 @@ const accessGetter = vi.fn();
 const auditMock = vi.fn();
 
 const state: {
-  role: { id: string; organization_id: string | null; key: string } | undefined;
+  role:
+    | {
+        id: string;
+        organization_id: string | null;
+        key: string;
+        name?: string;
+        description?: string | null;
+      }
+    | undefined;
   /** F-63: what the role insert throws, when set. */
   insertError: Error | undefined;
 } = {
@@ -78,10 +87,12 @@ vi.mock("@/db/database", () => ({
     updateTable: (t: unknown) => makeChain(tableKey(t)),
     deleteFrom: (t: unknown) => makeChain(tableKey(t)),
     // F-97: the in-use guard (lock + counts) and the deletes share one transaction.
+    // F-39: so do the PATCH's If-Match check and its update.
     transaction: () => ({
       execute: async (cb: (trx: unknown) => Promise<unknown>) =>
         cb({
           selectFrom: (t: unknown) => makeChain(tableKey(t)),
+          updateTable: (t: unknown) => makeChain(tableKey(t)),
           deleteFrom: () => makeChain("trx"),
         }),
     }),
@@ -107,19 +118,23 @@ function superadmin(perms: string[]): AuthStatusModule.UserAccessContext {
   return { ...orgAdmin(perms), organizationId: null, permissions: [...perms, "superuser"] };
 }
 
-function req(path: string, init?: { method?: string; body?: unknown }): NextRequest {
+function req(
+  path: string,
+  init?: { method?: string; body?: unknown; headers?: Record<string, string> },
+): NextRequest {
   const url = `http://test.local/api/administrator/roles${path}`;
   return {
     nextUrl: new URL(url),
     url,
     method: init?.method ?? "GET",
-    headers: new Headers({ "content-type": "application/json" }),
+    headers: new Headers({ "content-type": "application/json", ...init?.headers }),
     json: async () => init?.body,
   } as unknown as NextRequest;
 }
 const idCtx = { params: Promise.resolve({ id: ROLE }) };
 
 let POST: typeof ListRoute.POST;
+let GET: typeof IdRoute.GET;
 let PATCH: typeof IdRoute.PATCH;
 let DELETE: typeof IdRoute.DELETE;
 
@@ -129,7 +144,7 @@ beforeEach(async () => {
   state.insertError = undefined;
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ POST } = await import("@/app/api/administrator/roles/route"));
-  ({ PATCH, DELETE } = await import("@/app/api/administrator/roles/[id]/route"));
+  ({ GET, PATCH, DELETE } = await import("@/app/api/administrator/roles/[id]/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -214,5 +229,51 @@ describe("PATCH/DELETE /roles/[id] — mutation scoping", () => {
     expect(
       (await PATCH(req(`/${ROLE}`, { method: "PATCH", body: { name: "Renamed" } }), idCtx)).status,
     ).toBe(200);
+  });
+});
+
+/**
+ * F-39: the role's content ETag. GET answers it; a PATCH naming another tag in
+ * `If-Match` is 412 and writes nothing (the compare-and-swap under the row
+ * lock is pinned against Postgres in tests/db/record-etag.db.test.ts).
+ */
+describe("roles/[id] ETag + If-Match (F-39)", () => {
+  const current = () => roleEtag({ name: "", description: null, ...state.role! });
+  const rename = (headers?: Record<string, string>) =>
+    PATCH(req(`/${ROLE}`, { method: "PATCH", body: { name: "Renamed" }, headers }), idCtx);
+
+  beforeEach(() => {
+    state.role = {
+      id: ROLE,
+      organization_id: ORG_A,
+      key: "editor",
+      name: "Editor",
+      description: null,
+    };
+  });
+
+  it("GET answers the role's ETag", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.read"]));
+    const res = await GET(req(`/${ROLE}`), idCtx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("etag")).toBe(current());
+  });
+
+  it("PATCH with the current tag, with `*` or without one is applied and answers the new tag", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+    for (const headers of [{ "if-match": current() }, { "if-match": "*" }, undefined]) {
+      const res = await rename(headers);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("etag")).toBe(current());
+    }
+  });
+
+  it("PATCH with a stale tag is 412 precondition_failed, carrying the current tag, and audits no update", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+    const res = await rename({ "if-match": 'W/"stale"' });
+    expect(res.status).toBe(412);
+    expect(await res.json()).toMatchObject({ error: "precondition_failed" });
+    expect(res.headers.get("etag")).toBe(current());
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });

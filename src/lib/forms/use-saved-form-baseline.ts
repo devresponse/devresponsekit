@@ -48,9 +48,10 @@ import { useZodForm } from "./use-zod-form";
  *      relies on rules 1 and 2.
  *
  * Not solved here: two admins, or two browser tabs, editing the same record.
- * Rule 3 limits the stale side to the fields it changed, but nothing detects
- * the conflict; that needs ETag / If-Match on the PATCH routes (the known
- * limitation in docs/admin-manager.md §8).
+ * Rule 3 limits the stale side to the fields it changed; detecting the
+ * conflict is `useIfMatch`'s job (the record's ETag sent as `If-Match`, 412 on
+ * a stale save), which the org, role and group Settings forms add. After its
+ * reload, rule 2 is what keeps the admin's own edits.
  *
  * `serverValues` must be JSON-plain (strings, numbers, booleans, null, arrays):
  * it is compared by its JSON text so a fresh object literal on every render is

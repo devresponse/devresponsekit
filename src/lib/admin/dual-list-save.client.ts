@@ -5,49 +5,36 @@ import { diffPermissions } from "@/lib/admin/roles.client";
  * F-38: the ONE save path both dual-list editors go through (a role's
  * permissions, a group's roles).
  *
- * The admin API models a dual-list assignment as two independent writes on one
- * collection, a POST `{ [bodyKey]: toAdd }` and a DELETE
- * `{ [bodyKey]: toRemove }`. Each write is atomic; the pair is not (a single
- * atomic `PATCH { add, remove }` is a documented follow-up, see
- * docs/admin-manager.md §8.4), so a save can land half-way. Each editor used
- * to show a generic error when the DELETE failed after the POST had landed,
- * and keep its old baseline. The admin assumed nothing was saved and moved the
- * keys back; the local lists matched the stale baseline again, Save went
- * quiet, and the grant the POST had committed stayed live and invisible until
- * a reload.
+ * The editors used to save through two writes on one collection, a POST of the
+ * additions and then a DELETE of the removals. The pair was not atomic: when
+ * the DELETE was refused after the POST had landed, the editor showed a
+ * generic error and kept its old baseline, the admin moved the keys back, Save
+ * went quiet, and the grant the POST had committed stayed live and invisible
+ * until a reload. An interim fix sent additions first and re-read the server
+ * after every save.
  *
- * Three rules close that here, once, for both editors:
- *   1. Additions go FIRST, then removals. The actor's authority is recomputed
- *      on every request from their direct AND group-conferred roles
- *      (`getUserAccessContext`), so a committed write changes what the next
- *      one is judged against. An addition can only widen that authority; a
- *      removal can take away the very permission the next write needs (the
- *      route guard, `admin.groups.assign` / `admin.roles.update`, or the
- *      AUTHZ-3 held set) when the actor's own authority flows through the
- *      role or group being edited. Removals-first would then commit the
- *      removal, have the POST refused, and leave every holder without the
- *      authority, which the actor cannot restore (AUTHZ-3 forbids conferring
- *      what you lack). Additions-first makes such a swap succeed, and its
- *      only partial outcome, "added, not removed" (the DELETE refused by
- *      REVOKE-1 or REVOKE-2), is a grant AUTHZ-3 already let this actor make
- *      on its own; the editor shows it, and the actor may remove it again.
- *      A refused POST stops the save before the DELETE is sent.
- *   2. The server's set is ALWAYS re-read after the writes, success or not,
- *      and the editor resets both its baseline and its lists to it. A failed
+ * Each collection now takes ONE `PATCH { add, remove }`, which the server
+ * applies in one transaction after running every guard on both sets (AUTHZ-3,
+ * REVOKE-1, REVOKE-2), judged against the actor's authority as the request
+ * found it. A save therefore lands whole or not at all, and swapping the item
+ * the actor's own authority comes through for an equivalent one succeeds (the
+ * removal cannot take away the authority the addition is judged by). Two rules
+ * stay here, once, for both editors:
+ *   1. The server's set is ALWAYS re-read after the save, success or not, and
+ *      the editor resets both its baseline and its lists to it. A failed
  *      response is not proof that nothing committed (a 500 raised after the
- *      insert still leaves the row), so only a fresh GET is trusted. This is
- *      what keeps a committed grant from hiding behind a stale baseline.
- *   3. The failure is classified, so the editor names the guard that refused
+ *      commit still leaves the rows), so only a fresh GET is trusted, and a
+ *      committed grant can never hide behind a stale baseline.
+ *   2. The failure is classified, so the editor names the guard that refused
  *      the change instead of one generic line. A 403 is read as the AUTHZ-3 /
  *      REVOKE-1 refusal: the route guard answers with the same `forbidden`
- *      code, but under rule 1 a save cannot take that permission away from
- *      the actor between its own writes, so a route-guard 403 means it was
- *      lost elsewhere (another admin's edit) while the editor was open.
+ *      code, but one request cannot take that permission away from the actor
+ *      part-way, so a route-guard 403 means it was lost elsewhere (another
+ *      admin's edit) while the editor was open.
  */
 export interface DualListEndpoint {
-  /** The collection: GET lists the assigned ids; POST / DELETE take `{ [bodyKey]: ids }`. */
+  /** The collection: GET lists the assigned ids; PATCH takes `{ add, remove }`. */
   url: string;
-  bodyKey: string;
   /** Extracts the assigned ids from the GET response body. */
   readAssigned(body: unknown): ReadonlyArray<string>;
 }
@@ -60,12 +47,12 @@ export interface DualListEndpoint {
 export type DualListSaveError = "forbidden" | "lastSuperadmin" | "failed";
 
 export interface DualListSaveResult {
-  /** `null` when every write succeeded. */
+  /** `null` when the save succeeded (or there was nothing to send). */
   error: DualListSaveError | null;
   /**
    * The set the editor must adopt as BOTH its baseline and its lists: the
-   * server's re-read set, or, when every write succeeded but the re-read did
-   * not, the set that was saved. `null` when a write failed and the re-read
+   * server's re-read set, or, when the save succeeded but the re-read did
+   * not, the set that was saved. `null` when the save failed and the re-read
    * failed too, so what the server holds is unknown.
    */
   synced: string[] | null;
@@ -92,8 +79,9 @@ async function readServerSet(endpoint: DualListEndpoint): Promise<string[] | nul
 
 /**
  * Saves the difference between `baseline` (what the editor last read from the
- * server) and `next` (its lists) through `endpoint`: POST, then DELETE, then a
- * re-read of the server's set (see the module comment for why that order).
+ * server) and `next` (its lists) through `endpoint`: one PATCH
+ * `{ add, remove }`, then a re-read of the server's set (see the module
+ * comment). Nothing is sent when the lists match the baseline.
  */
 export async function saveDualListDiff(
   endpoint: DualListEndpoint,
@@ -101,29 +89,19 @@ export async function saveDualListDiff(
   next: ReadonlyArray<string>,
 ): Promise<DualListSaveResult> {
   const { toAdd, toRemove } = diffPermissions(baseline, next);
-  const writes = [
-    ["POST", toAdd],
-    ["DELETE", toRemove],
-  ] as const;
   let error: DualListSaveError | null = null;
-  try {
-    for (const [method, ids] of writes) {
-      if (ids.length === 0) continue;
+  if (toAdd.length > 0 || toRemove.length > 0) {
+    try {
       const res = await fetch(endpoint.url, {
-        method,
+        method: "PATCH",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ [endpoint.bodyKey]: ids }),
+        body: JSON.stringify({ add: toAdd, remove: toRemove }),
       });
-      if (!res.ok) {
-        // Stop at the first refusal: after a failed POST the DELETE is never
-        // sent, so a swap the actor may not complete removes nothing.
-        error = await classifyFailure(res);
-        break;
-      }
+      if (!res.ok) error = await classifyFailure(res);
+    } catch {
+      error = "failed";
     }
-  } catch {
-    error = "failed";
   }
   const serverSet = await readServerSet(endpoint);
   return { error, synced: serverSet ?? (error === null ? [...next].sort() : null) };

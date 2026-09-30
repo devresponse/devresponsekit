@@ -20,14 +20,12 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  * Left column = roles available in the org (the org's role catalog minus the
  * ones already bundled). Right column = roles the group currently confers.
  * `Save` diffs against the server's known set and goes through the shared
- * dual-list save (`useDualListSave`, F-38): one POST `{ roleIds: toAdd }`,
- * THEN one DELETE `{ roleIds: toRemove }` against
- * `/api/administrator/groups/[id]/roles` (additions first, so swapping the
- * role that confers the admin's own authority cannot strand the group empty),
- * then a re-read of the group's roles that resets both the baseline and the
- * lists, after a failure too. The server rejects a foreign/global role (404)
- * and, in either direction, a role conferring a permission a non-superadmin
- * does not hold (403, AUTHZ-3 / REVOKE-1).
+ * dual-list save (`useDualListSave`, F-38): one atomic PATCH
+ * `{ add, remove }` against `/api/administrator/groups/[id]/roles`, which
+ * lands whole or not at all, then a re-read of the group's roles that resets
+ * both the baseline and the lists, after a failure too. The server rejects a
+ * foreign/global role (404) and, in either direction, a role conferring a
+ * permission a non-superadmin does not hold (403, AUTHZ-3 / REVOKE-1).
  *
  * F-41: the org's role catalog is read in full (`fetchAllPages`); it was one
  * `pageSize=200` request, so an org with more roles could not bundle the rest,
@@ -91,7 +89,6 @@ export function GroupRolesEditor({
   const endpoint = useMemo<DualListEndpoint>(
     () => ({
       url: `/api/administrator/groups/${groupId}/roles`,
-      bodyKey: "roleIds",
       readAssigned: (body) => (body as { roles: Array<{ id: string }> }).roles.map((r) => r.id),
     }),
     [groupId],

@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
+
 /**
  * Weak ETag helpers for the `/api/v1` surface (design §8.1 — optimistic
- * concurrency via ETag + If-Match). The entity tag is derived from a
- * row's `updated_at` so a stale client write (`If-Match` not matching the
- * current tag) can be rejected with `412 Precondition Failed`.
+ * concurrency via ETag + If-Match) and the administrator org, role and group
+ * records (F-39). The `/api/v1` user tag is derived from the row's
+ * `updated_at`; an administrator record's from its content
+ * ({@link contentEtag}). Either way a stale client write (`If-Match` not
+ * matching the current tag) can be rejected with `412 Precondition Failed`.
  *
  * Pure (no IO) so it is shared by route handlers and unit tests.
  */
@@ -15,6 +19,20 @@ export function userEtag(updatedAt: Date | string): string {
   const iso =
     updatedAt instanceof Date ? updatedAt.toISOString() : new Date(updatedAt).toISOString();
   return `W/"${iso}"`;
+}
+
+/**
+ * F-39: a weak ETag that is a hash of `parts`, the fields a record's PATCH can
+ * change, in a fixed order. Content, not a timestamp: `app_roles` has no
+ * `updated_at`, and hashing what the editor shows needs no migration and
+ * cannot miss a writer that forgets to bump a stamp. It is weak because it
+ * covers those fields only (a member count moving does not conflict with a
+ * rename), and compared by exact match as {@link ifMatchSatisfied} does.
+ * `parts` must be JSON values; a `Date` would hash its ISO string.
+ */
+export function contentEtag(parts: ReadonlyArray<unknown>): string {
+  const digest = createHash("sha256").update(JSON.stringify(parts)).digest("base64url");
+  return `W/"${digest}"`;
 }
 
 /**

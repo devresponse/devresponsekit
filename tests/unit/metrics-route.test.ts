@@ -80,15 +80,31 @@ describe("GET /api/metrics", () => {
     it("returns 200 with the Prometheus content-type and no-store", async () => {
       const res = await GET(scrapeRequest(`Bearer ${TOKEN}`));
       expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")).toContain("text/plain");
+      // The exact text-format version a scraper negotiates, held across the
+      // prom-client → @prometheus-io/client move (F-113); OpenMetrics would be
+      // a different wire format, not a drop-in.
+      expect(res.headers.get("content-type")).toBe("text/plain; version=0.0.4; charset=utf-8");
       expect(res.headers.get("cache-control")).toBe("no-store");
     });
 
     it("exposes Node/process default metrics under the app prefix", async () => {
       const res = await GET(scrapeRequest(`Bearer ${TOKEN}`));
       const body = await res.text();
-      // `nodejs_*` defaults are cross-platform (heap, event-loop lag, version).
-      expect(body).toContain("devresponsekit_nodejs_");
+      // Every default family docs/observability.md §5 names, by the names the
+      // dashboards query (F-113 kept them), plus the event-loop utilization
+      // the successor library adds. All of these are cross-platform.
+      for (const [family, type] of [
+        ["nodejs_heap_size_used_bytes", "gauge"],
+        ["process_resident_memory_bytes", "gauge"],
+        ["nodejs_eventloop_lag_seconds", "gauge"],
+        ["nodejs_eventloop_utilization_histogram", "histogram"],
+        ["nodejs_eventloop_utilization_summary", "summary"],
+        ["nodejs_gc_duration_seconds", "histogram"],
+        ["process_cpu_seconds_total", "counter"],
+        ["nodejs_active_handles", "gauge"],
+      ]) {
+        expect(body).toContain(`# TYPE devresponsekit_${family} ${type}\n`);
+      }
     });
 
     it("registers the denials counter (HELP/TYPE emitted even at zero)", async () => {

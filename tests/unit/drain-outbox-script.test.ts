@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 /**
  * `pnpm outbox:drain` (scripts/drain-outbox.ts) is a separate, short-lived
- * process with its own prom-client registry and no `/api/metrics`, so the
+ * process with its own metrics registry and no `/api/metrics`, so the
  * worker outcomes it counts are discarded when it exits (F-27 review). Its
  * operator-visible record is the per-row `email_delivery` log lines plus this
  * one summary line, which must therefore break out `expired`: only the worker

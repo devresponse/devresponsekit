@@ -169,6 +169,44 @@ describe("dependency governance: overrides and mutes are documented", () => {
     );
     expect(inLock).toEqual(pkg.pnpm.overrides);
   });
+
+  it("every lockfile resolves each direct dependency at or above the version its package.json declares", () => {
+    // An override that is not parent-scoped (`pkg`, or `pkg@N` whose range
+    // meets the declared one) also rewrites the direct entry's own specifier,
+    // so a floor below the declaration silently wins over it: after #481
+    // package.json declared `dompurify ^3.4.16` while the `^3.4.13` override
+    // held the lockfile at 3.4.15. Only a `parent>child` key leaves the direct
+    // entry alone. The outcome is checked, not the two floors against each
+    // other: Dependabot bumps the direct entry and never the override (its
+    // group PR resolved 3.4.16 under that same `^3.4.13` specifier), so an
+    // equality rule would fail every such PR while the lockfile was sound.
+    for (const dir of lockfiles.pnpm) {
+      const at = (file: string) => (dir === "" ? file : `${dir}/${file}`);
+      const manifest = JSON.parse(read(at("package.json"))) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      const direct = { ...manifest.dependencies, ...manifest.devDependencies };
+      const importer = sliceAt(read(at("pnpm-lock.yaml")), "\nimporters:\n", "\npackages:\n");
+      const resolved = Object.fromEntries(
+        [
+          ...importer.matchAll(
+            /^ {6}'?([^'\s]+?)'?:\n {8}specifier: [^\n]+\n {8}version: (\d[^\s(]*)/gm,
+          ),
+        ].map((m) => [m[1]!, m[2]!]),
+      );
+      // Completeness guard: every direct dependency must be read from the
+      // importer (at a numeric version), or a parse that matched nothing
+      // would pass vacuously.
+      expect(Object.keys(resolved).sort(), at("pnpm-lock.yaml")).toEqual(
+        Object.keys(direct).sort(),
+      );
+      const below = Object.entries(direct)
+        .filter(([name, spec]) => compareVersions(resolved[name]!, spec.replace(/^[\^~]/, "")) < 0)
+        .map(([name, spec]) => `${at("")}${name}: declared ${spec}, lockfile ${resolved[name]}`);
+      expect(below).toEqual([]);
+    }
+  });
 });
 
 describe("dependency governance: lockfile floors from the 2026-09 sweep", () => {

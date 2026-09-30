@@ -99,7 +99,7 @@ flowchart LR
 | Internationalization | next-intl — `en`, `fr`, `es`, `uk`, `pt`, `zh`, `hi`, `ja` |
 | UI | Tailwind CSS 4 + shadcn/ui (Radix UI, cmdk) |
 | Validation | Zod 4 |
-| Observability | Sentry (`@sentry/nextjs`, opt-in) + Prometheus metrics (`prom-client`, opt-in) |
+| Observability | Sentry (`@sentry/nextjs`, opt-in) + Prometheus metrics (`@prometheus-io/client`, opt-in) |
 | Package manager | pnpm 10.33.2 |
 | Tests | Vitest 4 (unit/component/integration/security) + Playwright (e2e + accessibility) |
 

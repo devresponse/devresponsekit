@@ -18,19 +18,27 @@ applies, and three surfaces are versioned with distinct guarantees:
 
 ## [Unreleased]
 
-Everything merged to `main` since 1.0.0 (#178 onward), and the work that
-lands with this changelog. That is the organization sign-up and invitation
-model, four more locales, the MCP agent gateway, satellite apps and the
-`drk-deploy` CLI, and the remediation of two reviews: the 2026-09-04 source
-review (cited as `review #n`) and the 2026-09-22 full review (cited as `F-`,
-`I-`, `A-` and `M-` ids). Of the latter, the Critical and the Highs shipped in
-#471 and #472, the 46 Mediums in #473, the created-user enrolment follow-ups
-in #480 and #486, and the Lows and advisories that need no operator decision
-land with this changelog.
+Nothing yet.
 
-No release has been tagged; the repository has no git tags at all, 1.0.0
-included. Production deploys every merge to `main`, and the version this
-becomes is the operator's decision.
+## [2.0.0] - 2026-09-30
+
+Everything merged to `main` since 1.0.0 (#178 through #488). That is the
+organization sign-up and invitation model, four more locales, the MCP agent
+gateway, satellite apps and the `drk-deploy` CLI, and the remediation of two
+reviews: the 2026-09-04 source review (cited as `review #n`) and the
+2026-09-22 full review (cited as `F-`, `I-`, `A-` and `M-` ids). Of the
+latter, the Critical and the Highs shipped in #471 and #472, the 46 Mediums in
+#473, the created-user enrolment follow-ups in #480 and #486, and the Lows and
+advisories that need no operator decision in #488.
+
+This is the first tagged release, `v2.0.0`; 1.0.0 was never tagged. It is a
+major version because it breaks what a 1.0.0 deployment or client relied on:
+it removes the HS256 SSO handoff and `SSO_HANDOFF_JWT_SECRET` that 1.0.0
+satellites used (#398), removes three environment variables, and refuses
+input 1.0.0 accepted (see **Changed** and **Removed**). The `/api/v1` path
+stays the compatibility contract: its changes bring the code in line with the
+published OpenAPI document, so there is no new API prefix. Production already
+runs this release, since every merge to `main` deploys.
 
 ### Operator actions
 

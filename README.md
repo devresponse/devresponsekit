@@ -154,7 +154,7 @@ The canonical, audience-organized documentation set lives in **[docs/](docs/READ
 - [docs/testing.md](docs/testing.md) — test strategy, suites, coverage, manual QA checklist
 - [docs/observability.md](docs/observability.md) — logs, redaction, request-id correlation, audit, Sentry, metrics, health probes, and the roadmap
 - [docs/troubleshooting.md](docs/troubleshooting.md) — incident runbook, and common setup, build, runtime, and deployment failures and fixes
-- [CHANGELOG.md](CHANGELOG.md) — what changed since 1.0.0, what an operator must do before deploying it, and which fixes the satellite forks must port
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each release, what an operator must do before deploying it, and which fixes the satellite forks must port
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)
 
 ## Security model (summary)

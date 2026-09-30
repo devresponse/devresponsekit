@@ -33,6 +33,34 @@ export const APP_ID_RE = /^[a-z0-9](?:[a-z0-9._-]{0,127})$/;
 export const SSO_AUDIENCE_RE = /^[a-z0-9](?:[a-z0-9._:-]{0,199})$/;
 
 /**
+ * I-01: true when `id` lies in the namespace of the organization whose slug is
+ * `orgSlug`: the slug, a dot, and at least one more character (`acme.crm`).
+ *
+ * App ids and audiences are platform-global (a primary key and a UNIQUE
+ * index), so a name an org admin registers is a name no one else can have. A
+ * caller without cross-org reach may claim only names under its own org's
+ * slug, which only a superadmin assigns; every other name stays the
+ * platform's. The separator is a dot because an org slug (`SLUG_RE`) never
+ * contains one: with a hyphen, org `acme` would own `acme-corp-crm`, a name in
+ * the namespace of org `acme-corp`.
+ */
+export function isOrgNamespacedAppId(id: string, orgSlug: string): boolean {
+  const namespace = `${orgSlug}.`;
+  return id.length > namespace.length && id.startsWith(namespace);
+}
+
+/**
+ * I-01: true when the last `:` segment of `audience` is an app id in the
+ * namespace of the organization whose slug is `orgSlug`. That is the
+ * conventional `<prefix>:<applicationId>` shape (`devresponse-app:acme.crm`)
+ * for an app registered under the org's namespace, and it leaves every
+ * audience ending in a global id (`devresponse-app:crm`) to the platform.
+ */
+export function isOrgNamespacedAudience(audience: string, orgSlug: string): boolean {
+  return isOrgNamespacedAppId(audience.slice(audience.lastIndexOf(":") + 1), orgSlug);
+}
+
+/**
  * Returns true when `value` is a syntactically valid HTTPS origin per
  * §8.7. We require the URL to parse, the protocol to be `https:`,
  * and the value to NOT carry a path/search/hash component — origins

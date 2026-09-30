@@ -28,7 +28,7 @@ Manages the catalog of companion applications that appear in the shell's **Appli
 - Leads to: per-app editor pages (same form pattern as the other editors; not separately captured).
 
 ## Access
-`admin.apps.read`; mutations require `admin.apps.manage`.
+`admin.apps.read`; mutations require `admin.apps.manage`. An organization admin registers apps in its own organization only, under the organization's slug: an id such as `org-a.crm` and an SSO audience ending in an id under the slug (`devresponse-app:org-a.crm`). Any other id or audience, and every Global app, is a superadmin's to register (I-01).
 
 ## Observations
 Apps can be scoped Global or to a single organization, and the subdomain column ties each entry to the SSO handoff (single-use nonce JWTs let users move between subdomains without re-authenticating).

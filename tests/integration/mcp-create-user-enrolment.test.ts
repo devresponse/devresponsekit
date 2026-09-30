@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
  * new user in the credential's org. An agent approved with only the
  * `admin.users.create` scope used to mint an ACTIVE member of its org, with a
  * password it chose, although it held neither the membership permission
- * (`admin.users.update` / `admin.orgs.update`) nor the approval permission
+ * (`admin.users.update` / `admin.orgs.manage`) nor the approval permission
  * (`admin.users.manage`). Now the call fails as a tool error carrying the
  * v1 problem's `detail`, and nothing is written.
  *
@@ -108,7 +108,7 @@ function agentCaller() {
         "admin.users.read",
         "admin.users.update",
         "admin.users.manage",
-        "admin.orgs.update",
+        "admin.orgs.manage",
       ],
     },
   };
@@ -186,7 +186,7 @@ describe("MCP createUser → POST /api/v1/users (F-480)", () => {
       expect(body.result?.isError).toBe(true);
       const text = body.result!.content[0]!.text;
       expect(text).toContain("HTTP 403");
-      expect(text).toContain("admin.users.update or admin.orgs.update");
+      expect(text).toContain("admin.users.update or admin.orgs.manage");
       // The exchanged token carried the key's scopes, and no more.
       expect(mintAccessToken).toHaveBeenCalledWith(
         expect.objectContaining({ scopes: ["admin.users.create"], organizationId: ORG_ID }),

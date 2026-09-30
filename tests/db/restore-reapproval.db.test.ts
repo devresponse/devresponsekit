@@ -158,7 +158,7 @@ function superadminGuard() {
       permissions: [
         "admin.users.delete",
         "admin.users.update",
-        "admin.orgs.update",
+        "admin.orgs.manage",
         SUPERADMIN_PERMISSION,
       ],
       orgBound: false,
@@ -315,7 +315,7 @@ beforeAll(async () => {
   const invitePerm = await db
     .selectFrom("app_permissions")
     .select("id")
-    .where("key", "=", "admin.orgs.update")
+    .where("key", "=", "admin.orgs.manage")
     .executeTakeFirstOrThrow();
   for (const [key, organizationId] of [
     ["admin_a", w.orgA],

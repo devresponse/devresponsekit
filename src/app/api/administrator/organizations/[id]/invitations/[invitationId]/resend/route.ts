@@ -48,13 +48,13 @@ interface RouteContext {
  * rotated, so the previous link is dead, and nobody received the new one. The
  * audit row carries the outbox id and the email's status, as on create.
  *
- * Caller MUST hold `admin.orgs.update`.
+ * Caller MUST hold `admin.orgs.manage` (F-69: invitations are people management).
  */
 export const POST = withAdminRoute(async function POST(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const guard = await requireAdminPermission(request, "admin.orgs.update");
+  const guard = await requireAdminPermission(request, "admin.orgs.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   // F-64: from the SHARED bucket, the create route's: kept per process, it

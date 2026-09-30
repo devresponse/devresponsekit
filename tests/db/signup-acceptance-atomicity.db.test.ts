@@ -200,7 +200,7 @@ async function newInvitingOrg(
   const permission = await db
     .selectFrom("app_permissions")
     .select("id")
-    .where("key", "=", "admin.orgs.update")
+    .where("key", "=", "admin.orgs.manage")
     .executeTakeFirstOrThrow();
   const role = await db
     .insertInto("app_roles")

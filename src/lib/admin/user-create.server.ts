@@ -66,7 +66,7 @@ export interface CreatedAppUser {
  *
  * Before the create enrolled anyone, a caller confined to one org made a user a
  * member of it only through a route with its own permission:
- * `POST /organizations/{id}/members` (`admin.orgs.update`) or
+ * `POST /organizations/{id}/members` (`admin.orgs.manage` since F-69) or
  * `POST /users/{id}/memberships` (`admin.users.update`). And a pending user
  * became active only when someone holding `admin.users.manage` approved it. The
  * create is gated on `admin.users.create` alone, so once it enrolled, a key or
@@ -84,8 +84,12 @@ export interface CreatedAppUser {
  * nobody, so none of this applies to it.
  */
 
-/** Either permission writes a membership in the caller's own org on its own. */
-export const ENROLMENT_PERMISSIONS: readonly string[] = ["admin.users.update", "admin.orgs.update"];
+/**
+ * Either permission writes a membership in the caller's own org on its own.
+ * They are the guards of the two explicit paths above, so they move with them:
+ * the org-centric one is `admin.orgs.manage`, not `.update`, since F-69.
+ */
+export const ENROLMENT_PERMISSIONS: readonly string[] = ["admin.users.update", "admin.orgs.manage"];
 /** Approving a pending user (`POST /users/{id}/status` `approve`). */
 export const ACTIVATION_PERMISSION = "admin.users.manage";
 
@@ -109,7 +113,7 @@ export interface CreationRefusal {
 export const CREATION_REFUSAL_DETAIL: Record<CreationRefusalReason, string> = {
   enrolment_not_permitted:
     "Creating a user enrols it in the credential's organization, which also needs " +
-    "admin.users.update or admin.orgs.update.",
+    "admin.users.update or admin.orgs.manage.",
   activation_not_permitted:
     "Creating an active user also needs admin.users.manage. Omit initialAppStatus to create " +
     "a pending user, and approve it with POST /api/v1/users/{id}/status.",

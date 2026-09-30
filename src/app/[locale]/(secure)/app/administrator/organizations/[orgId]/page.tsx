@@ -85,8 +85,11 @@ export default async function AdministratorOrganizationDetailPage({
 
   const t = await getTranslations({ locale, namespace: "administrator.orgs" });
 
-  // Members, invitations, provider unbinding and the Authentication policy
-  // are org-scoped writes: `admin.orgs.update` in this org is enough.
+  // Org-scoped writes, each with the key its routes gate on (F-69): members,
+  // invitations and provider unbinding are the org's people and bindings,
+  // `admin.orgs.manage`; the Authentication policy is a setting of the org,
+  // `admin.orgs.update`. Holding the key in this org is enough for each.
+  const canManage = guard.access.permissions.includes("admin.orgs.manage");
   const canUpdate = guard.access.permissions.includes("admin.orgs.update");
   // F-66: the Settings form PATCHes the organization row itself, which the
   // route refuses without cross-org reach (403). Sharing `canUpdate` left it
@@ -154,6 +157,7 @@ export default async function AdministratorOrganizationDetailPage({
           memberCount: org.member_count,
           bindingCount: org.binding_count,
         }}
+        canManage={canManage}
         canUpdate={canUpdate}
         canEditSettings={canEditSettings}
         canReadRoles={canReadRoles}

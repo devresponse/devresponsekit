@@ -34,7 +34,7 @@ Tenant management: the list of organizations plus the platform-wide sign-up poli
 - Reached from: admin sidebar (Tenancy → Organizations).
 
 ## Access
-`admin.orgs.read`; policy edits require `admin.orgs.manage`.
+`admin.orgs.read`; saving the platform sign-up policy requires `admin.orgs.update` and a Superadmin.
 
 ## Observations
 This page is the runtime control plane for the sign-up flow observed on the public sign-up screen — policy changes here take effect without redeploying.

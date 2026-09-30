@@ -246,9 +246,10 @@ export async function findValidInvitationByToken(
 /**
  * The permission the create route (`POST …/organizations/:id/invitations`)
  * requires of the inviter, and so the one an invitation still needs its
- * inviter to hold when it is accepted (F-149).
+ * inviter to hold when it is accepted (F-149). `admin.orgs.manage` since F-69,
+ * which moved the org's people and bindings off `admin.orgs.update`.
  */
-const INVITE_PERMISSION = "admin.orgs.update";
+const INVITE_PERMISSION = "admin.orgs.manage";
 
 /**
  * Whether the inviter still has the standing the create route required when

@@ -136,7 +136,7 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
  * bearer, an org admin's session) enrols the user in its own org with that
  * same status, so it can act on the user it created; a superadmin's cookie
  * session creates the user in no org (`insertCreatedUser`). F-480: that
- * enrolment also needs `admin.users.update` or `admin.orgs.update`, and an
+ * enrolment also needs `admin.users.update` or `admin.orgs.manage` (F-69), and an
  * `active` user `admin.users.manage`, each as permission AND scope; an address
  * on an email domain bound to another org is refused too. Each is a 403 with a
  * `detail` saying which, before anything is written. The password is

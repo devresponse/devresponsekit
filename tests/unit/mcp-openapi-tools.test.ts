@@ -72,7 +72,7 @@ describe("deriveMcpTools (from the real OpenAPI document)", () => {
   it("names every scope createUser needs, and what its security cannot say", () => {
     const description = byName("createUser")!.description;
     expect(description).toMatch(
-      /^Create a user \(requires the `admin\.users\.create` and `admin\.users\.update`, or `admin\.users\.create` and `admin\.orgs\.update` scopes\)\. /,
+      /^Create a user \(requires the `admin\.users\.create` and `admin\.users\.update`, or `admin\.users\.create` and `admin\.orgs\.manage` scopes\)\. /,
     );
     expect(description).toContain("`admin.users.manage`");
     expect(description).toContain("bound to another organization");
@@ -343,7 +343,7 @@ describe("tool availability by scope (I-04)", () => {
     expect(byName("listUsers")!.scopeSets).toEqual([["admin.users.read"]]);
     expect(byName("createUser")!.scopeSets).toEqual([
       ["admin.users.create", "admin.users.update"],
-      ["admin.users.create", "admin.orgs.update"],
+      ["admin.users.create", "admin.orgs.manage"],
     ]);
   });
 
@@ -354,7 +354,7 @@ describe("tool availability by scope (I-04)", () => {
       (scope: string) =>
         held.includes(scope);
     expect(isToolAvailable(createUser, holding("admin.users.create"))).toBe(false);
-    expect(isToolAvailable(createUser, holding("admin.users.create", "admin.orgs.update"))).toBe(
+    expect(isToolAvailable(createUser, holding("admin.users.create", "admin.orgs.manage"))).toBe(
       true,
     );
     expect(isToolAvailable({ scopeSets: [] }, () => false)).toBe(true);

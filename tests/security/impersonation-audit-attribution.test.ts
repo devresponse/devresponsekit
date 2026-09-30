@@ -411,7 +411,7 @@ describe("admin console — DELETE /api/administrator/organizations/[id]/invitat
     "$label: revoked_by and the audit row name the human",
     async ({ session, human, borrowed }) => {
       sessionGetter.mockResolvedValue(session);
-      accessGetter.mockResolvedValue(access(["admin.orgs.update"], ORG_ID));
+      accessGetter.mockResolvedValue(access(["admin.orgs.manage"], ORG_ID));
       reads.first["select:app_organizations"] = ORG;
       reads.first["update:app_organization_invitations"] = { numUpdatedRows: 1n };
 

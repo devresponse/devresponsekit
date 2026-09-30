@@ -23,13 +23,13 @@ interface RouteContext {
  * `invitation_not_found` when there is no pending invitation with this id
  * in this org (accepted/revoked rows are history, not revocable).
  *
- * Caller MUST hold `admin.orgs.update`.
+ * Caller MUST hold `admin.orgs.manage` (F-69: invitations are people management).
  */
 export const DELETE = withAdminRoute(async function DELETE(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const guard = await requireAdminPermission(request, "admin.orgs.update");
+  const guard = await requireAdminPermission(request, "admin.orgs.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const limited = enforceRateLimit(

@@ -18,7 +18,7 @@ import type * as ResolveCallerModule from "@/lib/api-auth/resolve-caller.server"
  * org.
  *
  * F-480: that enrolment is a membership add, and an `active` one an approval,
- * so a confined creator also needs `admin.users.update` or `admin.orgs.update`,
+ * so a confined creator also needs `admin.users.update` or `admin.orgs.manage`,
  * and `admin.users.manage` for `active`, each as permission AND scope. A key
  * scoped to `admin.users.create` alone used to mint an active member of its org
  * with a password it chose. An address on a domain bound to another org is
@@ -429,6 +429,16 @@ describe("POST /api/administrator/users: a confined creator enrols the user in i
     it.each([
       ["an org admin's session holding only create", () => actAs(orgAdmin(CREATE_ONLY))],
       ['an API key scoped to ["admin.users.create"]', () => actAsKey(["admin.users.create"])],
+      // F-69: `admin.orgs.update` edits the org's settings; its members are
+      // `admin.orgs.manage`, so it no longer stands in for a membership add.
+      [
+        "an org admin's session holding create and admin.orgs.update (F-69)",
+        () => actAs(orgAdmin([...CREATE_ONLY, "admin.orgs.update"])),
+      ],
+      [
+        'an API key scoped to ["admin.users.create", "admin.orgs.update"] (F-69)',
+        () => actAsKey(["admin.users.create", "admin.orgs.update"]),
+      ],
     ])("%s is refused with 403 before anything is written", async (_label, arrange) => {
       arrange();
       const email = nextEmail();
@@ -443,7 +453,7 @@ describe("POST /api/administrator/users: a confined creator enrols the user in i
           appUserId: null,
           organizationId: ORG_A.id,
           email,
-          metadata: { required: ["admin.users.update", "admin.orgs.update"] },
+          metadata: { required: ["admin.users.update", "admin.orgs.manage"] },
         }),
       ]);
     });
@@ -455,9 +465,9 @@ describe("POST /api/administrator/users: a confined creator enrols the user in i
         () => actAs(orgAdmin(["admin.users.create", "admin.users.update"])),
       ],
       [
-        "admin.orgs.update",
+        "admin.orgs.manage",
         "org admin",
-        () => actAs(orgAdmin(["admin.users.create", "admin.orgs.update"])),
+        () => actAs(orgAdmin(["admin.users.create", "admin.orgs.manage"])),
       ],
       [
         "admin.users.update",
@@ -698,7 +708,7 @@ describe("POST /api/v1/users (the MCP `createUser` tool calls it): the same rule
         const res = await create({ email, initialAppStatus });
         expect(res.status).toBe(403);
         expect(await res.json()).toMatchObject({
-          detail: expect.stringContaining("admin.users.update or admin.orgs.update"),
+          detail: expect.stringContaining("admin.users.update or admin.orgs.manage"),
         });
         expectNothingWritten();
         expect(auditRows("admin.user.create_denied")).toEqual([
@@ -710,7 +720,7 @@ describe("POST /api/v1/users (the MCP `createUser` tool calls it): the same rule
             email,
             requestId: "req-1",
             metadata: {
-              required: ["admin.users.update", "admin.orgs.update"],
+              required: ["admin.users.update", "admin.orgs.manage"],
               via: "api.v1",
             },
           }),
@@ -732,7 +742,7 @@ describe("POST /api/v1/users (the MCP `createUser` tool calls it): the same rule
       const res = await create({ email: existing });
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({
-        detail: expect.stringContaining("admin.users.update or admin.orgs.update"),
+        detail: expect.stringContaining("admin.users.update or admin.orgs.manage"),
       });
       expect(auditRows("admin.user.create_denied")).toEqual([
         expect.objectContaining({ reason: "enrolment_not_permitted", email: existing }),

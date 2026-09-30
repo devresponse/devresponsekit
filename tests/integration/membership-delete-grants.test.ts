@@ -204,7 +204,7 @@ function req(url: string, body: unknown): NextRequest {
 const ROUTES: RouteCase[] = [
   {
     name: "DELETE /organizations/[id]/members",
-    gate: "admin.orgs.update",
+    gate: "admin.orgs.manage",
     userRowMetadata: {
       membershipId: MEMBERSHIP_ID,
       revokedRoleIds: ["r-org-admin"],
@@ -503,7 +503,7 @@ describe("DELETE /organizations/[id]/members — a batch audits each member's ow
   const OTHER_MEMBERSHIP = "22222222-2222-4222-8222-222222222222";
 
   it("each admin.user.membership_removed row lists only that member's roles and groups", async () => {
-    requireAdminMock.mockResolvedValue(grant(["admin.orgs.update", "superuser"], null));
+    requireAdminMock.mockResolvedValue(grant(["admin.orgs.manage", "superuser"], null));
     state.memberships = [
       state.memberships[0]!,
       {

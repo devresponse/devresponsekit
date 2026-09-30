@@ -183,7 +183,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *     not reach the user it just created. A superadmin's cookie session
  *     creates the user in no org (`insertCreatedUser`).
  *   - F-480: that enrolment also needs `admin.users.update` or
- *     `admin.orgs.update`, and an `active` user needs `admin.users.manage`,
+ *     `admin.orgs.manage` (F-69), and an `active` user needs `admin.users.manage`,
  *     each held as a permission and, for a bearer credential, as a scope. An
  *     address on an email domain bound to another org is refused too. Each is
  *     a 403 before anything is written (`refuseConfinedCreation`).

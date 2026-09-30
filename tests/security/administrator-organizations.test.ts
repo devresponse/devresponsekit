@@ -225,10 +225,13 @@ describe("security: organization delete requires admin.orgs.delete", () => {
   });
 });
 
-describe("security: member management requires admin.orgs.update", () => {
-  it("403 when caller has read but not update", async () => {
+// F-69: the org's people and bindings are `admin.orgs.manage`; `admin.orgs.update`
+// (the org's settings) no longer reaches them. The denial is the permission
+// guard's own, not a later check.
+describe("security: member management requires admin.orgs.manage (F-69)", () => {
+  it("403 when caller has read and update but not manage", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(ACCESS(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ACCESS(["admin.orgs.read", "admin.orgs.update"]));
     const res = await MembersPOST(
       jsonReq(`http://test.local/api/administrator/organizations/${ORG_ID}/members`, {
         appUserIds: ["u-2"],
@@ -236,14 +239,16 @@ describe("security: member management requires admin.orgs.update", () => {
       { params: Promise.resolve({ id: ORG_ID }) },
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "missing_admin_permission" }),
+    );
   });
 });
 
-describe("security: provider binding requires admin.orgs.update", () => {
-  it("403 when caller has read but not update", async () => {
+describe("security: provider binding requires admin.orgs.manage (F-69)", () => {
+  it("403 when caller has read and update but not manage", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(ACCESS(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ACCESS(["admin.orgs.read", "admin.orgs.update"]));
     const res = await ProvidersPOST(
       jsonReq(`http://test.local/api/administrator/organizations/${ORG_ID}/provider-bindings`, {
         provider: "github",
@@ -252,6 +257,8 @@ describe("security: provider binding requires admin.orgs.update", () => {
       { params: Promise.resolve({ id: ORG_ID }) },
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "missing_admin_permission" }),
+    );
   });
 });

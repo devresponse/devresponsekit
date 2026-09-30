@@ -21,11 +21,13 @@ import { OrganizationSettingsForm } from "./_organization-settings-form";
  * seeded from props must do the same.
  *
  * Every flag is a boolean the server page derives from the caller's access
- * context. `canUpdate` (`admin.orgs.update`) governs the org-scoped writes;
- * the Settings form writes the organization row itself, which is
- * SUPERADMIN-only, so it has its own `canEditSettings` (F-66). `canReadRoles`
- * and `canReadUsers` gate what reads another area's API or links to another
- * area's page (F-67).
+ * context, from the key the API gates the same write on (F-69): `canManage`
+ * (`admin.orgs.manage`) governs the org's people and bindings (members,
+ * invitations, providers) and `canUpdate` (`admin.orgs.update`) its
+ * Authentication policy. The Settings form writes the organization row
+ * itself, which is SUPERADMIN-only, so it has its own `canEditSettings`
+ * (F-66). `canReadRoles` and `canReadUsers` gate what reads another area's API
+ * or links to another area's page (F-67).
  */
 export interface OrganizationDetailJson {
   id: string;
@@ -41,6 +43,7 @@ export interface OrganizationDetailJson {
 
 export function OrganizationDetailTabs({
   org,
+  canManage,
   canUpdate,
   canEditSettings,
   canReadRoles,
@@ -49,6 +52,7 @@ export function OrganizationDetailTabs({
   platformAuthDefaults,
 }: {
   org: OrganizationDetailJson;
+  canManage: boolean;
   canUpdate: boolean;
   canEditSettings: boolean;
   canReadRoles: boolean;
@@ -72,19 +76,19 @@ export function OrganizationDetailTabs({
         <div className="space-y-6">
           <OrganizationMembersGrid
             orgId={org.id}
-            canUpdate={canUpdate}
+            canUpdate={canManage}
             canReadUsers={canReadUsers}
           />
           <OrganizationInvitationsPanel
             orgId={org.id}
-            canUpdate={canUpdate}
+            canUpdate={canManage}
             canReadRoles={canReadRoles}
           />
         </div>
       </TabsContent>
 
       <TabsContent value="providers" className="mt-4">
-        <OrganizationProvidersGrid orgId={org.id} canUpdate={canUpdate} />
+        <OrganizationProvidersGrid orgId={org.id} canUpdate={canManage} />
       </TabsContent>
 
       <TabsContent value="authentication" className="mt-4" {...tabs.keep("authentication")}>

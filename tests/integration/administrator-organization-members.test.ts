@@ -284,9 +284,9 @@ describe("GET /api/administrator/organizations/:id/members", () => {
 });
 
 describe("POST /api/administrator/organizations/:id/members", () => {
-  it("returns 403 when caller lacks admin.orgs.update", async () => {
+  it("returns 403 when caller lacks admin.orgs.manage, even holding admin.orgs.update (F-69)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read", "admin.orgs.update"]));
     const res = await POST(jsonReq({ appUserIds: ["u-2"] }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -295,7 +295,7 @@ describe("POST /api/administrator/organizations/:id/members", () => {
 
   it("returns 400 for invalid body (empty array)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     const res = await POST(jsonReq({ appUserIds: [] }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -304,7 +304,7 @@ describe("POST /api/administrator/organizations/:id/members", () => {
 
   it("returns 404 when org not found", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValue(null);
     const res = await POST(jsonReq({ appUserIds: ["u-2"] }), {
       params: Promise.resolve({ id: ORG_ID }),
@@ -314,7 +314,7 @@ describe("POST /api/administrator/organizations/:id/members", () => {
 
   it("returns 409 membership_exists on the (organization_id, app_user_id) unique, whatever the server's message language (F-132)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     insertExecute.mockRejectedValue(
       pgUniqueViolation("app_organization_memberships_organization_id_app_user_id_key"),
     );
@@ -328,9 +328,9 @@ describe("POST /api/administrator/organizations/:id/members", () => {
 });
 
 describe("PATCH /api/administrator/organizations/:id/members", () => {
-  it("returns 403 when caller lacks admin.orgs.update", async () => {
+  it("returns 403 when caller lacks admin.orgs.manage, even holding admin.orgs.update (F-69)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read", "admin.orgs.update"]));
     const res = await PATCH(jsonReq({ membershipIds: ["m-1"], status: "suspended" }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -339,9 +339,9 @@ describe("PATCH /api/administrator/organizations/:id/members", () => {
 });
 
 describe("DELETE /api/administrator/organizations/:id/members", () => {
-  it("returns 403 when caller lacks admin.orgs.update", async () => {
+  it("returns 403 when caller lacks admin.orgs.manage, even holding admin.orgs.update (F-69)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read", "admin.orgs.update"]));
     const res = await DELETE(jsonReq({ membershipIds: ["m-1"] }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -350,7 +350,7 @@ describe("DELETE /api/administrator/organizations/:id/members", () => {
 
   it("returns 400 for invalid body (empty array)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     const res = await DELETE(jsonReq({ membershipIds: [] }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -370,7 +370,7 @@ describe("DELETE /api/administrator/organizations/:id/members", () => {
    */
   it("DELETE rejects a batch above MAX_BULK_IDS with 400", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     const res = await DELETE(jsonReq({ membershipIds: overCapIds() }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -379,7 +379,7 @@ describe("DELETE /api/administrator/organizations/:id/members", () => {
 
   it("PATCH rejects a batch above MAX_BULK_IDS with 400", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     const res = await PATCH(jsonReq({ membershipIds: overCapIds(), status: "blocked" }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -388,7 +388,7 @@ describe("DELETE /api/administrator/organizations/:id/members", () => {
 
   it("PATCH still accepts a batch AT the cap (the ceiling is not off by one)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     itemsExecute.mockResolvedValue([]); // no rows resolve → 404, i.e. PAST validation
     const atCap = Array.from({ length: 500 }, () => MEMBERSHIP_ID);
     const res = await PATCH(jsonReq({ membershipIds: atCap, status: "blocked" }), {
@@ -403,7 +403,8 @@ describe("DELETE /api/administrator/organizations/:id/members", () => {
  *
  * This route never calls `resolveTargetUser`, which is exactly why the review
  * #7 rank guard and the last-superadmin invariant were both missing here: an
- * org admin holding only `admin.orgs.update` could block, suspend or delete a
+ * org admin holding only `admin.orgs.update` (the route's key then;
+ * `admin.orgs.manage` since F-69) could block, suspend or delete a
  * SUPERADMIN co-member's membership — the same lockout the user-centric twin
  * refuses. The real `refuseOutrankingTarget` runs in this suite (nothing mocks
  * `user-target.server` here).
@@ -438,7 +439,7 @@ describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () 
   }
 
   it("PATCH 403 + denied audit when the member is a SUPERADMIN and the actor is not", async () => {
-    ranks(["admin.orgs.update"], ["admin.orgs.update", "superuser"]);
+    ranks(["admin.orgs.manage"], ["admin.orgs.manage", "superuser"]);
     const res = await PATCH(jsonReq({ ...memberBody, status: "blocked" }), {
       params: Promise.resolve({ id: ORG_ID }),
     });
@@ -454,13 +455,13 @@ describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () 
   });
 
   it("DELETE 403 when the member is a SUPERADMIN and the actor is not", async () => {
-    ranks(["admin.orgs.update"], ["admin.orgs.update", "superuser"]);
+    ranks(["admin.orgs.manage"], ["admin.orgs.manage", "superuser"]);
     const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
     expect(res.status).toBe(403);
   });
 
   it("DELETE 200 for a plain member — ordinary org administration is unchanged", async () => {
-    ranks(["admin.orgs.update", "shell.view"], ["shell.view"]);
+    ranks(["admin.orgs.manage", "shell.view"], ["shell.view"]);
     const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
     expect(res.status).toBe(200);
     // F-12: the member's grants in this org go in the same transaction, first.
@@ -475,7 +476,7 @@ describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () 
     // Resolved in this org the member looks plain (the grant's org is not
     // active, so nothing expands) — but the grant is still there, and comes
     // back when that org is reactivated. Rank must not dip in between.
-    ranks(["admin.orgs.update", "shell.view"], ["shell.view"]);
+    ranks(["admin.orgs.manage", "shell.view"], ["shell.view"]);
     superuserGrants.holdsGrant = { id: "p-superuser" };
     const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
     expect(res.status).toBe(403);
@@ -485,7 +486,7 @@ describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () 
   });
 
   it("DELETE 200 for a SUPERADMIN actor against a superadmin member", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
     expect(res.status).toBe(200);
   });
@@ -494,7 +495,7 @@ describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () 
 describe("PATCH/DELETE organizations/:id/members — last-superadmin invariant (REVOKE-2)", () => {
   beforeEach(() => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     itemsExecute.mockResolvedValue([memberRow]);
     superuserGrants.rows = [
       { app_user_id: "u-member", organization_id: ORG_ID, role_id: "r-super" },

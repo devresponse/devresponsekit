@@ -232,7 +232,7 @@ beforeEach(() => {
   // grant path is the baseline.
   bannedMock.mockReset().mockResolvedValue(false);
   rolePermsMock.mockReset().mockResolvedValue(["admin.users.read"]);
-  heldPermsMock.mockReset().mockResolvedValue(["admin.orgs.update", "admin.users.read"]);
+  heldPermsMock.mockReset().mockResolvedValue(["admin.orgs.manage", "admin.users.read"]);
   insertCalls = [];
   updateCalls = [];
   transactionLog = [];
@@ -481,7 +481,7 @@ describe("consumeInvitation", () => {
 
     it("does NOT grant a role conferring a permission the inviter lacks — membership still created, audited as roleDenied", async () => {
       rolePermsMock.mockResolvedValue(["superuser"]);
-      heldPermsMock.mockResolvedValue(["admin.orgs.update"]);
+      heldPermsMock.mockResolvedValue(["admin.orgs.manage"]);
       const result = await consumeInvitation({
         invitation: invited,
         appUser: ELIGIBLE_USER,
@@ -532,7 +532,7 @@ describe("consumeInvitation", () => {
 
     it("grants when the role's permissions are a subset of the inviter's current held set", async () => {
       rolePermsMock.mockResolvedValue(["admin.users.read"]);
-      heldPermsMock.mockResolvedValue(["admin.orgs.update", "admin.users.read"]);
+      heldPermsMock.mockResolvedValue(["admin.orgs.manage", "admin.users.read"]);
       const result = await consumeInvitation({
         invitation: invited,
         appUser: ELIGIBLE_USER,
@@ -631,8 +631,10 @@ describe("consumeInvitation", () => {
       );
     });
 
-    it("refuses a plain invitation when the inviter no longer holds admin.orgs.update in the org (demoted or removed)", async () => {
-      for (const held of [[], ["admin.users.read"]]) {
+    it("refuses a plain invitation when the inviter no longer holds admin.orgs.manage in the org (demoted or removed)", async () => {
+      // F-69: `admin.orgs.update` is the org's settings; inviting is
+      // `admin.orgs.manage`, so holding only `.update` is no standing either.
+      for (const held of [[], ["admin.users.read"], ["admin.orgs.update", "admin.users.read"]]) {
         insertCalls = [];
         updateCalls = [];
         auditMock.mockReset();

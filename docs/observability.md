@@ -24,7 +24,7 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
 | **Email delivery** | `recordOutboxDelivery` (`src/lib/email/delivery-telemetry.server.ts`) | Every delivery outcome written to an `app_outbox` row, by the inline attempt (which the administrator test send also uses) and by the drain worker, increments `devresponsekit_outbox_delivery_total` ([§5](#5-metrics)) in the process that wrote the row. The inline attempt and the `/api/internal/outbox-drain` cron route run in the server, so their outcomes reach `/api/metrics`. A `pnpm outbox:drain` run is its own short-lived process, so its outcomes do not: they show only in its log lines, its summary line and the rows themselves (see §5). A failure also logs one `kind: "email_delivery"` line: `error` for a terminal one (`failed`, `expired`), `warn` for a transient one the worker will retry (F-27). A `superseded` row, an invitation email the drain dropped because its invitation was revoked, resent, accepted or deleted since it was queued (F-100), is counted but not logged: it was withdrawn, not lost. An invitation email that carries no accept link at all (a template edited to drop `{{acceptUrl}}`) is a logged `failed` instead. The line carries the outcome, a `reason` (`provider_rejected`, `attempts_exhausted`, `token_expired`, `invitation_link_missing`, `transient`), the outbox id, template, provider, attempt count, the provider's HTTP status (`providerStatus`), the error class and a system error code. It never carries the recipient, subject, body, template variables or the provider's response text; the row's sanitized `error` column holds that text, found by `outboxId`. The inline send's retries (F-99) report once, with their attempt count. When the row cannot be updated after a delivered send, `email delivered but its outbox row was not updated` is logged at `error` with the outbox id (F-101): the row stays `pending`, and the drain re-attempts it under the same idempotency key once its lease runs out. After a failed send the line is `email not delivered and its outbox row was not updated`, with the same outcome for the row. Either way the send returns the provider's answer instead of throwing. |
 | **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag and utilization, GC, CPU) + the `…_rate_limit_denials_total{scope}`, `…_pre_auth_refusals_total{event_type}` and `…_outbox_delivery_total{outcome,template}` business counters. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
-| **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Errors, transactions, spans, breadcrumbs and Session Replay are all scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process — see [§3](#3-redaction--scrubbing-policy). |
+| **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Errors, spans, breadcrumbs and Session Replay are all scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process — see [§3](#3-redaction--scrubbing-policy). |
 | **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the environment passes its schema, the database is reachable, the ledger holds every core migration the build needs **and** Better Auth's own schema check finds every table and column it writes (F-26); `503` with `reason: config_invalid`, `database_unreachable` or `schema_behind` otherwise (invalid variable names, missing ids and missing Better Auth tables go to the log under `kind: "config-invalid"`, `"schema-behind"` and `"auth-schema-behind"`, never the body). The email provider is deliberately not probed: a provider outage or a rejected sender would take every instance out of rotation, and sign-in with it, over mail the outbox retries anyway; the sender's shape is checked at boot and each delivery's outcome is in the email delivery signal above (F-27). Wire both to your orchestrator probes (see [deployment.md §4](./deployment.md#4-deploy--post-deploy-verification) and [docker.md §7](./docker.md)). |
 | **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged + captured to Sentry (not swallowed) so a fault that escaped every request boundary is visible in the log stream. They do **not** exit — Next 16 treats both as non-fatal — unless `PROCESS_FATAL_ON_UNCAUGHT=1` opts uncaught exceptions into `exit(1)` (review #23; see [configuration.md](./configuration.md)). |
 
@@ -68,13 +68,28 @@ Two layers, both fail-safe (redact-by-default):
     breadcrumbs, the transaction name, and every context value whose key ends in `path` or
     `url`. The last one matters because the `onRequestError` hook records the raw request
     path, query included, as `contexts.nextjs.request_path` (F-23);
-  - sampled **transactions** (`beforeSendTransaction`) and their **spans**
-    (`beforeSendSpan`), including the root-span attributes in `contexts.trace.data`, each
-    `spans[].data` (`url.full`, `url.query`, `http.request.header.*`, …), span
-    descriptions, and the transaction name;
+  - sampled **spans** (`beforeSendSpan`), the root span of each request included: every
+    attribute (`url.full`, `url.query`, `url.fragment`, the `http.request.header.*` arrays,
+    the request body, the client address, the `user.*` attributes the SDK copies from the
+    scope, `sentry.segment.name`, …) and every span name. Sentry 11 **streams** spans and
+    sends no transaction events, so this one hook is the only way a span leaves; it has no
+    `beforeSendTransaction`. The SDK silently skips a `beforeSendSpan` that does not match
+    its trace lifecycle, so all three configs pin `traceLifecycle: "stream"`. The pin also
+    overrides `SENTRY_TRACE_LIFECYCLE`, on purpose: the server and edge SDKs read that
+    variable when the option is unset, and `static` there would turn every span into a
+    transaction event that no hook scrubs. `tests/unit/sentry-config.test.ts` (which runs
+    the server and edge configs through their real SDKs with the variable set) and
+    `tests/unit/sentry-browser-spans.test.ts` prove the real SDK calls the hook. If the hook
+    ever throws, Sentry 11 would send the span unmodified, so the scrubber fails closed
+    instead: the span loses its attributes and its name (R11);
+  - the **trace header** of every envelope, errors' included, and the `baggage` header the
+    SDK adds to outgoing requests: both carry the trace's dynamic sampling context, whose
+    `transaction` is the root span's name, and none of the hooks above sees them. The
+    `ScrubDynamicSamplingContext` integration in all three configs scrubs that name as the
+    SDK builds the context (R11);
   - **breadcrumbs** (`beforeBreadcrumb`), as they are recorded. The URL loses its query,
-    and the `http.query` / `http.fragment` keys are dropped: the SDK's outgoing-request
-    breadcrumbs on the server copy both verbatim;
+    and the `url.query` / `url.fragment` keys are dropped: the SDK's outgoing-request
+    breadcrumbs on the server copy the fragment verbatim whatever the policy says;
   - **Session Replay** (browser only, F-23), which none of the hooks above reach. The
     `replay_event` (`urls`, `request.url`, the `Referer` header) goes through an event
     processor. The SDK's own recording frames (navigation, request and asset spans; click
@@ -91,8 +106,8 @@ Two layers, both fail-safe (redact-by-default):
   (`x-forwarded-for`, `x-real-ip`, the app-derived `x-drk-client-ip` that Better Auth's
   limiter keys on — review #35 — `cf-connecting-ip`, `true-client-ip`,
   `x-vercel-forwarded-for`, `forwarded`, `via`, …) are denied at write time and dropped by
-  the hooks, as are the `http.client_ip` / `user.ip_address` / `client.address` span
-  attributes the Node HTTP instrumentation sets. The deny list is a set of names plus any
+  the hooks, as are the `client.address` / `network.peer.address` / `user.ip_address` span
+  attributes (and the older `http.client_ip` spelling). The deny list is a set of names plus any
   header whose name contains `forwarded`, `-ip`, `remote-`, `via` or `-user`. On the server
   and edge runtimes it also holds the header `CLIENT_IP_SOURCE` names, read at startup,
   because that header can match none of those rules (Azure Front Door's `x-azure-clientip`
@@ -109,16 +124,17 @@ Two layers, both fail-safe (redact-by-default):
   path.
 
   The SDK is also told not to _record_ cookies, query parameters, bodies, or user info in the first
-  place (`dataCollection` in all three `Sentry.init` calls — this **replaces** the
-  deprecated `sendDefaultPii: false` bridge, so every deny list it used to apply is spelled
-  out explicitly); the hooks are the backstop (review #22). Because `dataCollection` builds
-  on the SDK's own **permissive** defaults rather than the bridge's, the categories that
+  place (`dataCollection` in all three `Sentry.init` calls — this **replaces** the old
+  `sendDefaultPii: false` bridge, which Sentry 11 removed, so every deny list it used to
+  apply is spelled out explicitly); the hooks are the backstop (review #22). Because
+  `dataCollection` builds on the SDK's own **permissive** defaults, the categories that
   default to _on_ are closed by name too — GraphQL documents/variables, database query
-  values (`databaseQueryData`, which the bridge mapped to `false`), and stack-frame local
-  variables. They are inert until the matching integration is enabled; spelling them out is
-  what keeps enabling one from silently opening a channel. `tests/unit/sentry-scrub.test.ts`
-  asserts the policy **as the SDK resolves it**, so an upstream rename or default flip fails
-  the build instead of leaking.
+  values (`databaseQueryData`, which the bridge mapped to `false`), queue task arguments
+  (`queues`, new in Sentry 11) and stack-frame local variables. They are inert until the
+  matching integration is enabled; spelling them out is what keeps enabling one from
+  silently opening a channel. `tests/unit/sentry-scrub.test.ts` asserts the policy **as
+  the SDK resolves it**, exactly, so an upstream rename, a new category or a default flip
+  fails the build instead of leaking.
 - **Email outbox** — `src/lib/email/outbox-secrets.ts` redacts one-time links (the
   `/reset-password/<token>` path segment and every `token=` query value → `[redacted]`) from
   the `app_outbox` columns the administrator API can read (`subject`, `body_html`,

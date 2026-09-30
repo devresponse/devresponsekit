@@ -5,7 +5,8 @@
  * Components opt in via the "use client" directive.
  */
 import createNextIntlPlugin from "next-intl/plugin";
-import { withSentryConfig } from "@sentry/nextjs";
+// Sentry 11 moved the build-time wrapper to its own entry point (R11).
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 

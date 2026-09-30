@@ -45,6 +45,8 @@ const EXTERNAL: Readonly<Record<string, string>> = {
     "read by Next.js itself; docs/docker.md says not to set it (src/lib/shutdown.server.ts)",
   GIT_SHA: "the operator's shell variable in docs/docker.md's build commands",
   API_TOKEN: "the reader's own variable in docs/api.md's client example",
+  SENTRY_TRACE_LIFECYCLE:
+    "read by the Sentry server and edge SDKs; docs/observability.md explains why the configs' traceLifecycle pin overrides it (R11)",
   INVALID_EMAIL_OR_PASSWORD:
     "Better Auth's own error code, logged as a failed sign-in's reason (docs/troubleshooting.md, F-55)",
   INVALID_EMAIL:

@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ErrorEvent } from "@sentry/nextjs";
 // The real `onRequestError` capture (Vitest resolves `@sentry/nextjs` to its
-// server build), fed into a real `@sentry/core` client (hoisted, see .npmrc).
+// server build), fed into a real `@sentry/core` client (hoisted, see .npmrc;
+// Sentry 11 moved the server client and the http helpers to
+// `@sentry/core/server`).
 import { captureRequestError } from "@sentry/nextjs";
 import {
-  ServerRuntimeClient,
-  addOutgoingRequestBreadcrumb,
   createStackParser,
   createTransport,
   getCurrentScope,
@@ -17,15 +17,15 @@ import {
   requestDataIntegration,
   setCurrentClient,
 } from "@sentry/core";
+import { ServerRuntimeClient, addOutgoingRequestBreadcrumb } from "@sentry/core/server";
 import {
   type SentryScrubbers,
+  type StreamedSpanJSON,
   SENTRY_DATA_COLLECTION,
   createSentryScrubbers,
   scrubBreadcrumb,
   scrubEvent,
   scrubSpan,
-  scrubTransaction,
-  type TransactionEvent,
 } from "@/lib/observability/sentry-shared";
 
 /**
@@ -139,10 +139,11 @@ describe("contexts.nextjs.request_path (F-23)", () => {
 
 /**
  * The server SDK's outgoing-request breadcrumb (`addOutgoingRequestBreadcrumb`
- * for node:http; node-core's fetch breadcrumb builds the same data) keeps a
- * sanitized `url` but copies the query and fragment into `http.query` /
- * `http.fragment`, whatever `dataCollection` says. The MCP gateway's call to
- * /api/v1 carries the tool's arguments in that query.
+ * for node:http; the fetch breadcrumb builds the same data) keeps a sanitized
+ * `url` but copies the fragment into `url.fragment` whatever `dataCollection`
+ * says, and the query into `url.query` (withheld by the closed policy since
+ * Sentry 11; Sentry 10 wrote both verbatim, as `http.query` / `http.fragment`).
+ * The MCP gateway's call to /api/v1 carries the tool's arguments in that query.
  */
 describe("outgoing-request breadcrumbs (F-23)", () => {
   type OutgoingRequest = Parameters<typeof addOutgoingRequestBreadcrumb>[0];
@@ -161,23 +162,22 @@ describe("outgoing-request breadcrumbs (F-23)", () => {
   const SCRUBBED = {
     status_code: 200,
     url: "https://app.example/api/v1/users",
-    "http.method": "GET",
+    "http.request.method": "GET",
   };
   const onlyCrumb = (event: ErrorEvent) => {
     expect(event.breadcrumbs).toHaveLength(1);
     return event.breadcrumbs![0]!.data;
   };
 
-  it("is needed: the closed write-time policy still records the query and fragment", async () => {
+  it("is needed: the closed write-time policy still records the fragment", async () => {
     const event = await captureThroughSdk(
       { dataCollection: SENTRY_DATA_COLLECTION },
       { path: "/en/app", headers: {} },
       recordOutgoingRequest,
     );
-    expect(onlyCrumb(event)).toMatchObject({
-      "http.query": `?email=alice@example.com&token=${TOKEN}`,
-      "http.fragment": `#${TOKEN}`,
-    });
+    const crumb = onlyCrumb(event);
+    expect(crumb?.["url.fragment"]).toBe(TOKEN);
+    expect(crumb?.["url.query"]).toBeUndefined();
   });
 
   it("drops them as the breadcrumb is recorded", async () => {
@@ -220,7 +220,6 @@ describe("createSentryScrubbers: the CLIENT_IP_SOURCE header (F-23, from F-17)",
       expect(createSentryScrubbers(extra)).toEqual({
         dataCollection: SENTRY_DATA_COLLECTION,
         beforeSend: scrubEvent,
-        beforeSendTransaction: scrubTransaction,
         beforeSendSpan: scrubSpan,
         beforeBreadcrumb: scrubBreadcrumb,
       });
@@ -254,34 +253,35 @@ describe("createSentryScrubbers: the CLIENT_IP_SOURCE header (F-23, from F-17)",
       }).getDataCollectionOptions(),
       "request",
     );
-    expect(recorded["http.request.header.x_azure_clientip"]).not.toBe(IP);
-    expect(recorded["http.request.header.user_agent"]).toBe("ua");
+    expect(recorded["http.request.header.x-azure-clientip"]).toEqual(["[Filtered]"]);
+    expect(recorded["http.request.header.user-agent"]).toEqual(["ua"]);
   });
 
-  it("drops the header's span attributes from transactions and standalone spans", () => {
+  it("drops the header's attributes from every streamed span, root and child (R11)", () => {
     const scrubbers = createSentryScrubbers([AZURE]);
-    const data = () => ({
-      "http.request.header.x_azure_clientip": IP,
-      "http.request.header.user_agent": "ua",
-    });
-    const tx = scrubbers.beforeSendTransaction(
-      {
-        type: "transaction",
-        request: { headers: { "X-Azure-ClientIP": IP, Accept: "text/html" } },
-        contexts: { trace: { trace_id: "t", span_id: "s", data: data() } },
-        spans: [{ span_id: "c", trace_id: "t", start_timestamp: 0, data: data() }],
-      } as unknown as TransactionEvent,
-      {},
-    );
-    expect(JSON.stringify(tx)).not.toContain(IP);
-    expect(tx.request?.headers).toEqual({ Accept: "text/html" });
-    const span = scrubbers.beforeSendSpan({
-      span_id: "c",
+    const span = (isSegment: boolean): StreamedSpanJSON => ({
       trace_id: "t",
+      span_id: isSegment ? "s" : "c",
+      name: "GET /en/app",
       start_timestamp: 0,
-      data: data(),
-    } as Parameters<typeof scrubSpan>[0]);
-    expect(span.data).toEqual({ "http.request.header.user_agent": "ua" });
+      status: "ok",
+      is_segment: isSegment,
+      attributes: {
+        // Sentry 11's spelling, and an underscore one.
+        "http.request.header.x-azure-clientip": [IP],
+        "http.request.header.x_azure_clientip": IP,
+        "http.request.header.user-agent": ["ua"],
+      },
+    });
+    for (const isSegment of [true, false]) {
+      expect(scrubbers.beforeSendSpan(span(isSegment)).attributes).toEqual({
+        "http.request.header.user-agent": ["ua"],
+      });
+      // The shared hook does not know the header.
+      expect(scrubSpan(span(isSegment)).attributes).toHaveProperty([
+        "http.request.header.x-azure-clientip",
+      ]);
+    }
   });
 
   it("matches an underscore spelling as sent and as an attribute key", async () => {

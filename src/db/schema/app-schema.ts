@@ -415,6 +415,7 @@ export interface AppDatabase {
   app_rate_limits: AppRateLimitsTable;
   session: BetterAuthSessionTable;
   user: BetterAuthUserTable;
+  account: BetterAuthAccountTable;
 }
 
 /*
@@ -441,6 +442,8 @@ export interface BetterAuthUserTable {
   name: ColumnType<string, never, never>;
   email: ColumnType<string, never, never>;
   emailVerified: ColumnType<boolean, never, never>;
+  /** Read by the data-subject export (F-151, `src/lib/user-data/export.server.ts`). */
+  image: ColumnType<string | null, never, never>;
   /**
    * App-declared additional field (`user.additionalFields` in auth.ts):
    * true when `emailVerified` was stamped by a waived-verification sign-up
@@ -456,6 +459,20 @@ export interface BetterAuthUserTable {
    */
   banned: ColumnType<boolean | null, never, never>;
   banExpires: ColumnType<Date | null, never, never>;
+}
+
+/**
+ * Better Auth's sign-in methods for a user: one `credential` row holding the
+ * password hash, one row per linked social provider. Only the columns the
+ * data-subject export reads (F-151) are typed; the password hash and the
+ * provider tokens are left out on purpose, so no Kysely query can select them.
+ */
+export interface BetterAuthAccountTable {
+  id: ColumnType<string, never, never>;
+  userId: ColumnType<string, never, never>;
+  providerId: ColumnType<string, never, never>;
+  accountId: ColumnType<string, never, never>;
+  createdAt: ColumnType<Date, never, never>;
 }
 
 export type AppOrganization = Selectable<AppOrganizationsTable>;

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as PageModule from "@/app/[locale]/(secure)/app/administrator/users/[userId]/page";
+import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 
 /**
  * Executes the administrator User-detail RSC (review #122).
@@ -30,9 +31,14 @@ vi.mock("next-intl/server", () => ({
 vi.mock("@/lib/admin/permissions.server", () => ({
   checkAdminPermissionServer: (...a: unknown[]) => checkAdminPermissionServer(...a),
 }));
-vi.mock("@/lib/admin/access-scope.server", () => ({
-  canAccessUser: (...a: unknown[]) => canAccessUser(...a),
-}));
+vi.mock("@/lib/admin/access-scope.server", async () => {
+  // The real (pure) `hasCrossOrgReach` decides the F-151 erase button.
+  const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
+  return {
+    hasCrossOrgReach: actual.hasCrossOrgReach,
+    canAccessUser: (...a: unknown[]) => canAccessUser(...a),
+  };
+});
 vi.mock("@/db/database", () => ({
   db: {
     selectFrom: () => ({
@@ -45,6 +51,9 @@ vi.mock("@/db/database", () => ({
 // Client islands: the page only forwards props; they are not under test.
 vi.mock("@/app/[locale]/(secure)/app/administrator/users/[userId]/_impersonate-button", () => ({
   ImpersonateUserButton: () => null,
+}));
+vi.mock("@/app/[locale]/(secure)/app/administrator/users/[userId]/_erase-button", () => ({
+  EraseUserButton: () => null,
 }));
 vi.mock("@/app/[locale]/(secure)/app/administrator/users/[userId]/_user-detail-tabs", () => ({
   UserDetailTabs: () => null,
@@ -410,5 +419,86 @@ describe("administrator/users/[userId] page — isSelf for the Sessions tab (F-1
   it("is true when the viewer opens their own user", async () => {
     checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-target", access: ACCESS });
     expect(findTabsProps(await Page(params(USER_ID)))!.isSelf).toBe(true);
+  });
+});
+
+/**
+ * F-151: the data-subject export link and the erase button. The export needs
+ * the export route's own key; erasure is offered only where the route would
+ * run it: a superadmin with cross-org reach, on a soft-deleted account that is
+ * not erased yet and is not an agent's service account.
+ */
+describe("administrator/users/[userId] page — data export and erasure (F-151)", () => {
+  /** Every element in the rendered tree, depth first. */
+  function elements(node: unknown, out: Array<{ props: Record<string, unknown> }> = []) {
+    if (!node || typeof node !== "object") return out;
+    if (Array.isArray(node)) {
+      for (const child of node) elements(child, out);
+      return out;
+    }
+    const el = node as { props?: Record<string, unknown> };
+    if (el.props) {
+      out.push(el as { props: Record<string, unknown> });
+      elements(el.props.children, out);
+    }
+    return out;
+  }
+  const exportLink = (tree: unknown) =>
+    elements(tree).find((el) => String(el.props.href ?? "").endsWith(`/users/${USER_ID}/export`));
+  const eraseButton = (tree: unknown) =>
+    elements(tree).find((el) => "userId" in el.props && !("isSelf" in el.props));
+  const texts = (tree: unknown) =>
+    elements(tree).flatMap((el) =>
+      typeof el.props.children === "string" ? [el.props.children] : [],
+    );
+
+  const SUPERADMIN = {
+    ...ACCESS,
+    organizationId: null,
+    permissions: ["superuser", "admin.users.read"],
+  };
+  const ERASED_EMAIL = `erased+${USER_ID}@erased.invalid`;
+
+  async function render(access: object, row: object = {}) {
+    checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-admin", access });
+    canAccessUser.mockResolvedValue(true);
+    executeTakeFirst.mockResolvedValue({ ...USER_ROW, ...row });
+    return Page(params(USER_ID));
+  }
+
+  it("links the export only for a holder of admin.users.export", async () => {
+    expect(exportLink(await render(ACCESS))).toBeUndefined();
+    const link = exportLink(
+      await render({ ...ACCESS, permissions: ["admin.users.read", "admin.users.export"] }),
+    );
+    expect(link?.props).toMatchObject({ download: true });
+  });
+
+  it("offers erasure to a superadmin on a soft-deleted account", async () => {
+    const button = eraseButton(await render(SUPERADMIN, { status: "deactivated" }));
+    expect(button?.props).toMatchObject({ userId: USER_ID, email: "target@x.com" });
+  });
+
+  it("does not offer erasure on an account that is not soft-deleted", async () => {
+    expect(eraseButton(await render(SUPERADMIN, { status: "active" }))).toBeUndefined();
+  });
+
+  it("does not offer erasure without cross-org reach, whatever the permissions", async () => {
+    const orgAdmin = { ...ACCESS, permissions: ["admin.users.read", "admin.users.delete"] };
+    expect(eraseButton(await render(orgAdmin, { status: "deactivated" }))).toBeUndefined();
+  });
+
+  it("does not offer erasure for an agent service account", async () => {
+    const agent = {
+      status: "deactivated",
+      better_auth_user_id: "mcp-agent:5b0c7f6e-0c1e-4a57-9d3a-1f2e3d4c5b6a",
+    };
+    expect(eraseButton(await render(SUPERADMIN, agent))).toBeUndefined();
+  });
+
+  it("says an erased account is erased, and offers nothing more", async () => {
+    const tree = await render(SUPERADMIN, { status: "deactivated", primary_email: ERASED_EMAIL });
+    expect(eraseButton(tree)).toBeUndefined();
+    expect(texts(tree)).toContain("erasure.erasedNotice");
   });
 });

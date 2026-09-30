@@ -9,6 +9,7 @@ import {
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { restoreBetterAuthBan } from "@/lib/admin/auth-admin.server";
 import { mustUseRestore } from "@/lib/admin/deactivated-user";
+import { isErasedAccount, USER_ERASED_ERROR, USER_ERASED_STATUS } from "@/lib/admin/erased-user";
 import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -98,6 +99,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
 
   if (!mustUseRestore(target)) {
     return adminErrorResponse("not_deactivated", 409, request, {
+      requestId: guard.requestId,
+    });
+  }
+  // F-151: erasure is final. The account has no address, name or sign-in
+  // method left; restoring it would only put a nameless account back into
+  // every org's approval queue (`erased-user.ts`).
+  if (isErasedAccount(target)) {
+    return adminErrorResponse(USER_ERASED_ERROR, USER_ERASED_STATUS, request, {
       requestId: guard.requestId,
     });
   }

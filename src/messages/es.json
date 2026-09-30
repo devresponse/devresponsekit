@@ -506,6 +506,8 @@
         "revokeSessions": "Revocar todas las sesiones",
         "softDelete": "Eliminar (suave)",
         "restore": "Restaurar",
+        "exportData": "Exportar datos",
+        "erase": "Borrar datos personales",
         "confirm": "Confirmar",
         "cancel": "Cancelar",
         "impersonate": "Suplantar",
@@ -602,6 +604,16 @@
         "selfError": "No puede suplantarse a sí mismo.",
         "bannerLabel": "Está suplantando a {email}.",
         "stopErrorToast": "No se pudo detener la suplantación. Inténtalo de nuevo."
+      },
+      "erasure": {
+        "confirmTitle": "¿Borrar los datos personales de {email}?",
+        "confirmDescription": "Esta acción no se puede deshacer. La dirección de correo se sustituye por un seudónimo, se eliminan el nombre y la imagen, se borran todas las sesiones y métodos de inicio de sesión, se vacían los correos dirigidos a este usuario y se eliminan del registro de auditoría la dirección IP y el agente de usuario de sus propias solicitudes. Las filas de auditoría se conservan. Un usuario borrado no se puede restaurar.",
+        "confirmEmailLabel": "Escribe la dirección de correo del usuario para confirmar",
+        "confirmAck": "Entiendo que esto es permanente y se auditará.",
+        "eraseButton": "Borrar definitivamente",
+        "successToast": "Se han borrado los datos personales del usuario.",
+        "errorToast": "No se pudieron borrar los datos personales del usuario.",
+        "erasedNotice": "Los datos personales de este usuario se han borrado."
       },
       "groups": {
         "title": "Membresías de grupo",
@@ -1333,6 +1345,7 @@
     "no_changes": "No se proporcionaron cambios.",
     "not_deactivated": "El usuario no está desactivado.",
     "use_restore": "Este usuario tiene una eliminación suave. Restáuralo primero.",
+    "user_erased": "Los datos personales de este usuario se han borrado. Un usuario borrado no se puede restaurar.",
     "not_applicable_to_service_account": "Esta es la cuenta de servicio de un agente de IA, que no inicia sesión. Bloquéala aquí o revócala en Agents.",
     "not_found": "No encontrado.",
     "organization_not_found": "Organización no encontrada.",
@@ -1343,6 +1356,7 @@
     "role_organization_mismatch": "Este rol pertenece a otra organización.",
     "slug_taken": "Este identificador ya está en uso.",
     "soft_delete_failed": "El borrado lógico falló; reintenta.",
+    "erase_failed": "No se pudieron borrar los datos del usuario; reintenta.",
     "unauthenticated": "Se requiere inicio de sesión.",
     "unknown_resource": "Recurso desconocido.",
     "untrusted_origin": "El origen no es de confianza.",
@@ -1463,7 +1477,10 @@
       "noRoles": "Sin roles asignados.",
       "permissions": "Permisos",
       "permissionsDescription": "Todas las acciones que tienes permitido realizar actualmente, otorgadas por tus roles en la organización activa.",
-      "noPermissions": "No tienes permisos en la organización activa."
+      "noPermissions": "No tienes permisos en la organización activa.",
+      "dataExport": "Tus datos",
+      "dataExportDescription": "Descarga una copia de los datos que esta plataforma guarda sobre ti: tu perfil, organizaciones, roles, métodos de inicio de sesión, sesiones, claves API (sin sus secretos) y tu actividad en el registro de auditoría.",
+      "dataExportButton": "Descargar mis datos (JSON)"
     },
     "security": {
       "passwordTitle": "Contraseña",

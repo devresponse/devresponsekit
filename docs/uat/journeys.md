@@ -40,7 +40,7 @@ The `admin` role granted to the Limited Admin holds exactly `shell.view`, `admin
 - `src/proxy.ts` only redirects a request with **no session cookie** to `/sign-in` (`src/proxy.ts:190-201`); it is explicitly **not** the authorization boundary.
 - The real gate is `requireSecureSession` (`src/lib/auth-guard.ts:188-212`): it resolves the user's access context and calls `decideSecureAccess(status, membershipStatus)` (`src/lib/auth-status.ts:80-91`) — a `pending_approval` decision redirects to `/pending-approval`, a `blocked` decision to `/blocked`.
 - A user's effective permissions in their active org are `direct roles ∪ group-conferred roles`, deduped by a SQL `UNION` (`src/lib/auth-status.ts:361-378`); the `superuser` marker then expands to the full permission set (`src/lib/auth-status.ts:423-426`).
-- Admin screens gate on a specific key via `checkAdminPermissionServer(...)`; a denial returns **404 Not Found**, never 403, so a foreign resource's existence is never leaked (e.g. `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:41-44`; `canAccessOrg` → `not_found` at `src/app/api/administrator/organizations/[id]/members/route.ts:154-157`).
+- Admin screens gate on a specific key via `checkAdminPermissionServer(...)`; a denial returns **404 Not Found**, never 403, so a foreign resource's existence is never leaked (e.g. `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:45-48`; `canAccessOrg` → `not_found` at `src/app/api/administrator/organizations/[id]/members/route.ts:154-157`).
 - The admin nav only surfaces links whose required key the user holds (`ADMINISTRATOR_NAV_GROUPS` in `src/app/[locale]/(secure)/app/administrator/_components/administrator-navigation.ts`), and every nav key matches its destination page guard (verified per link in Journey 2).
 
 ---
@@ -53,7 +53,7 @@ The `admin` role granted to the Limited Admin holds exactly `shell.view`, `admin
 - **Note:** this journey follows the **platform-default** sign-up policy (verification + admin approval). An organization can configure a different policy on its **Authentication** tab (auto-active, invite-only, auto-approve domains), and an accepted invitation activates a user outright — see UAT-JOURNEY for invitations and [docs/auth-signup-policy.md](../auth-signup-policy.md).
 - **Code:** sign-up form `src/components/auth/email-password-sign-up-form.tsx`; the initial status is decided by the org's sign-up policy in `src/lib/user-provisioning.server.ts` (`decideInitialStatus`), defaulting to `pending_approval`; pending redirect `src/lib/auth-guard.ts:203-205`; approve action `src/lib/admin/user-actions.server.ts:181-185` (event `admin.user.approved`) requiring `admin.users.manage`; `/app` redirects to `/app/dashboard` (`src/app/[locale]/(secure)/app/page.tsx:8`).
 
-**Note (approve is a Users-list bulk action):** approval is performed from the **Users list** by selecting the pending row and choosing **Approve** (`src/app/[locale]/(secure)/app/administrator/users/_users-grid.tsx:239-242` → `POST /api/administrator/users/bulk`). The user **detail** page shows only a read-only status badge — there is no per-user approve button there (`src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:139-156`).
+**Note (approve is a Users-list bulk action):** approval is performed from the **Users list** by selecting the pending row and choosing **Approve** (`src/app/[locale]/(secure)/app/administrator/users/_users-grid.tsx:239-242` → `POST /api/administrator/users/bulk`). The user **detail** page shows only a read-only status badge — there is no per-user approve button there (`src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:155-183`).
 
 | # | Step (what to do) | Expected result |
 |---|---|---|
@@ -106,7 +106,7 @@ So bundle a role whose permissions include a `*.read` key (the **Administrator**
 - **Screens:** (admin) Users → user detail → **Roles** tab (assign, then remove) → confirm the effective permission changed.
 - **Personas:** **Org Admin** (`orgadmin@orga.local`) with `admin.roles.assign`; target **Member** `user4@orga.local`.
 - **Preconditions:** app seeded; the target holds only `member` initially.
-- **Code:** Roles tab panel `src/app/[locale]/(secure)/app/administrator/users/[userId]/_user-roles-panel.tsx`; assign/remove call `POST` / `DELETE /api/administrator/users/{userId}/app-roles` requiring `admin.roles.assign` (`src/app/api/administrator/users/[id]/app-roles/route.ts:95`); the assign control is gated on `canAssignRoles` (`users/[userId]/page.tsx:164`).
+- **Code:** Roles tab panel `src/app/[locale]/(secure)/app/administrator/users/[userId]/_user-roles-panel.tsx`; assign/remove call `POST` / `DELETE /api/administrator/users/{userId}/app-roles` requiring `admin.roles.assign` (`src/app/api/administrator/users/[id]/app-roles/route.ts:95`); the assign control is gated on `canAssignRoles` (`users/[userId]/page.tsx:191`).
 
 | # | Step (what to do) | Expected result |
 |---|---|---|

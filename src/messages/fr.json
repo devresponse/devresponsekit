@@ -506,6 +506,8 @@
         "revokeSessions": "Révoquer toutes les sessions",
         "softDelete": "Supprimer (soft)",
         "restore": "Restaurer",
+        "exportData": "Exporter les données",
+        "erase": "Effacer les données personnelles",
         "confirm": "Confirmer",
         "cancel": "Annuler",
         "impersonate": "Usurper l’identité",
@@ -602,6 +604,16 @@
         "selfError": "Vous ne pouvez pas usurper votre propre identité.",
         "bannerLabel": "Vous usurpez l’identité de {email}.",
         "stopErrorToast": "Impossible d’arrêter l’usurpation. Réessayez."
+      },
+      "erasure": {
+        "confirmTitle": "Effacer les données personnelles de {email} ?",
+        "confirmDescription": "Cette action est irréversible. L’adresse e-mail est remplacée par un pseudonyme, le nom et la photo sont supprimés, toutes les sessions et méthodes de connexion sont supprimées, les e-mails adressés à cet utilisateur sont vidés, et l’adresse IP et l’agent utilisateur de ses propres requêtes sont effacés du journal d’audit. Les lignes d’audit elles-mêmes sont conservées. Un utilisateur effacé ne peut pas être restauré.",
+        "confirmEmailLabel": "Saisissez l’adresse e-mail de l’utilisateur pour confirmer",
+        "confirmAck": "Je comprends que cette action est définitive et sera auditée.",
+        "eraseButton": "Effacer définitivement",
+        "successToast": "Les données personnelles de l’utilisateur ont été effacées.",
+        "errorToast": "Impossible d’effacer les données personnelles de l’utilisateur.",
+        "erasedNotice": "Les données personnelles de cet utilisateur ont été effacées."
       },
       "groups": {
         "title": "Appartenances aux groupes",
@@ -1333,6 +1345,7 @@
     "no_changes": "Aucune modification fournie.",
     "not_deactivated": "L’utilisateur n’est pas désactivé.",
     "use_restore": "Cet utilisateur a fait l’objet d’une suppression douce. Restaurez-le d’abord.",
+    "user_erased": "Les données personnelles de cet utilisateur ont été effacées. Un utilisateur effacé ne peut pas être restauré.",
     "not_applicable_to_service_account": "Il s’agit du compte de service d’un agent d’IA, qui ne se connecte pas. Bloquez-le ici ou révoquez-le dans Agents.",
     "not_found": "Introuvable.",
     "organization_not_found": "Organisation introuvable.",
@@ -1343,6 +1356,7 @@
     "role_organization_mismatch": "Ce rôle appartient à une autre organisation.",
     "slug_taken": "Ce slug est déjà utilisé.",
     "soft_delete_failed": "La suppression douce a échoué ; réessayez.",
+    "erase_failed": "L’effacement des données de l’utilisateur a échoué ; réessayez.",
     "unauthenticated": "Connexion requise.",
     "unknown_resource": "Ressource inconnue.",
     "untrusted_origin": "L’origine de la requête n’est pas approuvée.",
@@ -1463,7 +1477,10 @@
       "noRoles": "Aucun rôle attribué.",
       "permissions": "Autorisations",
       "permissionsDescription": "Toutes les actions que vous êtes actuellement autorisé à effectuer, accordées par vos rôles dans l'organisation active.",
-      "noPermissions": "Vous n'avez aucune autorisation dans l'organisation active."
+      "noPermissions": "Vous n'avez aucune autorisation dans l'organisation active.",
+      "dataExport": "Vos données",
+      "dataExportDescription": "Téléchargez une copie des données que cette plateforme détient à votre sujet : votre profil, vos organisations, vos rôles, vos méthodes de connexion, vos sessions, vos clés API (sans leurs secrets) et votre activité dans le journal d’audit.",
+      "dataExportButton": "Télécharger mes données (JSON)"
     },
     "security": {
       "passwordTitle": "Mot de passe",

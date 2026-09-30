@@ -230,7 +230,7 @@ _Source: `src/lib/api-auth/scopes.ts`._
 
 `ACCOUNT_SCOPES` (self-service, **not** `app_permissions` rows; gate the strictly self-scoped `/api/account/*` + `/api/v1/me/*` routes that need only an active membership):
 
-- `account.read` — `GET /api/v1/me`, `GET /api/v1/me/api-keys`
+- `account.read` — `GET /api/v1/me`, `GET /api/v1/me/api-keys` (and the guard call of `GET /api/account/export`, which then refuses every bearer credential: the data-subject export is cookie-only, F-151)
 - `account.profile.write` — `PATCH /api/account/profile`
 - `account.preferences.write` — `PUT /api/account/preferences`
 - `account.apikeys.manage` — `POST /api/v1/me/api-keys`, `DELETE`/`rotate` on `/api/v1/me/api-keys/[id]`

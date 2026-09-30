@@ -21,6 +21,7 @@ import {
   type BanSnapshot,
 } from "@/lib/admin/auth-admin.server";
 import { mustUseRestore, USE_RESTORE_ERROR } from "@/lib/admin/deactivated-user";
+import { isErasedAccount, USER_ERASED_ERROR } from "@/lib/admin/erased-user";
 import {
   AGENT_ACTIVATION_REASON,
   SHARED_TARGET_REASON,
@@ -777,6 +778,10 @@ async function performRestore(
   // console through this path.
   if (!mustUseRestore(target)) {
     return { ok: false, appUserId: target.appUserId, error: "not_deactivated" };
+  }
+  // F-151: an erased account stays deleted, as on the single-row route.
+  if (isErasedAccount(target)) {
+    return { ok: false, appUserId: target.appUserId, error: USER_ERASED_ERROR };
   }
   // F-57: an earlier ban the soft-delete replaced comes back. The record is a
   // database read, so it is outside the `auth_unban_failed` handling below.

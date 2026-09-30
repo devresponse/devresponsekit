@@ -335,9 +335,9 @@ i18n: run `en` + `uk`; labels, the password hint, status options, and error mess
 
 ## ADMIN-USERS-DETAIL — User detail (header + tabs container)
 
-- Route: `/app/administrator/users/[userId]` · Example URL: `/en/app/administrator/users/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:34`
-- Purpose: The per-user workspace: a metadata header (name, email, status badge, optional Impersonate button) plus a tabbed container — Overview, Roles, Groups, Memberships, Sessions, and (permission-gated) Audit.
-- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:41`); the `userId` must be a UUID (`:46`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:75`, `access-scope.server.ts:386`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.users.impersonate` and an Active account (Impersonate button, F-148) — `[userId]/page.tsx:90`–`:110`. A tab whose API demands MORE than `admin.users.read` is rendered only for a caller who holds that key (review #76): **Groups** needs `admin.groups.read`, **Sessions** needs `admin.users.sessions`, **Audit** needs `admin.audit.read` (`_user-detail-tabs.tsx:82`,`:84`,`:85`). No tab in the bar leads to a 403.
+- Route: `/app/administrator/users/[userId]` · Example URL: `/en/app/administrator/users/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:38`
+- Purpose: The per-user workspace: a metadata header (name, email, status badge, optional **Export data**, **Erase personal data** and **Impersonate** buttons) plus a tabbed container — Overview, Roles, Groups, Memberships, Sessions, and (permission-gated) Audit.
+- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:45`); the `userId` must be a UUID (`:50`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:79`, `access-scope.server.ts:386`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.users.impersonate` and an Active account (Impersonate button, F-148) — `[userId]/page.tsx:94`–`:114`; `admin.users.export` (Export data), and cross-org reach on a soft-deleted account not yet erased (Erase personal data) — `:128`–`:134`. A tab whose API demands MORE than `admin.users.read` is rendered only for a caller who holds that key (review #76): **Groups** needs `admin.groups.read`, **Sessions** needs `admin.users.sessions`, **Audit** needs `admin.audit.read` (`_user-detail-tabs.tsx:82`,`:84`,`:85`). No tab in the bar leads to a 403.
 - Access matrix:
   - Member → **404**.
   - Limited Admin → header + Overview/Roles/Memberships tabs, **plus** the Audit tab (holds `admin.audit.read`). The **Groups** and **Sessions** tabs are **absent** — the `admin` role holds neither `admin.groups.read` nor `admin.users.sessions` (review #76). Roles/Memberships show **no** mutate buttons; the Impersonate button is absent.
@@ -364,16 +364,31 @@ User stories
     | 1 | Sign in as `superuser@orga.local`; open an `org-b` user's detail; copy the UUID from the URL. | You have a valid `org-b` user id. |
     | 2 | Sign out; sign in as `orgadmin@orga.local`. | ORG A console. |
     | 3 | Paste `/en/app/administrator/users/<org-b-uuid>` into the address bar. | **Not Found** (404). Not "Forbidden". |
-    | 4 | Try a made-up UUID and a non-UUID string. | Both → **Not Found** (`[userId]/page.tsx:46`). |
+    | 4 | Try a made-up UUID and a non-UUID string. | Both → **Not Found** (`[userId]/page.tsx:50`). |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+
+- ADMIN-USERS-DETAIL-S3 — As a Superadmin, I want to answer a former member's access and erasure requests without touching the database (F-151).
+  - Acceptance criteria: Given a user, when I choose **Export data**, then their JSON document downloads; given the user is soft-deleted, when I choose **Erase personal data**, tick the acknowledgement and type their address, then their address, name, sessions and sign-in methods are gone and every audit row about them remains.
+  - UAT script:
+    | # | Step (what to do) | Expected result |
+    |---|---|---|
+    | 1 | Sign in as `superuser@orga.local`; open `user5@orga.local`'s detail; click **Export data**. | A `user-data-<id>-<yyyymmdd>.json` file downloads, `organizationScope` is `null`. |
+    | 2 | Soft-delete the user (Users list → row → **Delete (soft)**); reopen the detail page. | **Erase personal data** now shows in the header. |
+    | 3 | Click it; type a different address. | **Erase permanently** stays disabled until the box is ticked AND the address matches. |
+    | 4 | Type the address, tick the box, confirm. | The page refreshes: the header shows `erased+<id>@erased.invalid` and "This user's personal data has been erased.", and no erase button. |
+    | 5 | Open the Audit tab. | Every earlier row is still there; the newest are the function's own `db.user.pseudonymised` and `admin.user.erased`. Rows the user made carry no IP address. |
+    | 6 | Try **Restore** on the user. | **409** `user_erased`. |
+    | 7 | As `orgadmin@orga.local`, call `POST /api/administrator/users/<id>/erase`. | **403**, with an `administrator.access.denied` row (reason `cross_org_reach_required`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Non-UUID or unknown id → 404 (`page.tsx:46`, `:69`).
-2. Cross-tenant id → 404 via `canAccessUser` (`page.tsx:75`), not 403.
+1. Non-UUID or unknown id → 404 (`page.tsx:50`, `:73`).
+2. Cross-tenant id → 404 via `canAccessUser` (`page.tsx:79`), not 403.
 3. A soft-deleted (`deactivated`) user shows a warning panel on Overview with the deactivation timestamp/actor/reason (`_user-detail-tabs.tsx:107`).
+4. F-151: **Export data** is shown only to a holder of `admin.users.export` (superadmins hold it); for a user shared with another org, or one who outranks the caller, the download answers 403. **Erase personal data** is shown only to a superadmin (cross-org reach) on a soft-deleted user who is not yet erased and is not an agent's service account. After an erasure the header shows the `erased+<id>@erased.invalid` address and says the data was erased, and **Restore** answers 409 `user_erased` ([Admin Manager, Data export and erasure](../admin-manager.md#data-export-and-erasure-f-151)).
 
 Accessibility: tabs follow the tablist pattern (arrow-key navigation, roving focus); the header actions are reachable by keyboard. No axe violations.
-i18n: run `en` + `uk`; tab labels, field labels, and dates localize; status uses the `status.*` catalog (unknown enum values render verbatim, `page.tsx:220`).
+i18n: run `en` + `uk`; tab labels, field labels, and dates localize; status uses the `status.*` catalog (unknown enum values render verbatim, `page.tsx:247`).
 
 ---
 
@@ -410,7 +425,7 @@ i18n: run `en` + `uk`; field labels and the created/updated line localize; the i
 
 - Route: `/app/administrator/users/[userId]` (Roles tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-roles-panel.tsx:48`
 - Purpose: Lists the application role assignments the user holds (role name, key, organization, assigned date). With the right permission, the operator can assign a role (dialog + picker) or remove one.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:41`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:90`, `_user-roles-panel.tsx:182`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:105`, `:242`). The **Assign** button also needs `admin.roles.read`, because its picker lists roles from `GET /api/administrator/roles`; Remove does not. The role name links to the role page only for a holder of `admin.roles.read`, and the organization to its page only for a holder of `admin.orgs.read`; otherwise both are plain text (F-67).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:41`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:94`, `_user-roles-panel.tsx:182`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:105`, `:242`). The **Assign** button also needs `admin.roles.read`, because its picker lists roles from `GET /api/administrator/roles`; Remove does not. The role name links to the role page only for a holder of `admin.roles.read`, and the organization to its page only for a holder of `admin.orgs.read`; otherwise both are plain text (F-67).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **sees the assignments list** (has `admin.users.read`) but **no** Assign button and **no** per-row Remove (lacks `admin.roles.assign`); role and organization names are plain text (lacks `admin.roles.read` and `admin.orgs.read`, F-67).
@@ -458,7 +473,7 @@ i18n: run `en` + `uk`; column headers, buttons, dialog text, and error messages 
 
 - Route: `/app/administrator/users/[userId]` (Groups tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-groups-panel.tsx:37`
 - Purpose: Lists the groups the user belongs to and, with permission, lets the operator add the user to a group (dialog + picker) or remove them. Group membership confers the union of the group's roles' permissions (ADR-0002).
-- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:38`), and the tab TRIGGER is gated on the same key so a caller without it never reaches the panel (`_user-detail-tabs.tsx:82`, review #76). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:91`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:86`, `:180`).
+- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:38`), and the tab TRIGGER is gated on the same key so a caller without it never reaches the panel (`_user-detail-tabs.tsx:82`, review #76). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:95`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:86`, `:180`).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Groups tab is **not rendered** at all: the `admin` role lacks `admin.groups.read`, which now gates the tab trigger (review #76). The API is still the boundary — a hand-made `GET …/groups` for that user answers 403.
@@ -503,7 +518,7 @@ i18n: run `en` + `uk`; title, buttons, dialog, empty and error text localize.
 
 - Route: `/app/administrator/users/[userId]` (Memberships tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-memberships-panel.tsx:29`
 - Purpose: Lists the user's organization memberships (org slug/name, status, source provider, joined date). With permission, the operator can remove a membership.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:68`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:92`, `_user-memberships-panel.tsx:120`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:434`). The organization slug links to the organization page only for a holder of `admin.orgs.read`, that page's guard, and is plain text otherwise (F-67).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:68`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:96`, `_user-memberships-panel.tsx:120`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:434`). The organization slug links to the organization page only for a holder of `admin.orgs.read`, that page's guard, and is plain text otherwise (F-67).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → sees the memberships list (`admin.users.read`) but **no** Remove action (lacks `admin.users.update`), and org slugs are plain text (lacks `admin.orgs.read`, F-67).
@@ -593,7 +608,7 @@ i18n: run `en` + `uk`; expiry/IP/user-agent labels, the empty message and both c
 
 - Route: `/app/administrator/users/[userId]` (Audit tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-audit-panel.tsx:12`
 - Purpose: The user-scoped audit trail — `app_audit_events` rows about this user — rendered by the shared audit grid with its global filter toolbar hidden (the view is already scoped). Each row opens a detail sheet with full metadata.
-- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:103`, `_user-detail-tabs.tsx:94`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:41`).
+- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:107`, `_user-detail-tabs.tsx:94`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:41`).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **Audit tab present and working** (the `admin` role holds `admin.audit.read`), scoped to ORG A.
@@ -696,6 +711,8 @@ Legend: **view** = can open/read the screen; **act** = can perform the screen's 
 | — Sessions tab | `admin.users.sessions` (read + act) | 404 | tab absent (#76); API 403 | view + act (shared-target caveat) | view + act |
 | — Audit tab | `admin.audit.read` | 404 | view (tab present) | view | view |
 | Impersonate | `admin.users.impersonate` | 404 | button absent | act | act |
+| Export data (F-151) | `admin.users.export` | 404 | button absent | act (own org; shared or outranking target 403) | act |
+| Erase personal data (F-151) | `admin.users.delete` + cross-org reach, soft-deleted target | 404 | button absent | button absent; API 403 | act |
 
 ## Coverage checklist (this file's inventory)
 
@@ -703,7 +720,7 @@ Legend: **view** = can open/read the screen; **act** = can perform the screen's 
 - [x] Console overview — happy (S1/S2) + partial-permission (S3) + empty state.
 - [x] Users list — search/filter/sort (S1), bulk approve (S2), partial-permission + refused ban (S3), CSV export (S4), 404/scoping/rate-limit negatives.
 - [x] Create user — happy (S1), validation incl. 409 (S2), 404 for non-creator (S3), rate-limit + concurrency.
-- [x] User detail — happy (S1) + cross-tenant 404 (S2), non-UUID negative.
+- [x] User detail — happy (S1) + cross-tenant 404 (S2), non-UUID negative, data export and erasure (S3).
 - [x] Overview tab, Roles tab, Groups tab, Memberships tab, Sessions tab, Audit tab — each with a can/cannot persona pair and its own negatives.
 - [x] Impersonation journey — start/stop (S1) + escalation refusals (S2).
 - [x] 404-not-403 asserted at both page level (Member/Limited Admin) and resource level (cross-tenant id).

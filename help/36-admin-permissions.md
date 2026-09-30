@@ -21,7 +21,7 @@ The catalog of permission keys that roles are built from — the single source o
 ## Key elements
 - **New permission** button.
 - Table: Key, Description, Roles using this (count), and per-row **Edit** / **Delete**.
-- 38 seeded keys covering API keys, apps, audit, OAuth clients, email, groups, orgs, permissions, roles, and users (e.g. `admin.users.impersonate` — "Impersonate another user"), plus `audit.view`, `shell.view`, and `superuser`.
+- 39 seeded keys covering API keys, apps, audit, OAuth clients, email, groups, orgs, permissions, roles, and users (e.g. `admin.users.impersonate` — "Impersonate another user"), plus `audit.view`, `shell.view`, and `superuser`.
 
 ## Actions available
 - Create, edit, or delete permission keys (`admin.permissions.manage` plus cross-organization reach) — *not exercised.*

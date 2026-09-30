@@ -265,6 +265,47 @@ See [Troubleshooting](./troubleshooting.md) for operational issues.
 
 **Rolling back.** A code rollback needs nothing from the database: the previous build maps the global-key conflict to `409 key_taken`, moves the default flag clear-then-set as it always has, and never reads the tokens, though it stores them again at sign-in, so repeat step 5 after rolling forward. The scrub cannot be undone and needs no undo; the next sign-in works as before. If an index itself must go in an emergency, `drop index if exists auth.<name>` by hand and leave the ledger row: re-create it from the file's own statement, or remove it for good with a new forward migration (see **Rollback** above).
 
+### Migration 0008
+
+`0008-user-data-export-erasure.sql` (2026-09 review, F-151) adds the `admin.users.export` permission, the erasure function `app_users_pseudonymise(uuid)` (`SECURITY DEFINER`, owned by the migrating role, executable by `<DB_SCHEMA>_runtime` and not by `PUBLIC`), and a narrow exemption in the audit table's append-only trigger that lets only that function replace an erased user's `email`, `metadata.email`, `ip_address` and `user_agent` ([Admin Manager, Data export and erasure](./admin-manager.md#data-export-and-erasure-f-151)). It is in `REQUIRED_CORE_MIGRATIONS` (the erase route calls the function), so apply it **before** merging (§1.1). It is an insert, two `CREATE OR REPLACE FUNCTION` statements and a grant: no table lock, nothing to backfill, and the previous build runs unchanged against it (it never calls the function, never sets the marker, and the trigger keeps its two older exemptions verbatim). `auth` below is `DB_SCHEMA`.
+
+1. **Preflight (read-only), as the role that will apply it.** The function runs with that role's privileges: it writes Better Auth's tables, and the trigger admits its audit update only when that role owns `app_audit_events`. Both hold when `pnpm db:auth:migrate` and `pnpm db:app:migrate` run as the same role, which is the default. Every row must say `true`:
+
+   ```sql
+   select t, has_table_privilege(format('auth.%I', t), 'UPDATE')
+             and has_table_privilege(format('auth.%I', t), 'DELETE') as ok
+     from unnest(array['user', 'session', 'account', 'verification']) t;
+   select pg_get_userbyid(relowner) = current_user as owns_audit_table
+     from pg_class where oid = 'auth.app_audit_events'::regclass;
+   ```
+
+   A `false`: grant `update, delete` on those tables to the role (the migration prints the statement as a `NOTICE` and still applies), or apply the migration as the audit table's owner. Nothing else can fail on data.
+
+2. **Apply** with `pnpm db:app:migrate` (or `drk-deploy migrate`, §1.3) against the direct production `DATABASE_URL`, from the PR's pushed branch. The run ends with `[migrate] done`. A `[migrate] notice [0008] the migrating role … cannot UPDATE and DELETE Better Auth table(s)` line means step 1 found a gap: close it before anyone erases a user, or the erase route answers `500 erase_failed`.
+
+3. **Verify**, then merge:
+
+   ```sql
+   select id, checksum from auth.app_schema_migrations
+    where id = '0008-user-data-export-erasure.sql';
+   select key from auth.app_permissions where key = 'admin.users.export';     -- 1 row
+   select prosecdef, proconfig from pg_proc
+    where oid = 'auth.app_users_pseudonymise(uuid)'::regprocedure;            -- t, {search_path=...}
+   select has_function_privilege('auth_runtime', 'auth.app_users_pseudonymise(uuid)', 'execute'),
+          has_function_privilege('public', 'auth.app_users_pseudonymise(uuid)', 'execute');  -- t, f
+   -- The trigger still refuses an ordinary UPDATE (on a table with at least one row):
+   begin;
+   update auth.app_audit_events set reason = reason
+    where id = (select id from auth.app_audit_events limit 1);  -- ERROR: app_audit_events is append-only
+   rollback;
+   ```
+
+   (`auth_runtime` exists only where 0005 could create it; see §8.) Once the new build is live, `GET /api/health/ready` answers **200** (§4).
+
+4. **Grant the export (optional).** Until a role holds `admin.users.export`, only superadmins can export another user; each user can always export their own data from Account → Overview. Add the key to the roles that answer access requests (Administrator → Roles).
+
+**Rolling back.** A code rollback needs nothing from the database: the previous build does not know the permission (a role holding it keeps an unused key) and never calls the function. An erasure cannot be undone and has nothing to roll back; restore from a snapshot only if a request was erased by mistake (see **Rollback** above). If the function itself must be disabled in an emergency, `revoke execute on function auth.app_users_pseudonymise(uuid) from auth_runtime;` by hand (a runtime connected as the owner can still call it; drop it instead) and leave the ledger row: the erase route then answers `500 erase_failed`. Put it back by re-creating it from the file's own statement, or remove it for good with a new forward migration.
+
 ---
 
 ## 6. Self-host / container
@@ -283,8 +324,8 @@ CI is **[`.github/workflows/`](../.github/workflows/)** (source of truth). [`ci.
 
 By default the application connects as the same role that runs migrations and owns every table (Neon's `neondb_owner`, the local `devresponse`). That role can do anything to the schema — including deleting audit rows — so the audit log's append-only trigger is a guard against accidents, not a privilege boundary. Migration `0005-integrity-constraints.sql` (review #83) splits the two:
 
-- **Owner / migration role** — whatever `DATABASE_URL` you run `pnpm db:app:migrate` / `db:provision` with. Owns the tables, the trigger and the `SECURITY DEFINER` retention function `app_audit_events_prune(days, batch)`.
-- **Runtime role `<DB_SCHEMA>_runtime`** (`auth_runtime` by default) — created by 0005 as `NOLOGIN` with **no password**, holding `USAGE` on the schema, `SELECT/INSERT/UPDATE/DELETE` on every table **except** `UPDATE/DELETE/TRUNCATE` on `app_audit_events` (`INSERT`/`SELECT` only), and `EXECUTE` on the retention function. Default privileges are set so tables a later migration creates are covered automatically. The append-only trigger permits a `DELETE` only when the **effective** role is the table owner _and_ the transaction-local `app.audit_retention` marker is on — both hold inside that function whoever calls it; the owner half never holds for the runtime role — so a stolen runtime credential cannot purge or rewrite audit history even by setting the marker itself. Until you switch, the app connects as the owner and a session that sets the marker _can_ delete: the trigger guards against accidents, the role switch is the privilege boundary. The function itself clamps the requested window to a **30-day floor** and each batch to 10 000 rows, so even through its one sanctioned path the runtime credential cannot purge recent history.
+- **Owner / migration role** — whatever `DATABASE_URL` you run `pnpm db:app:migrate` / `db:provision` with. Owns the tables, the trigger, the `SECURITY DEFINER` retention function `app_audit_events_prune(days, batch)` and, from 0008, the `SECURITY DEFINER` erasure function `app_users_pseudonymise(app_user_id)`.
+- **Runtime role `<DB_SCHEMA>_runtime`** (`auth_runtime` by default) — created by 0005 as `NOLOGIN` with **no password**, holding `USAGE` on the schema, `SELECT/INSERT/UPDATE/DELETE` on every table **except** `UPDATE/DELETE/TRUNCATE` on `app_audit_events` (`INSERT`/`SELECT` only), and `EXECUTE` on the retention and erasure functions. Default privileges are set so tables a later migration creates are covered automatically. The append-only trigger permits a `DELETE` only when the **effective** role is the table owner _and_ the transaction-local `app.audit_retention` marker is on — both hold inside that function whoever calls it; the owner half never holds for the runtime role — so a stolen runtime credential cannot purge audit history even by setting the marker itself. The one UPDATE besides the org-deletion tombstone follows the same rule: the erasure function's pseudonymisation of an erased user's address (the `email` column and an existing `metadata.email`), IP address and user agent, admitted only for the owner with the `app.audit_pseudonymise` marker on (F-151). That function has no age floor, and the runtime role may deactivate an account itself, so through it a stolen runtime credential _can_ rewrite part of the trail: it can pseudonymise the rows that name an account and clear the IP address and user agent of that account's requests, recent ones included. It cannot delete a row or change anything else, and every call writes a `db.user.pseudonymised` audit row naming the account, the database login and its `SET ROLE`, which the credential cannot remove. Until you switch, the app connects as the owner and a session that sets the marker _can_ delete: the trigger guards against accidents, the role switch is the privilege boundary. The function itself clamps the requested window to a **30-day floor** and each batch to 10 000 rows, so even through its one sanctioned path the runtime credential cannot purge recent history.
 
 Nothing changes until you switch the app's connection string. To adopt it, once, against the **direct** endpoint as the owner role:
 

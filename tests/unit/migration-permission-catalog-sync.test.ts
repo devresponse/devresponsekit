@@ -52,7 +52,7 @@ describe("core migrations ↔ ADMIN_PERMISSION_CATALOG sync", () => {
   const seeded = collectSeededPermissions();
 
   it("parses a plausible seed (guards against the SQL shape drifting past the regex)", () => {
-    // 35 catalog keys + the superuser marker; a rewrite of the insert
+    // 36 catalog keys + the superuser marker; a rewrite of the insert
     // syntax that this parser no longer matches shows up as a collapse here.
     expect(seeded.size).toBeGreaterThanOrEqual(ADMIN_PERMISSION_CATALOG.length + 1);
   });

@@ -169,9 +169,9 @@ All Account pages live under `/[locale]/app/account/**`, each guarded by `requir
 
 ### UAT-ACCOUNT-OVERVIEW — Account overview
 
-- Route: `/app/account`  ·  Example URL: `/en/app/account`  ·  Code: `src/app/[locale]/(secure)/app/account/page.tsx:31`
-- Purpose: A read-only summary of the caller's account: identity (display name, email, status, member-since), organization memberships, roles, and the full effective permission list. Editable areas live in the sub-sections; status/memberships/roles are admin-controlled and display-only here (`src/app/[locale]/(secure)/app/account/page.tsx:14`).
-- Guard / who can access: `requireSecureSession(locale, "/{locale}/app/account")`. Additionally `notFound()` if the session has no provisioned `appUserId` or the overview row is missing (`src/app/[locale]/(secure)/app/account/page.tsx:40`, `:49`).
+- Route: `/app/account`  ·  Example URL: `/en/app/account`  ·  Code: `src/app/[locale]/(secure)/app/account/page.tsx:32`
+- Purpose: A read-only summary of the caller's account: identity (display name, email, status, member-since), organization memberships, roles, and the full effective permission list. Editable areas live in the sub-sections; status/memberships/roles are admin-controlled and display-only here (`src/app/[locale]/(secure)/app/account/page.tsx:15`).
+- Guard / who can access: `requireSecureSession(locale, "/{locale}/app/account")`. Additionally `notFound()` if the session has no provisioned `appUserId` or the overview row is missing (`src/app/[locale]/(secure)/app/account/page.tsx:41`, `:50`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away — cannot see.
   - Member / Limited Admin / Org Admin / Superadmin: each sees **their own** overview only (data is keyed on `access.appUserId`). No cross-account view exists.
@@ -201,15 +201,27 @@ User stories
     | 3 | If you belong to no org, read the Organizations card. | It shows **You are not a member of any organization.** |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
+- UAT-ACCOUNT-OVERVIEW-S3 — As a Member, I want to download everything the platform holds about me, so that I can answer my own access request (F-151).
+  - Acceptance criteria: Given I am signed in as myself, when I choose **Download my data (JSON)** on the overview, then a `user-data-<id>-<yyyymmdd>.json` file downloads with my profile, organizations, roles, sign-in methods, sessions, API keys and audit activity, and no token, password hash or key secret.
+  - UAT script:
+    | # | Step (what to do) | Expected result |
+    |---|---|---|
+    | 1 | Sign in as `user5@orga.local`; open `/en/app/account`. | A **Your data** card with a **Download my data (JSON)** button is shown below Permissions. |
+    | 2 | Click the button. | A JSON file downloads; `profile.primaryEmail` is your address, `sessions` lists this browser's session with its IP address, and the text contains no session token. |
+    | 3 | Click it three more times quickly. | The fourth answers **429** (export tier: 3 burst, one per 20 s). |
+    | 4 | As an admin, open Administrator → Audit and filter `account.data_exported`. | One row per download, with section counts in its metadata and none of the data. |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+
 Negative & edge cases
 - Out-of-scope access: there is no id in the URL, so cross-account viewing is impossible by construction; the page is always the caller's own record.
+- The data export is the caller's own and a cookie session's only: while impersonating, the **Your data** card is not shown and `GET /api/account/export` answers 403; an API key or JWT gets 403 as well (`src/app/api/account/export/route.ts`).
 - While an admin is **impersonating** the user, the Organizations card and the Roles block list only the organizations the admin can reach, as the org switcher does (F-65). As `orgadmin@orga.local` (ORG A only), impersonate `multi1@shared.local` (a member of all three orgs) and open `/en/app/account`: only **ORG A** and the roles held there are listed. Signed in as `multi1` themselves, the same page lists all three. A Superadmin impersonator sees every org, since their reach is not confined.
-- Not-provisioned session (no `appUserId`) → `notFound()` (404), not an error page (`src/app/[locale]/(secure)/app/account/page.tsx:40`).
-- The status badge color varies: `active` is neutral; `blocked`/`suspended`/`deactivated` are destructive (`src/app/[locale]/(secure)/app/account/page.tsx:23`) — though a blocked user cannot reach this page, so this mainly affects a per-org membership status.
+- Not-provisioned session (no `appUserId`) → `notFound()` (404), not an error page (`src/app/[locale]/(secure)/app/account/page.tsx:41`).
+- The status badge color varies: `active` is neutral; `blocked`/`suspended`/`deactivated` are destructive (`src/app/[locale]/(secure)/app/account/page.tsx:24`) — though a blocked user cannot reach this page, so this mainly affects a per-org membership status.
 - No loading skeleton (server-rendered); no inline error (read-only).
 
-Accessibility: Content is a set of definition lists (`<dl>`/`<dt>`/`<dd>`) and cards; status is conveyed by badge text, not color alone. Keyboard users can read top-to-bottom; no interactive controls to trap.
-i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the status badge, the "Member since" date (the app formatter's long date, `src/app/[locale]/(secure)/app/account/page.tsx:77`; a date format saved in Preferences replaces it, see UAT-ACCOUNT-PREFERENCES-S2), and every card title localize; no raw keys.
+Accessibility: Content is a set of definition lists (`<dl>`/`<dt>`/`<dd>`) and cards; status is conveyed by badge text, not color alone. Keyboard users can read top-to-bottom; the one control, **Download my data (JSON)**, is a link reachable by Tab.
+i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the status badge, the "Member since" date (the app formatter's long date, `src/app/[locale]/(secure)/app/account/page.tsx:78`; a date format saved in Preferences replaces it, see UAT-ACCOUNT-PREFERENCES-S2), and every card title localize; no raw keys.
 
 ### UAT-ACCOUNT-PROFILE — Profile
 

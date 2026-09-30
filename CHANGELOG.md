@@ -63,6 +63,14 @@ For a deployment running 2.0.0.
    the old files stay in the public repository's history (added in #346,
    retaken in #347). Revoke that key on the demo if it is still active, and
    decide whether to purge the old `help/screenshots/*.png` from history.
+4. **Apply migration `0008` before the deploy.** Follow
+   [docs/deployment.md → Migration 0008](docs/deployment.md#migration-0008)
+   (F-151): a read-only preflight that the migrating role can write Better
+   Auth's tables and owns the audit table, the apply, and the checks. `0008`
+   is a required core migration, so until it is in the ledger
+   `GET /api/health/ready` answers `503 schema_behind`. Vercel runs no
+   migrations: apply it by hand, before the merge that needs it
+   ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
 
 ### Security fixes the satellite forks must port
 
@@ -77,6 +85,18 @@ of 2.0.0's list below. Each entry names what to carry over.
   `isSessionPastLifetime`. Until a fork carries them, its handoff sessions
   still roll forever, and disabling its app on the kit signs no one out,
   because the kit finds a handoff session by its token.
+
+### Added
+
+- **Data-subject export and erasure (F-151).** A user downloads their own
+  data as JSON from Account → Overview (`GET /api/account/export`); an
+  administrator holding the new `admin.users.export` permission downloads a
+  user's from the detail page. A superadmin erases a soft-deleted user's
+  personal data with `POST /api/administrator/users/[id]/erase`, which runs
+  the `SECURITY DEFINER` function `app_users_pseudonymise` from migration
+  `0008`: addresses become a pseudonym, sessions and sign-in methods go, and
+  the audit trail keeps every row. See operator action 4 and
+  [docs/admin-manager.md → Data export and erasure](docs/admin-manager.md#data-export-and-erasure-f-151).
 
 ### Changed
 

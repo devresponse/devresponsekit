@@ -223,7 +223,7 @@ export function reconcileLedgerChecksum(
  * not part of the traced serverless/standalone bundle, and the list must
  * describe what THIS build expects, not whatever happens to be on disk.
  * `tests/unit/migration-plan.test.ts` pins it to the actual core `*.sql`
- * files, so adding the next core file (0008) without extending this list fails CI.
+ * files, so adding the next core file (0009) without extending this list fails CI.
  */
 export const REQUIRED_CORE_MIGRATIONS: readonly string[] = [
   "0001-initial-schema.sql",
@@ -233,6 +233,7 @@ export const REQUIRED_CORE_MIGRATIONS: readonly string[] = [
   "0005-integrity-constraints.sql",
   "0006-rate-limit-buckets.sql",
   "0007-uniqueness-search-indexes-token-scrub.sql",
+  "0008-user-data-export-erasure.sql",
 ];
 
 /**

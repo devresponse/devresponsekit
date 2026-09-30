@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { getImpersonatorId, requireSecureSession } from "@/lib/auth-guard";
@@ -125,6 +126,25 @@ export default async function AccountOverviewPage({
         description={t("overview.permissionsDescription")}
         emptyLabel={t("overview.noPermissions")}
       />
+
+      {/* F-151: the person's own data-subject export. A plain link: the route
+          is a cookie-session GET that answers with an attachment. It refuses
+          an impersonated session (IMP-1), so the card is not offered there. */}
+      {impersonatorId ? null : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">{t("overview.dataExport")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-muted-foreground text-sm">{t("overview.dataExportDescription")}</p>
+            <Button asChild variant="outline" size="sm">
+              <a href="/api/account/export" download>
+                {t("overview.dataExportButton")}
+              </a>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </section>
   );
 }

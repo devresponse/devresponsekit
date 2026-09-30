@@ -573,7 +573,7 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  * `superuser` role is ORG-SCOPED to the default organization, so every one of
  * those rows is reachable by a delegated admin OF THAT ORG — someone holding
  * `admin.roles.assign`, `admin.roles.update`, `admin.users.update` or
- * `admin.orgs.update` there. Revoking the assignment, stripping the marker off
+ * `admin.orgs.manage` there. Revoking the assignment, stripping the marker off
  * the role, or blocking/deleting the membership each destroy the authority
  * PLATFORM-WIDE, and no org admin can confer it back (AUTHZ-3 forbids
  * conferring a permission you do not hold). The platform could therefore be

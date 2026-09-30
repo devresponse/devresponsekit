@@ -119,6 +119,7 @@ describe("organization Settings tab (F-39)", () => {
   const renderOrg = (org: OrganizationDetailJson) => (
     <OrganizationDetailTabs
       org={org}
+      canManage
       canUpdate
       canEditSettings
       canReadRoles
@@ -238,6 +239,7 @@ describe("organization Settings tab — SUPERADMIN-only writes (F-66)", () => {
           memberCount: 3,
           bindingCount: 0,
         }}
+        canManage
         canUpdate
         canEditSettings={false}
         canReadRoles
@@ -277,6 +279,7 @@ describe("organization Authentication tab (F-39)", () => {
   const renderOrg = (authSettings: AuthPolicySettingsJson | null) => (
     <OrganizationDetailTabs
       org={ORG}
+      canManage
       canUpdate
       canEditSettings
       canReadRoles

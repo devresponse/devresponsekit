@@ -278,6 +278,7 @@ const SUPERADMIN_GRANT = {
       "admin.roles.update",
       "admin.users.update",
       "admin.orgs.update",
+      "admin.orgs.manage",
       SUPERADMIN_PERMISSION,
     ],
     orgBound: false,

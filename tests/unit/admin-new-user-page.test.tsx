@@ -13,7 +13,7 @@ import type * as PageModule from "@/app/[locale]/(secure)/app/administrator/user
  * prop; this suite pins the prop the page passes. `hasCrossOrgReach` is the
  * real one. The initial status follows the same rule (F-480): a confined
  * creator's user joins its org, so the API refuses every create from one
- * without `admin.users.update` or `admin.orgs.update`, and an Active one
+ * without `admin.users.update` or `admin.orgs.manage`, and an Active one
  * without `admin.users.manage` as well. The page asks the API's own predicate
  * (`mayCreateUser`, real here): it shows a notice in place of a form whose
  * every submit would answer 403, and offers Active only when it may.
@@ -124,10 +124,10 @@ describe("new-user page — the platform role is offered with the API's predicat
     expect(formProps(await Page(params))).toMatchObject({ canCreateActive: true });
   });
 
-  it("offers the form (Pending only) with admin.orgs.update as the membership permission", async () => {
+  it("offers the form (Pending only) with admin.orgs.manage as the membership permission", async () => {
     checkAdminPermissionServer.mockResolvedValue({
       betterAuthUserId: "ba-1",
-      access: { ...ORG_ADMIN, permissions: ["admin.users.create", "admin.orgs.update"] },
+      access: { ...ORG_ADMIN, permissions: ["admin.users.create", "admin.orgs.manage"] },
     });
     expect(formProps(await Page(params))).toMatchObject({ canCreateActive: false });
   });
@@ -139,6 +139,8 @@ describe("new-user page — the platform role is offered with the API's predicat
   it.each([
     ["create only", ["admin.users.read", "admin.users.create"]],
     ["create and approve, no membership permission", ["admin.users.create", "admin.users.manage"]],
+    // F-69: `admin.orgs.update` is the org's settings, not its members.
+    ["create and admin.orgs.update (F-69)", ["admin.users.create", "admin.orgs.update"]],
   ])(
     "shows a notice instead of the form to an org admin holding %s",
     async (_label, permissions) => {

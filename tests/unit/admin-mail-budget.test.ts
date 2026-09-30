@@ -69,7 +69,7 @@ vi.mock("@/lib/audit.server", () => ({
 const ORG = "11111111-2222-4333-8444-555555555555";
 
 const orgAdmin = {
-  access: { permissions: ["admin.orgs.update"], organizationId: ORG },
+  access: { permissions: ["admin.orgs.manage"], organizationId: ORG },
   betterAuthUserId: "ba-admin",
   requestId: "req-1",
 };

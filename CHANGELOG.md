@@ -18,7 +18,48 @@ applies, and three surfaces are versioned with distinct guarantees:
 
 ## [Unreleased]
 
-Nothing yet.
+### Operator actions
+
+For a deployment running 2.0.0.
+
+1. **Grant `admin.orgs.manage` where `admin.orgs.update` managed people.**
+   An organization's members, invitations and provider bindings now need
+   `admin.orgs.manage`, and `admin.orgs.update` keeps only its settings
+   (F-69). The seeded `admin.platform` role holds both. A custom role, API
+   key or OAuth client with `.update` and not `.manage` loses those writes
+   and the membership half of a confined user create, and a pending
+   invitation sent through such a role is voided when someone accepts it.
+   Before the deploy, list them read-only and add `admin.orgs.manage` where
+   people management was meant:
+
+   ```sql
+   select coalesce(o.slug, '(global)') as org, r.key from app_roles r
+   left join app_organizations o on o.id = r.organization_id
+   join app_role_permissions rp on rp.role_id = r.id
+   join app_permissions p on p.id = rp.permission_id and p.key = 'admin.orgs.update'
+   where not exists (
+     select 1 from app_role_permissions rp2
+     join app_permissions p2 on p2.id = rp2.permission_id
+     where rp2.role_id = r.id and p2.key = 'admin.orgs.manage');
+   select 'api_key' as kind, id, name, scopes from app_api_keys
+   where status = 'active' and 'admin.orgs.update' = any(scopes)
+     and not (scopes && array['admin.orgs.manage', 'admin.orgs.*', 'admin.*', '*'])
+   union all
+   select 'oauth_client', id, name, scopes from app_oauth_clients
+   where status = 'active' and 'admin.orgs.update' = any(scopes)
+     and not (scopes && array['admin.orgs.manage', 'admin.orgs.*', 'admin.*', '*']);
+   ```
+
+### Changed
+
+- **Organization permissions.** `admin.orgs.manage` gates an organization's
+  members, invitations and provider bindings, as the catalog always said,
+  and `admin.orgs.update` only its settings: the record and its sign-up
+  policy. Both used to be `admin.orgs.update`, and `admin.orgs.manage`
+  gated nothing (F-69). The membership permission a confined creator needs
+  to create a user (#480, #486) is now `admin.users.update` or
+  `admin.orgs.manage`, not `admin.orgs.update`. A test now fails when a
+  catalog key reaches no guard. See operator action 1.
 
 ## [2.0.0] - 2026-09-30
 

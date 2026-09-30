@@ -85,7 +85,7 @@ const SUPERADMIN: AuthStatusModule.UserAccessContext = {
     "admin.roles.create",
     "admin.roles.update",
     "admin.permissions.manage",
-    "admin.orgs.update",
+    "admin.orgs.manage",
     "admin.users.update",
   ],
 };

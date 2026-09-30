@@ -226,6 +226,17 @@ describe("administrator/organizations/[orgId] — viewer flags (F-66, F-67)", ()
     expect((await tabsProps(["admin.orgs.read"])).canEditSettings).toBe(false);
   });
 
+  // F-69: the members, invitations and providers panels write through routes
+  // gated on `admin.orgs.manage`, the Authentication policy through routes
+  // gated on `admin.orgs.update`; each panel's flag follows its routes' key.
+  it("derives canManage from admin.orgs.manage and canUpdate from admin.orgs.update, apart (F-69)", async () => {
+    const settingsOnly = await tabsProps(["admin.orgs.read", "admin.orgs.update"]);
+    expect(settingsOnly).toMatchObject({ canManage: false, canUpdate: true });
+
+    const peopleOnly = await tabsProps(["admin.orgs.read", "admin.orgs.manage"]);
+    expect(peopleOnly).toMatchObject({ canManage: true, canUpdate: false });
+  });
+
   it("derives the role-select and member-link flags from roles.read and users.read", async () => {
     const without = await tabsProps(["admin.orgs.read", "admin.orgs.update"]);
     expect(without.canReadRoles).toBe(false);

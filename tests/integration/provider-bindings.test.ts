@@ -158,7 +158,7 @@ describe("provider-bindings — POST", () => {
    * or a competitor's domain and capture those sign-ups into their tenant.
    */
   it("F-04: ORG ADMIN is refused (403) even in their own org, and audited", async () => {
-    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.manage"]));
     const res = await post(ORG_A, { provider: "email", providerOrganizationKey: "acme.com" });
     expect(res.status).toBe(403);
     expect(((await res.json()) as { reason?: string }).reason).toBe("cross_org_reach_required");
@@ -170,7 +170,7 @@ describe("provider-bindings — POST", () => {
 
   it("F-04: a superuser-owned credential BOUND to one org is refused too", async () => {
     accessGetter.mockResolvedValue({
-      ...superadmin(["admin.orgs.update"]),
+      ...superadmin(["admin.orgs.manage"]),
       organizationId: ORG_A,
       orgBound: true,
     });
@@ -180,12 +180,12 @@ describe("provider-bindings — POST", () => {
   });
 
   it("SUPERADMIN binds (201)", async () => {
-    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.manage"]));
     expect((await post(ORG_A, body)).status).toBe(201);
   });
 
   it("409 binding_exists when another org holds the key, whatever the server's message language (F-132)", async () => {
-    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.manage"]));
     state.insertError = pgUniqueViolation(
       "app_provider_organizations_provider_provider_organization_k_key",
     );
@@ -196,7 +196,7 @@ describe("provider-bindings — POST", () => {
   });
 
   it("F-04: an email binding is stored LOWERCASED, the way sign-up routing looks it up", async () => {
-    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.manage"]));
     const res = await post(ORG_A, { provider: "email", providerOrganizationKey: "  Acme.COM " });
     expect(res.status).toBe(201);
     expect(state.inserted).toEqual([
@@ -213,7 +213,7 @@ describe("provider-bindings — POST", () => {
     [{ provider: "email", providerOrganizationKey: "hotmail.ca" }, "public_email_domain"],
     [{ provider: "github", providerOrganizationKey: "   " }, "invalid_key"],
   ])("F-04: refuses %j even for a superadmin (400 %s)", async (b, reason) => {
-    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.manage"]));
     const res = await post(ORG_A, b);
     expect(res.status).toBe(400);
     expect(((await res.json()) as { reason?: string }).reason).toBe(reason);
@@ -221,21 +221,60 @@ describe("provider-bindings — POST", () => {
   });
   it("ORG ADMIN gets 404 binding in a foreign org", async () => {
     state.org = { id: ORG_B, slug: "org-b" };
-    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.manage"]));
     expect((await POST(req(ORG_B, { method: "POST", body }), ctx(ORG_B))).status).toBe(404);
+  });
+});
+
+/**
+ * F-69: bindings are managed with the org's people, on `admin.orgs.manage`.
+ * They gated on `admin.orgs.update` (the org's settings), so a role built to
+ * edit settings could unbind the org's identity providers. The permission
+ * guard's own denial names the key it asked for.
+ */
+describe("provider-bindings — F-69: admin.orgs.update is not enough", () => {
+  const settingsEditor = () => orgAdmin(["admin.orgs.read", "admin.orgs.update"]);
+  const deniedFor = (key: string) =>
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        reason: "missing_admin_permission",
+        metadata: expect.objectContaining({ required: [key] }),
+      }),
+    );
+
+  it("DELETE: 403 from the permission guard, asking for admin.orgs.manage", async () => {
+    accessGetter.mockResolvedValue(settingsEditor());
+    const res = await DELETE(
+      req(ORG_A, { method: "DELETE", body: { bindingIds: [BIND] } }),
+      ctx(ORG_A),
+    );
+    expect(res.status).toBe(403);
+    deniedFor("admin.orgs.manage");
+  });
+
+  it("POST: 403 from the permission guard, before the F-04 reach check", async () => {
+    accessGetter.mockResolvedValue(settingsEditor());
+    const res = await POST(
+      req(ORG_A, { method: "POST", body: { provider: "google", providerOrganizationKey: "g-2" } }),
+      ctx(ORG_A),
+    );
+    expect(res.status).toBe(403);
+    deniedFor("admin.orgs.manage");
+    expect(state.inserted).toEqual([]);
   });
 });
 
 describe("provider-bindings — DELETE", () => {
   it("ORG ADMIN removes in own org (200); 404 in a foreign org", async () => {
-    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.manage"]));
     expect(
       (await DELETE(req(ORG_A, { method: "DELETE", body: { bindingIds: [BIND] } }), ctx(ORG_A)))
         .status,
     ).toBe(200);
 
     state.org = { id: ORG_B, slug: "org-b" };
-    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.manage"]));
     expect(
       (await DELETE(req(ORG_B, { method: "DELETE", body: { bindingIds: [BIND] } }), ctx(ORG_B)))
         .status,

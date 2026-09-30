@@ -173,7 +173,7 @@ function normalizeBindingKey(
  *   - providerOrganizationKey: string (for `email`, the email domain)
  *   - displayName: string (optional)
  *
- * Caller MUST hold `admin.orgs.update` AND have cross-org reach (an unbound
+ * Caller MUST hold `admin.orgs.manage` (F-69) AND have cross-org reach (an unbound
  * superadmin) — F-04. A binding is a PLATFORM-WIDE claim, not a setting of
  * one tenant: `(provider, key)` is unique across every organization, and an
  * `email` binding routes every uninvited email/password sign-up, and every
@@ -198,7 +198,7 @@ export const POST = withAdminRoute(async function POST(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const guard = await requireAdminPermission(request, "admin.orgs.update");
+  const guard = await requireAdminPermission(request, "admin.orgs.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const limited = enforceRateLimit(
@@ -299,7 +299,8 @@ export const POST = withAdminRoute(async function POST(
  * Body:
  *   - bindingIds: string[]
  *
- * Caller MUST hold `admin.orgs.update`.
+ * Caller MUST hold `admin.orgs.manage` (F-69: bindings are managed with the
+ * members, not with the org's settings).
  */
 const deleteBindingsSchema = z
   .object({
@@ -311,7 +312,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const guard = await requireAdminPermission(request, "admin.orgs.update");
+  const guard = await requireAdminPermission(request, "admin.orgs.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const limited = enforceRateLimit(

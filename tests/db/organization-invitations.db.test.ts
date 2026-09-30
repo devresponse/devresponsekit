@@ -125,7 +125,7 @@ async function newRoleWithPermission(orgId: string, tag: string): Promise<string
   return role.id;
 }
 
-/** An org role carrying one permission of the real catalog (`admin.orgs.update`, `superuser`). */
+/** An org role carrying one permission of the real catalog (`admin.orgs.manage`, `superuser`). */
 async function newCatalogRole(orgId: string, tag: string, permissionKey: string): Promise<string> {
   const perm = await db
     .selectFrom("app_permissions")
@@ -293,7 +293,7 @@ describe("app_organization_invitations (DB-backed)", () => {
     const inviterId = await newInviter(
       orgId,
       "consume-inviter",
-      await newCatalogRole(orgId, "consume-admin", "admin.orgs.update"),
+      await newCatalogRole(orgId, "consume-admin", "admin.orgs.manage"),
     );
     const userId = await newUser("consume-user");
     const created = await createInvitation({
@@ -345,7 +345,7 @@ describe("app_organization_invitations (DB-backed)", () => {
     const inviterId = await newInviter(
       orgId,
       "confer-inviter",
-      await newCatalogRole(orgId, "confer-admin", "admin.orgs.update"),
+      await newCatalogRole(orgId, "confer-admin", "admin.orgs.manage"),
     );
     const inviteeId = await newUser("confer-invitee");
 
@@ -359,7 +359,7 @@ describe("app_organization_invitations (DB-backed)", () => {
     });
     const found = await findValidInvitationByToken(first.plaintextToken);
     expect(found).toMatchObject({ roleId, invitedByAppUserId: inviterId });
-    expect(await permissionKeysHeldInOrg(inviterId, orgId)).toEqual(["admin.orgs.update"]);
+    expect(await permissionKeysHeldInOrg(inviterId, orgId)).toEqual(["admin.orgs.manage"]);
 
     const denied = await consumeInvitation({
       invitation: found!,
@@ -400,7 +400,7 @@ describe("app_organization_invitations (DB-backed)", () => {
       .values({ app_user_id: inviterId, organization_id: orgId, role_id: roleId })
       .execute();
     expect((await permissionKeysHeldInOrg(inviterId, orgId)).sort()).toEqual(
-      [`${PREFIX}perm.confer-role`, "admin.orgs.update"].sort(),
+      [`${PREFIX}perm.confer-role`, "admin.orgs.manage"].sort(),
     );
 
     const second = await createInvitation({
@@ -550,7 +550,7 @@ describe("app_organization_invitations (DB-backed)", () => {
     const inviterId = await newInviter(
       orgId,
       "lapsed-inviter",
-      await newCatalogRole(orgId, "lapsed-admin", "admin.orgs.update"),
+      await newCatalogRole(orgId, "lapsed-admin", "admin.orgs.manage"),
     );
     const inviteeId = await newUser("lapsed-invitee");
     const lapses: Array<[string, () => Promise<unknown>, () => Promise<unknown>]> = [
@@ -600,13 +600,39 @@ describe("app_organization_invitations (DB-backed)", () => {
     }
   });
 
+  it("F-69: an inviter holding admin.orgs.update but not admin.orgs.manage has no standing", async () => {
+    // `admin.orgs.update` is the org's settings; its people, invitations
+    // included, are `admin.orgs.manage`, which the create route demands and
+    // acceptance re-checks (F-149).
+    const orgId = await newOrg("settings-only");
+    const inviterId = await newInviter(
+      orgId,
+      "settings-only-inviter",
+      await newCatalogRole(orgId, "settings-only-admin", "admin.orgs.update"),
+    );
+    const inviteeId = await newUser("settings-only-invitee");
+    const created = await createInvitation({
+      organizationId: orgId,
+      email: EMAIL,
+      invitedByAppUserId: inviterId,
+    });
+    const result = await consumeInvitation({
+      invitation: (await findValidInvitationByToken(created.plaintextToken))!,
+      appUser: { id: inviteeId, primaryEmail: EMAIL, status: "pending_approval" },
+      actorBetterAuthUserId: `${PREFIX}settings-only-invitee`,
+    });
+    expect(result).toEqual({ consumed: false, reason: "inviter_lacks_standing" });
+    expect(await membershipOf(inviteeId, orgId)).toBeUndefined();
+    expect(await invitationRow(created.id)).toMatchObject({ status: "revoked", revoked_by: null });
+  });
+
   it.each(["blocked", "suspended"])(
     "F-154: accepting over a %s membership records the acceptance but writes no role",
     async (status) => {
       const orgId = await newOrg(`withheld-${status}`);
       // The inviter holds the invite permission, which is all the role carries,
       // so standing (F-149) and AUTHZ-3 both pass: only the grant rule is left.
-      const roleId = await newCatalogRole(orgId, `withheld-role-${status}`, "admin.orgs.update");
+      const roleId = await newCatalogRole(orgId, `withheld-role-${status}`, "admin.orgs.manage");
       const inviterId = await newInviter(orgId, `withheld-inviter-${status}`, roleId);
       const inviteeId = await newUser(`withheld-invitee-${status}`, "active");
       await db

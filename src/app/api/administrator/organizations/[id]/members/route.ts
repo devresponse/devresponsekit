@@ -94,11 +94,12 @@ async function loadScopedMembers(
  * the actor (review #7).
  *
  * This route is ORG-CENTRIC — it never calls `resolveTargetUser`, so it was the
- * one place where `admin.orgs.update` alone let an org admin block, suspend or
- * delete the membership of a SUPERADMIN co-member, which the user-centric twin
- * (and every other account-level action) refuses. The batch is denied whole
- * rather than partially applied: a caller who mixes an ordinary member with a
- * superadmin gets one unambiguous 403 and no half-done mutation.
+ * one place where `admin.orgs.update` (its key then; `admin.orgs.manage` since
+ * F-69) alone let an org admin block, suspend or delete the membership of a
+ * SUPERADMIN co-member, which the user-centric twin (and every other
+ * account-level action) refuses. The batch is denied whole rather than
+ * partially applied: a caller who mixes an ordinary member with a superadmin
+ * gets one unambiguous 403 and no half-done mutation.
  *
  * `refuseOutrankingTarget` costs a `getUserAccessContext` round-trip per
  * DISTINCT member, and a SUPERADMIN cookie actor short-circuits before any of
@@ -209,7 +210,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  *   - appUserId: uuid
  *   - status: membership status (defaults to "active")
  *
- * Caller MUST hold `admin.orgs.update`.
+ * Caller MUST hold `admin.orgs.manage`. F-69: that key manages an org's people
+ * and bindings (members, invitations, provider bindings), while
+ * `admin.orgs.update` edits the org's own settings. Every write here used to
+ * gate on `.update`, so a role built to edit settings could add, block and
+ * remove members, and `.manage` gated nothing.
  */
 const createMemberSchema = z
   .object({
@@ -222,7 +227,7 @@ export const POST = withAdminRoute(async function POST(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const guard = await requireAdminPermission(request, "admin.orgs.update");
+  const guard = await requireAdminPermission(request, "admin.orgs.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const limited = enforceRateLimit(
@@ -252,7 +257,7 @@ export const POST = withAdminRoute(async function POST(
 
   // Intentional asymmetry with users/[id]/memberships (audit #23): that route
   // is user-centric and gates on canAccessUser; this one is ORG-CENTRIC. The
-  // actor holds admin.orgs.update AND canAccessOrg(this org) — i.e. they
+  // actor holds admin.orgs.manage AND canAccessOrg(this org) — i.e. they
   // administer the target org — so enrolling a member is a core org-management
   // capability and is deliberately NOT gated on separately "seeing" the user.
   // Consent-based self-enrollment for brand-new users goes through invitations;
@@ -327,7 +332,7 @@ export const POST = withAdminRoute(async function POST(
  *   - membershipIds: string[]
  *   - status: new membership status
  *
- * Caller MUST hold `admin.orgs.update`.
+ * Caller MUST hold `admin.orgs.manage` (F-69).
  */
 /**
  * `membershipIds` is capped at {@link MAX_BULK_IDS} — the same ceiling
@@ -348,7 +353,7 @@ export const PATCH = withAdminRoute(async function PATCH(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const guard = await requireAdminPermission(request, "admin.orgs.update");
+  const guard = await requireAdminPermission(request, "admin.orgs.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const limited = enforceRateLimit(
@@ -472,7 +477,7 @@ export const PATCH = withAdminRoute(async function PATCH(
  * Body:
  *   - membershipIds: string[]
  *
- * Caller MUST hold `admin.orgs.update`.
+ * Caller MUST hold `admin.orgs.manage` (F-69).
  */
 /** Same cap as {@link patchMembersSchema}, for the same reason. */
 const deleteMembersSchema = z
@@ -485,7 +490,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   request: NextRequest,
   context: RouteContext,
 ) {
-  const guard = await requireAdminPermission(request, "admin.orgs.update");
+  const guard = await requireAdminPermission(request, "admin.orgs.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const limited = enforceRateLimit(

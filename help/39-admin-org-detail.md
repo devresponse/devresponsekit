@@ -31,7 +31,7 @@ Manages a single tenant (captured for the seed "Default Organization"): its memb
 - Leads to: tab content in place.
 
 ## Access
-`admin.orgs.read` to view; `admin.orgs.update` / `admin.orgs.manage` for changes.
+`admin.orgs.read` to view. Members, invitations and provider bindings need `admin.orgs.manage` (binding a new provider also needs a Superadmin); the Authentication policy needs `admin.orgs.update`; the Settings tab needs `admin.orgs.update` and a Superadmin.
 
 ## Observations
 All four demo users are members here via the "email" source. Invitation-based onboarding (visible as the Invitations section) pairs with the "Invitation required" approval mode on the sign-up policy.

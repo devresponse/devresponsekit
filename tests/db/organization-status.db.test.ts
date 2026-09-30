@@ -334,7 +334,7 @@ describe("F-09 invitation path", () => {
     const invitePerm = await db
       .selectFrom("app_permissions")
       .select("id")
-      .where("key", "=", "admin.orgs.update")
+      .where("key", "=", "admin.orgs.manage")
       .executeTakeFirstOrThrow();
     const adminRole = await db
       .insertInto("app_roles")

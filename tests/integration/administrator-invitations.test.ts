@@ -244,20 +244,21 @@ describe("GET /api/administrator/organizations/:id/invitations", () => {
 });
 
 describe("POST /api/administrator/organizations/:id/invitations", () => {
-  it("returns 403 when caller lacks admin.orgs.update", async () => {
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read"]));
+  it("returns 403 when caller lacks admin.orgs.manage, even holding admin.orgs.update (F-69)", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read", "admin.orgs.update"]));
     const res = await createPOST(jsonReq(BASE, { email: "a@b.co" }), listCtx());
     expect(res.status).toBe(403);
+    expect(createInvitationMock).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid email with 400", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     const res = await createPOST(jsonReq(BASE, { email: "not-an-email" }), listCtx());
     expect(res.status).toBe(400);
   });
 
   it("returns 404 role_not_found for a role outside this org", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined); // role lookup misses
     const res = await createPOST(
       jsonReq(BASE, { email: "ada@example.com", roleId: ROLE_ID }),
@@ -279,7 +280,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
         .mockResolvedValueOnce(undefined); // no active member
 
     it("403 forbidden when an org admin invites with a role granting `superuser`", async () => {
-      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage"]));
       roleFound();
       executeMock.mockResolvedValue([{ key: "superuser" }]);
       const res = await createPOST(withRole(), listCtx());
@@ -309,7 +310,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     });
 
     it("403 forbidden when the role confers a permission the org admin does not hold", async () => {
-      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update", "admin.users.read"]));
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage", "admin.users.read"]));
       roleFound();
       executeMock.mockResolvedValue([{ key: "admin.users.read" }, { key: "admin.users.delete" }]);
       const res = await createPOST(withRole(), listCtx());
@@ -325,7 +326,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     });
 
     it("201 when the role's permissions are a subset of what the org admin holds", async () => {
-      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update", "admin.users.read"]));
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage", "admin.users.read"]));
       roleFound();
       executeMock.mockResolvedValue([{ key: "admin.users.read" }]);
       const res = await createPOST(withRole(), listCtx());
@@ -336,7 +337,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     });
 
     it("201 for a SUPERADMIN cookie session inviting with a `superuser` role", async () => {
-      accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+      accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
       roleFound();
       executeMock.mockResolvedValue([{ key: "superuser" }]);
       const res = await createPOST(withRole(), listCtx());
@@ -348,7 +349,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
   });
 
   it("returns 409 member_exists when the address already belongs to an active member", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce({ id: "m-1" }); // active-member lookup hits
     const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
     expect(res.status).toBe(409);
@@ -356,7 +357,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
   });
 
   it("returns 409 invitation_exists on the pending-unique violation, whatever the server's message language (F-132)", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
     createInvitationMock.mockRejectedValue(
       pgUniqueViolation("idx_app_org_invitations_pending_unique"),
@@ -367,7 +368,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
   });
 
   it("does not report a 23505 on the table's other unique key as invitation_exists (F-132)", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
     // A token-hash collision says nothing about a pending invitation for this
     // address. In English, which the old message match claimed as invitation_exists.
@@ -381,7 +382,7 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
   });
 
   it("creates, sends the invitation email, and audits", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     // org load (shared helper), then the active-member check. The inviter
     // lookup + render now live inside the mocked sendInvitationEmail.
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined); // no active member
@@ -424,7 +425,7 @@ describe("F-09 — no invitations into an organization that is not active", () =
       // A superadmin can still open a suspended org (loading is status-agnostic
       // so it can be inspected and reactivated), but a link into it would be
       // dead on arrival: `findValidInvitationByToken` refuses it.
-      accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+      accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
       selectFirst.mockResolvedValueOnce({ ...ORG_ROW, status });
       const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
       expect(res.status).toBe(409);
@@ -441,7 +442,7 @@ describe("F-09 — no invitations into an organization that is not active", () =
   );
 
   it("resend: 409 organization_not_active — the invitee's current link is NOT rotated away", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst
       .mockResolvedValueOnce(SUSPENDED_ORG_ROW)
       .mockResolvedValueOnce({ id: INVITATION_ID, email: "ada@example.com" });
@@ -455,7 +456,7 @@ describe("F-09 — no invitations into an organization that is not active", () =
   });
 
   it("revoke still works in a suspended org (cleanup is always allowed)", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(SUSPENDED_ORG_ROW);
     const res = await revokeDELETE(getReq(`${BASE}/${INVITATION_ID}`), itemCtx());
     expect(res.status).toBe(200);
@@ -464,8 +465,15 @@ describe("F-09 — no invitations into an organization that is not active", () =
 });
 
 describe("DELETE /api/administrator/organizations/:id/invitations/:invitationId", () => {
+  it("returns 403 when caller lacks admin.orgs.manage, even holding admin.orgs.update (F-69)", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read", "admin.orgs.update"]));
+    const res = await revokeDELETE(getReq(`${BASE}/${INVITATION_ID}`), itemCtx());
+    expect(res.status).toBe(403);
+    expect(revokeInvitationMock).not.toHaveBeenCalled();
+  });
+
   it("returns 404 invitation_not_found when nothing pending was revoked", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     revokeInvitationMock.mockResolvedValue(false);
     const res = await revokeDELETE(getReq(`${BASE}/${INVITATION_ID}`), itemCtx());
     expect(res.status).toBe(404);
@@ -473,7 +481,7 @@ describe("DELETE /api/administrator/organizations/:id/invitations/:invitationId"
   });
 
   it("revokes and audits", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     const res = await revokeDELETE(getReq(`${BASE}/${INVITATION_ID}`), itemCtx());
     expect(res.status).toBe(200);
     expect(auditMock).toHaveBeenCalledWith(
@@ -483,15 +491,23 @@ describe("DELETE /api/administrator/organizations/:id/invitations/:invitationId"
 });
 
 describe("POST .../invitations/:invitationId/resend", () => {
+  it("returns 403 when caller lacks admin.orgs.manage, even holding admin.orgs.update (F-69)", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read", "admin.orgs.update"]));
+    const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
+    expect(res.status).toBe(403);
+    expect(regenerateMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+  });
+
   it("returns 404 for an unknown invitation", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
     const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
     expect(res.status).toBe(404);
   });
 
   it("rotates the token, re-sends, and audits", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     // org load (shared helper), then the invitation lookup. The inviter
     // lookup + render live inside the mocked sendInvitationEmail.
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
@@ -535,7 +551,7 @@ describe("POST .../invitations/:invitationId/resend", () => {
     // The inviter was banned, removed or demoted since. Acceptance would void
     // the invitation, so the resend must not answer 200 and mail a link that
     // cannot work: `enforceInviterStanding` voids it here and says no.
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
     inviterStandingMock.mockResolvedValue(false);
     const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
@@ -566,7 +582,7 @@ describe("F-64: invitation mail is budgeted across instances", () => {
   const resend = () => resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
 
   it("create and resend take the per-actor budget from the SHARED bucket", async () => {
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
     expect((await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx())).status).toBe(
       201,
@@ -584,7 +600,7 @@ describe("F-64: invitation mail is budgeted across instances", () => {
   });
 
   it("create: an org admin spends the org's daily budget, and a spent one creates and mails nothing", async () => {
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
     orgMailBudgetMock.mockResolvedValue(tooMany());
     const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
@@ -600,7 +616,7 @@ describe("F-64: invitation mail is budgeted across instances", () => {
   });
 
   it("resend: the invitation's cooldown is asked after the budget, and a cooling one is neither rotated nor mailed", async () => {
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
     recipientCooldownMock.mockResolvedValue(tooMany());
     const res = await resend();
@@ -618,7 +634,7 @@ describe("F-64: invitation mail is budgeted across instances", () => {
   });
 
   it("resend: a spent org budget refuses before the cooldown token is spent", async () => {
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
     orgMailBudgetMock.mockResolvedValue(tooMany());
     const res = await resend();
@@ -629,7 +645,7 @@ describe("F-64: invitation mail is budgeted across instances", () => {
   });
 
   it("resend: an unknown invitation 404s without touching either budget", async () => {
-    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
     expect((await resend()).status).toBe(404);
     expect(orgMailBudgetMock).not.toHaveBeenCalled();
@@ -649,7 +665,7 @@ describe("F-104: the invitation routes report the email's delivery", () => {
   const resend = () => resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
 
   beforeEach(() => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.manage"]));
   });
 
   it("create: a rejected email answers ok:false, and audits an error naming the outbox row", async () => {

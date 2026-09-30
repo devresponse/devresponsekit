@@ -79,7 +79,7 @@ async function audited(org: string, eventType: string, agoMs: number, count = 1)
 }
 
 const orgAdminOf = (organizationId: string) => ({
-  access: { permissions: ["admin.orgs.update"], organizationId },
+  access: { permissions: ["admin.orgs.manage"], organizationId },
   betterAuthUserId: ACTOR,
   requestId: "req-f64",
 });

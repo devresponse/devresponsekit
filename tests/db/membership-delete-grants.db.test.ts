@@ -279,7 +279,7 @@ function grant(
   };
 }
 const SUPERADMIN_COOKIE = () =>
-  grant({ permissions: ["admin.orgs.update", "admin.users.update", SUPERADMIN_PERMISSION] }, null);
+  grant({ permissions: ["admin.orgs.manage", "admin.users.update", SUPERADMIN_PERMISSION] }, null);
 
 function req(url: string, body: unknown): NextRequest {
   return {
@@ -461,14 +461,14 @@ describe.each(ROUTES)("$name (DB-backed, F-12)", ({ remove, readd }) => {
         {
           organizationId: w.orgA,
           permissions: [
-            "admin.orgs.update",
+            "admin.orgs.manage",
             "admin.users.update",
             "admin.roles.update",
             "admin.groups.update",
             SUPERADMIN_PERMISSION,
           ],
         },
-        ["admin.orgs.update", "admin.users.update"],
+        ["admin.orgs.manage", "admin.users.update"],
       ),
     );
     const res = await remove();

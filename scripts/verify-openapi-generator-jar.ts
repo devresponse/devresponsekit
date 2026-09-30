@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -130,12 +133,37 @@ export async function ensureVerifiedJar({
     if (!response.ok) {
       throw new Error(`Download failed: ${response.status} ${response.statusText} (${url})`);
     }
+    if (!response.body) {
+      throw new Error(`Download failed: empty response body (${url})`);
+    }
     await mkdir(path.dirname(jarPath), { recursive: true });
-    // Write to a sibling temp file and rename only after verification, so a
-    // partial or wrong download can never sit at the path the wrapper runs.
+    // Stream the body through the hash into a sibling temp file and rename it
+    // only after the digest matches the pin, so a partial or wrong download can
+    // never sit at the path the wrapper runs. Writing network bytes to disk is
+    // this script's purpose (CodeQL js/http-to-file-access flagged the old
+    // buffer-then-writeFile form, F-112); the pin is what makes it safe.
+    // Streaming hashes the bytes as they are written, so the 30 MB JAR is never
+    // held in memory and the temp file needs no separate hash; the check below
+    // still re-verifies the JAR at the path the wrapper runs.
     const tmp = `${jarPath}.download`;
-    await writeFile(tmp, Buffer.from(await response.arrayBuffer()));
-    const actual = await sha256File(tmp);
+    const hash = createHash("sha256");
+    try {
+      await pipeline(
+        Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>),
+        async function* (chunks: AsyncIterable<Uint8Array>) {
+          for await (const chunk of chunks) {
+            hash.update(chunk);
+            yield chunk;
+          }
+        },
+        createWriteStream(tmp),
+      );
+    } catch (error) {
+      // A connection dropped mid-body leaves a partial temp file: clear it.
+      await rm(tmp, { force: true });
+      throw error;
+    }
+    const actual = hash.digest("hex");
     if (actual !== pinned) {
       await rm(tmp, { force: true });
       throw new Error(

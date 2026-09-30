@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider, useTheme } from "@/components/theme/theme-provider";
-import { ThemeScript } from "@/components/theme/theme-script";
+import { inlineScriptStringLiteral, ThemeScript } from "@/components/theme/theme-script";
 
 /**
  * Tests for the in-house theme provider that replaced `next-themes` (React 19
@@ -60,6 +60,20 @@ describe("ThemeScript", () => {
     const html = renderToStaticMarkup(<ThemeScript />);
     expect(html).toContain("<script");
     expect(html).not.toContain("nonce=");
+  });
+
+  it("builds the interpolated string literal so no markup can close the inline script (F-112)", () => {
+    // JSON.stringify alone would pass `</script>` and `<!--` through verbatim,
+    // and the HTML parser ends the element there before any JS runs.
+    const hostile = '</script><script>alert(1)</script><!-- \u2028\u2029 "quoted"';
+    const literal = inlineScriptStringLiteral(hostile);
+    expect(literal).not.toMatch(/[<>\u2028\u2029]/);
+    expect(literal).toContain("\\u003c/script\\u003e");
+    // Still a JS string literal with exactly the original value.
+    expect(JSON.parse(literal)).toBe(hostile);
+    // The shipped script embeds the storage key through it: the plain key is
+    // unchanged, so the rendered script is too.
+    expect(inlineScriptStringLiteral("theme")).toBe('"theme"');
   });
 });
 

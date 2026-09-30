@@ -70,8 +70,12 @@ const server = createServer((req, res) => {
       print("REQ_DONE 200");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // The diagnostic goes to the parent over stdout (the protocol above), never
+      // into the HTTP body: the parent asserts on the REQ_DONE line and never
+      // reads a 500's body, and echoing a caught error to an HTTP client is the
+      // js/stack-trace-exposure pattern (F-112) even on a loopback fixture.
       res.writeHead(500, { "content-type": "text/plain" });
-      res.end(message);
+      res.end("error");
       print(`REQ_DONE 500 ${message}`);
     }
   })();

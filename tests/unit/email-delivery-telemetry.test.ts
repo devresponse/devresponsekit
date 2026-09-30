@@ -39,8 +39,11 @@ const base = {
 
 async function counterValue(outcome: string, template: string): Promise<number> {
   const metric = await metrics.outboxDeliveryTotal.get();
+  // @prometheus-io/client types a two-label sample's `labels` as a union of
+  // one-key records (F-113), so read them through a plain record.
   const sample = metric.values.find(
-    (v) => v.labels.outcome === outcome && v.labels.template === template,
+    (v: { labels: Record<string, unknown> }) =>
+      v.labels.outcome === outcome && v.labels.template === template,
   );
   return sample?.value ?? 0;
 }
@@ -204,7 +207,9 @@ describe("recordOutboxDelivery (F-27)", () => {
       attempts: 1,
     });
     const metric = await metrics.outboxDeliveryTotal.get();
-    expect(metric.values.map((v) => v.labels.template)).toEqual(["other"]);
+    expect(
+      metric.values.map((v: { labels: Record<string, unknown> }) => v.labels.template),
+    ).toEqual(["other"]);
   });
 
   it("is exposed by the scrape registry under its documented name", async () => {

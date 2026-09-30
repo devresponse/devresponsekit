@@ -3,7 +3,7 @@ import { getServerEnv } from "@/lib/env";
 import { registry, startDefaultMetrics } from "@/lib/observability/metrics.server";
 import { isOperatorBearerAuthorized } from "@/lib/operator-bearer.server";
 
-// Reads the prom-client registry (Node-only) and node:crypto.
+// Reads the @prometheus-io/client registry (Node-only) and node:crypto.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 

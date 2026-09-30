@@ -121,6 +121,11 @@ of 2.0.0's list below. Each entry names what to carry over.
   declare; most lists used to drop it and answer every row. `POST
   /organizations` also returns `key` (the slug), and a revoke that happens
   answers `alreadyRevoked: false`, the shapes the spec declares (F-74).
+- **Runtime.** `/api/metrics` runs on `@prometheus-io/client`, the successor
+  to the deprecated `prom-client`: the same metric names and exposition, with
+  event-loop utilization added to the defaults (F-113). The `dompurify` and
+  `postcss` override floors are raised to their declared versions, so
+  DOMPurify resolves 3.4.16.
 
 ### Security
 

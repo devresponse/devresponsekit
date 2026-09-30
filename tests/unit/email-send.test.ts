@@ -577,9 +577,13 @@ describe("sendAppEmail — delivery outcomes are logged and counted (F-27)", () 
 
   async function counter(outcome: string, template: string): Promise<number> {
     const metric = await metrics.outboxDeliveryTotal.get();
+    // @prometheus-io/client types a two-label sample's `labels` as a union of
+    // one-key records (F-113), so read them through a plain record.
     return (
-      metric.values.find((v) => v.labels.outcome === outcome && v.labels.template === template)
-        ?.value ?? 0
+      metric.values.find(
+        (v: { labels: Record<string, unknown> }) =>
+          v.labels.outcome === outcome && v.labels.template === template,
+      )?.value ?? 0
     );
   }
 

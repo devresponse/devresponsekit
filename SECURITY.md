@@ -160,14 +160,22 @@ exists; `tests/unit/dependency-governance.test.ts` fails when an override is
 added without a row (and when the lockfile resolves below the patched lines
 the 2026-09 sweep established). Floors are **scoped** — to a parent
 (`parent>child`) or a major (`pkg@N`) — so a floor can never cross a major
-version behind a consumer's back. Review each row when its parent ships a
-release that satisfies the floor on its own; the override can then go.
+version behind a consumer's back. A floor that is not parent-scoped (`pkg`,
+or `pkg@N` when the declared range is in major N) also rewrites the specifier
+of a direct dependency of the same name, so a floor below the version
+`package.json` declares silently wins over the declaration (after #481 a
+`^3.4.13` floor held the declared `dompurify ^3.4.16` at 3.4.15). Set such a
+floor at the declared version. Dependabot bumps only the direct entry, never
+the floor, so the floor can fall behind again: the same test fails when a
+lockfile resolves a direct dependency below its declared version, and the fix
+is to raise the floor to the declaration. Review each row when its parent
+ships a release that satisfies the floor on its own; the override can then go.
 
 | Override | Floor | Why (advisories closed) | Scope / consumer | Review by |
 | --- | --- | --- | --- | --- |
 | `jsdom>undici` | `^8.9.0` | `GHSA-4cwx-7wf7-3272` (high). `jsdom@30` declares `undici@^8.9.0` (its network stack needs undici 8 — forcing 7.x hangs XHR/`fromURL`); the floor is the first patched 8.x release and dedupes with the direct dev pin. | Dev (jsdom test environment). The direct dev `undici` is pinned `8.10.2` separately. | 2026-12-01 |
-| `dompurify` | `^3.4.13` | `GHSA-cmwh-pvxp-8882`, `GHSA-55q2-fjhq-7xh7` (moderate), `GHSA-c2j3-45gr-mqc4` (low). | Runtime (`mermaid` on the in-app docs renderer, also a direct dependency). | 2026-12-01 |
-| `postcss` | `^8.5.23` | `GHSA-r28c-9q8g-f849` (high, `sourceMappingURL` path traversal), `GHSA-fxqj-rqcc-2cmp` (moderate); pulls `nanoid@^3.3.18` (`GHSA-28wg-ghj8-5hjv`, `GHSA-2v37-7h3g-55p8`, high). `next` pins `postcss@8.4.31`. | Build (Next.js + Tailwind), validated by `pnpm build`. | 2026-12-01 |
+| `dompurify` | `^3.4.16` | `GHSA-cmwh-pvxp-8882`, `GHSA-55q2-fjhq-7xh7` (moderate), `GHSA-c2j3-45gr-mqc4` (low). Raised to the direct dependency's declared `^3.4.16`: at `^3.4.13` it held the lockfile at 3.4.15 after #481 bumped the declaration. | Runtime (`mermaid` on the in-app docs renderer, also a direct dependency). | 2026-12-01 |
+| `postcss` | `^8.5.28` | `GHSA-r28c-9q8g-f849` (high, `sourceMappingURL` path traversal), `GHSA-fxqj-rqcc-2cmp` (moderate); pulls `nanoid@^3.3.18` (`GHSA-28wg-ghj8-5hjv`, `GHSA-2v37-7h3g-55p8`, high). `next` pins `postcss@8.4.31`. Raised to the direct dev pin `8.5.28`. | Build (Next.js + Tailwind), validated by `pnpm build`. | 2026-12-01 |
 | `@babel/core` | `^7.29.6` | Dependabot alert #4. | Dev (Stryker instrumenter). | 2026-12-01 |
 | `esbuild` | `^0.28.1` | Dependabot alert #3; `vite` declares `^0.27.0`. | Dev (vitest), validated by `pnpm test:coverage`. | 2026-12-01 |
 | `next>sharp` | `^0.35.0` | `GHSA-f88m-g3jw-g9cj` (high — libvips CVE-2026-33327/33328/35590/35591). `next@16.2.x` declares `sharp@^0.34.5` as an optional dependency. | **Runtime** (`next/image` optimisation in the standalone server). Validated by `pnpm build` + the Trivy image scan. | 2026-12-01 |
@@ -211,7 +219,7 @@ advisories at every level after the 2026-09-04 sweep).
 - `dompurify` (`GHSA-cmwh-pvxp-8882`, moderate — `ALLOWED_ATTR` pollution via
   `setConfig`) reached the runtime via `mermaid` on the in-app docs renderer.
   Pinned forward to the patched line with `pnpm.overrides` (now `dompurify:
-  ^3.4.13`); `pnpm why dompurify` confirms a single resolved version, and the
+  ^3.4.16`); `pnpm why dompurify` confirms a single resolved version, and the
   mermaid render path stays defended by `securityLevel: "strict"` + server-side
   `rehypeSanitize`.
 - `postcss`, `esbuild`, and `@babel/core` (Dependabot alerts #1/#3/#4) were

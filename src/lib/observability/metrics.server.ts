@@ -1,18 +1,23 @@
 import "server-only";
-import { Counter, Registry, collectDefaultMetrics } from "prom-client";
+import { Counter, Registry, collectDefaultMetrics } from "@prometheus-io/client";
 
 /**
  * Prometheus metrics registry (observability epic #52 — first increment).
  *
+ * Built on `@prometheus-io/client`, the Prometheus project's continuation of
+ * `prom-client`, which is deprecated in its favour (F-113). The API, the
+ * metric names and the text exposition (`text/plain; version=0.0.4`) carried
+ * over unchanged; its default metrics add event-loop utilization.
+ *
  * Exposes a scrape endpoint at `GET /api/metrics` (token-guarded). This module
- * holds a DEDICATED `Registry` (not prom-client's global `register`) so test
+ * holds a DEDICATED `Registry` (not the library's global `register`) so test
  * module reloads never collide with a process-global singleton, and so the
  * surface stays explicit.
  *
  * What ships here:
- *   - Node/process default metrics (heap, RSS, event-loop lag, GC, CPU, handles)
- *     — the highest-value-per-effort signal for catching leaks / saturation,
- *     with zero application instrumentation.
+ *   - Node/process default metrics (heap, RSS, event-loop lag and utilization,
+ *     GC, CPU, handles) — the highest-value-per-effort signal for catching
+ *     leaks / saturation, with zero application instrumentation.
  *   - `…_rate_limit_denials_total{scope}` — the first business counter, fed from
  *     the limiter's deny path.
  *   - `…_pre_auth_refusals_total{event_type}` — refusals decided before the

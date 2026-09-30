@@ -24,6 +24,7 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
 import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { ADMIN_MAIL_EVENTS, enforceOrgAdminMailBudget } from "@/lib/admin/admin-mail-budget.server";
+import { adminMailLocale } from "@/lib/admin/admin-mail-locale.server";
 import { refuseUnconferrable } from "@/lib/admin/refusals.server";
 import type { SendAppEmailResult } from "@/lib/email/send.server";
 import { createInvitation, sendInvitationEmail } from "@/lib/invitations.server";
@@ -239,6 +240,13 @@ export const POST = withAdminRoute(async function POST(
   const overBudget = await enforceOrgAdminMailBudget(guard, org.id, request);
   if (overBudget) return overBudget;
 
+  // F-102: the language of the email and of its link: the invitee's own if
+  // the address has an account with a membership in this org (the outbox row
+  // is this org's, so it must not reveal an account elsewhere), else the
+  // inviting admin's. Read before the invitation is written, so a failed read
+  // leaves nothing to audit.
+  const locale = await adminMailLocale(email, org.id, request, guard.access);
+
   let created: { id: string; plaintextToken: string; expiresAt: Date };
   try {
     created = await createInvitation({
@@ -294,6 +302,7 @@ export const POST = withAdminRoute(async function POST(
     organizationName: org.name,
     inviterAppUserId: guard.access.appUserId,
     plaintextToken: created.plaintextToken,
+    locale,
   }).catch(async (err: unknown) => {
     // F-104: the invitation exists already, so a send that throws still
     // leaves its audit row before the 500. It threw before its outbox row

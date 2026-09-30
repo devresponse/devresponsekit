@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { db, pgPool } from "@/db/database";
+import { adminMailLocale } from "@/lib/admin/admin-mail-locale.server";
 import { permissionKeysHeldInOrg } from "@/lib/admin/grantable-permissions.server";
 import {
   consumeInvitation,
@@ -34,6 +35,11 @@ import { provisionUserFromAuth } from "@/lib/user-provisioning.server";
  *      a deactivated or removed inviter's invitation admits nobody either.
  *   7. The shared grant rule (F-154): accepting over a blocked or suspended
  *      membership, which the accept leaves as it is, writes no role.
+ *   8. The invitation's language (F-102): `adminMailLocale` finds the
+ *      invitee's account by address, whatever its case, and reads its
+ *      `preferred_locale` when the account is in the inviting org; an address
+ *      with no account there, or one that belongs only to other orgs, gets the
+ *      admin's page's.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts), excluded from `pnpm test`.
  * All fixtures use a `__dbtest_inv_` prefix and self-clean (audit rows via
@@ -666,6 +672,67 @@ describe("app_organization_invitations (DB-backed)", () => {
       expect(audit.metadata).toMatchObject({ roleGranted: false, roleWithheld: roleId });
     },
   );
+
+  describe("F-102: the invitation's language", () => {
+    const fromFrenchPage = {
+      headers: new Headers({ referer: "http://localhost/fr/app/administrator/organizations/x" }),
+    };
+    const admin = { preferredLocale: "es" };
+
+    /** An account set to Japanese, with a membership of `status` in each org. */
+    async function japaneseAccount(orgIds: string[], status: string): Promise<void> {
+      const appUserId = await newUser("locale", "active", EMAIL);
+      await db
+        .updateTable("app_users")
+        .set({ preferred_locale: "ja" })
+        .where("id", "=", appUserId)
+        .execute();
+      for (const orgId of orgIds) {
+        await db
+          .insertInto("app_organization_memberships")
+          .values({ organization_id: orgId, app_user_id: appUserId, status })
+          .execute();
+      }
+    }
+
+    it("writes to an account in the inviting org in its language, to a new address in the admin's", async () => {
+      const orgId = await newOrg("locale");
+      // A pending member, whom an invitation may legitimately reach.
+      await japaneseAccount([orgId], "pending_approval");
+
+      // Stored lower-case, invited as typed: matched case-insensitively.
+      expect(await adminMailLocale(` ${EMAIL.toUpperCase()} `, orgId, fromFrenchPage, admin)).toBe(
+        "ja",
+      );
+      expect(
+        await adminMailLocale(`${PREFIX}nobody@dbtest.local`, orgId, fromFrenchPage, admin),
+      ).toBe("fr");
+      expect(
+        await adminMailLocale(
+          `${PREFIX}nobody@dbtest.local`,
+          orgId,
+          { headers: new Headers() },
+          admin,
+        ),
+      ).toBe("es");
+    });
+
+    it("answers for an account that belongs only to another org as for no account", async () => {
+      // The inviting org's admins read the outbox row. Its language must not
+      // tell them that the address has an account elsewhere, or which language
+      // that account chose (existence is never leaked across tenants).
+      const inviting = await newOrg("locale-inviting");
+      const elsewhere = await newOrg("locale-elsewhere");
+      await japaneseAccount([elsewhere], "active");
+
+      expect(await adminMailLocale(EMAIL, inviting, fromFrenchPage, admin)).toBe("fr");
+      expect(await adminMailLocale(EMAIL, inviting, { headers: new Headers() }, admin)).toBe("es");
+      // Its own org's admins, and an org-less platform row, which only an admin
+      // with cross-org reach reads, may see it.
+      expect(await adminMailLocale(EMAIL, elsewhere, fromFrenchPage, admin)).toBe("ja");
+      expect(await adminMailLocale(EMAIL, null, fromFrenchPage, admin)).toBe("ja");
+    });
+  });
 
   it("treats a pending row past expires_at as expired at read time", async () => {
     const orgId = await newOrg("expiry");

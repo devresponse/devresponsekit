@@ -39,6 +39,10 @@ const inviterStandingMock = vi.fn();
 const sharedLimitMock = vi.fn();
 const orgMailBudgetMock = vi.fn();
 const recipientCooldownMock = vi.fn();
+// F-102: the language the routes write the email in. Its resolution is pinned
+// in tests/unit/admin-mail-locale.test.ts; here, what the routes ask it and
+// that they send what it answers.
+const mailLocaleMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -71,6 +75,9 @@ vi.mock("@/lib/admin/admin-mail-budget.server", async () => {
     enforceRecipientCooldown: (...a: unknown[]) => recipientCooldownMock(...a),
   };
 });
+vi.mock("@/lib/admin/admin-mail-locale.server", () => ({
+  adminMailLocale: (...a: unknown[]) => mailLocaleMock(...a),
+}));
 const sendInvitationEmailMock = vi.fn();
 vi.mock("@/lib/invitations.server", () => ({
   createInvitation: (...args: unknown[]) => createInvitationMock(...args),
@@ -183,9 +190,11 @@ beforeEach(async () => {
     sharedLimitMock,
     orgMailBudgetMock,
     recipientCooldownMock,
+    mailLocaleMock,
   ])
     m.mockReset();
   orgMailBudgetMock.mockResolvedValue(null);
+  mailLocaleMock.mockResolvedValue("fr");
   recipientCooldownMock.mockResolvedValue(null);
   sessionGetter.mockResolvedValue({ user: { id: "ba-admin" } });
   selectFirst.mockResolvedValue(ORG_ROW);
@@ -400,6 +409,8 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
       organizationName: "Test Org",
       inviterAppUserId: "admin-app-user",
       plaintextToken: "tok-plain",
+      // F-102: the language `adminMailLocale` answered, for the email and its link.
+      locale: "fr",
     });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -541,6 +552,7 @@ describe("POST .../invitations/:invitationId/resend", () => {
       organizationName: "Test Org",
       inviterAppUserId: "admin-app-user",
       plaintextToken: "tok-rotated",
+      locale: "fr",
     });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.organization.invitation_resent" }),
@@ -786,5 +798,78 @@ describe("F-104: the invitation routes report the email's delivery", () => {
         metadata: expect.objectContaining({ invitationId: INVITATION_ID, emailStatus: null }),
       }),
     );
+  });
+});
+
+/**
+ * F-102: every invitation went out in English with an `/en/` link, whoever it
+ * was for and whatever language the admin worked in. Both routes now ask
+ * `adminMailLocale` about the INVITEE's address (not the admin's) in the
+ * inviting org, with the request (its `Referer` names the admin's page) and
+ * the admin's context, and
+ * hand its answer to `sendInvitationEmail`, which writes the email and anchors
+ * its link in it.
+ */
+describe("F-102: the invitation is written in the invitee's language", () => {
+  const ADMIN_PAGE = `http://test.local/ja/app/administrator/organizations/${ORG_ID}`;
+  const fromPage = <R extends NextRequest>(req: R): R => {
+    req.headers.set("referer", ADMIN_PAGE);
+    return req;
+  };
+
+  beforeEach(() => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.manage"]));
+  });
+
+  it("create: asks about the invitee's address and sends in the language it answers", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    mailLocaleMock.mockResolvedValue("uk");
+    const req = fromPage(jsonReq(BASE, { email: "Ada@Example.com " }));
+    expect((await createPOST(req, listCtx())).status).toBe(201);
+    // For the inviting org, whose admins read the outbox row: an account
+    // elsewhere must not show through it (the resolver confines the lookup).
+    expect(mailLocaleMock).toHaveBeenCalledWith(
+      "ada@example.com",
+      ORG_ID,
+      req,
+      expect.objectContaining({ appUserId: "admin-app-user", preferredLocale: "en" }),
+    );
+    expect(sendInvitationEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "ada@example.com", locale: "uk" }),
+    );
+  });
+
+  it("resend: asks about the invitation's address and sends in the language it answers", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    mailLocaleMock.mockResolvedValue("ja");
+    const req = fromPage(getReq(`${BASE}/${INVITATION_ID}/resend`));
+    expect((await resendPOST(req, itemCtx())).status).toBe(200);
+    expect(mailLocaleMock).toHaveBeenCalledWith(
+      "ada@example.com",
+      ORG_ID,
+      req,
+      expect.objectContaining({ appUserId: "admin-app-user" }),
+    );
+    expect(sendInvitationEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "ada@example.com", locale: "ja" }),
+    );
+  });
+
+  it("create: resolves the language before anything is written, so a failed read leaves no invitation", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    mailLocaleMock.mockRejectedValue(new Error("db down"));
+    const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
+    expect(res.status).toBe(500);
+    expect(createInvitationMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("resend: resolves the language before the rotation, so a failed read keeps the current link", async () => {
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    mailLocaleMock.mockRejectedValue(new Error("db down"));
+    const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
+    expect(res.status).toBe(500);
+    expect(regenerateMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
   });
 });

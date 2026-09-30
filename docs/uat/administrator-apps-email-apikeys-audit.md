@@ -249,7 +249,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-EMAIL-OUTBOX-S2 — As an Org Admin, I want to send a test email, so that I can confirm rendering and provider wiring end to end.
-  - Acceptance criteria: Given I hold `admin.email.manage`, when I Send, then the test email goes to my own address, a result message shows the delivery status and a new outbox row appears; with no provider configured the status is `logged` (`_outbox-grid.tsx`; test route sends the `test_email` template, `test/route.ts`). An org admin cannot choose another recipient (F-64).
+  - Acceptance criteria: Given I hold `admin.email.manage`, when I Send, then the test email goes to my own address, a result message shows the delivery status and a new outbox row appears; with no provider configured the status is `logged` (`_outbox-grid.tsx`; test route sends the `test_email` template, `test/route.ts`). An org admin cannot choose another recipient (F-64). The email is written in the recipient's language, which is my own account's **Language** (F-102, `admin-mail-locale.server.ts`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -257,6 +257,7 @@ User stories
     | 2 | Click **Send** | A short result message appears (e.g. delivered / logged) |
     | 3 | Watch the grid | A new row for the `test_email` template appears near the top |
     | 4 | Open the new row's detail | To matches your address; Status matches the result; body is text |
+    | 5 | Set your **Language** to 日本語 (Account → Preferences), then send another test | The new row's subject and body are in Japanese (F-102). Before, every test email was in English |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-EMAIL-OUTBOX-S3 — As a read-only email admin, I want the outbox without the Send action, so that I cannot generate mail.

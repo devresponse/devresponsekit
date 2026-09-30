@@ -27,6 +27,10 @@ const sendMock = vi.fn();
 // tests/db/admin-mail-budget.db.test.ts; here, that the route asks them.
 const sharedLimitMock = vi.fn();
 const orgMailBudgetMock = vi.fn();
+// F-102: the test email's language. Its resolution is pinned in
+// tests/unit/admin-mail-locale.test.ts; here, that the route asks it about the
+// recipient and sends in what it answers.
+const mailLocaleMock = vi.fn();
 /** Every `.select(...)` argument the handler under test issued (projection guard). */
 let selectedColumns: unknown[] = [];
 
@@ -58,6 +62,10 @@ vi.mock("@/lib/admin/admin-mail-budget.server", async () => {
     enforceOrgAdminMailBudget: (...args: unknown[]) => orgMailBudgetMock(...args),
   };
 });
+
+vi.mock("@/lib/admin/admin-mail-locale.server", () => ({
+  adminMailLocale: (...args: unknown[]) => mailLocaleMock(...args),
+}));
 
 vi.mock("@/db/database", () => {
   function makeChain() {
@@ -164,8 +172,10 @@ beforeEach(async () => {
     sendMock,
     sharedLimitMock,
     orgMailBudgetMock,
+    mailLocaleMock,
   ])
     m.mockReset();
+  mailLocaleMock.mockResolvedValue("en");
   sharedLimitMock.mockResolvedValue(null);
   orgMailBudgetMock.mockResolvedValue(null);
   selectedColumns = [];
@@ -546,6 +556,29 @@ describe("POST /api/administrator/email/test", () => {
       expect(auditMock).not.toHaveBeenCalled();
     });
 
+    // F-102: it went out in the default locale whoever it was for: the route
+    // named no locale and no related user for `sendAppEmail` to read one from.
+    it("writes an org admin's test in the language resolved for their own address", async () => {
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.email.manage"]));
+      sendMock.mockResolvedValue({ outboxId: "o-14", status: "logged" });
+      mailLocaleMock.mockResolvedValue("ja");
+      const req = makeReq("/api/administrator/email/test", {
+        method: "POST",
+        body: { to: "Admin@X.com" },
+      });
+      expect((await testPOST(req)).status).toBe(200);
+      // For the row's org, whose admins read it, and where the admin is a member.
+      expect(mailLocaleMock).toHaveBeenCalledWith(
+        "Admin@X.com",
+        "o-1",
+        req,
+        expect.objectContaining({ appUserId: "u-1", primaryEmail: "admin@x.com" }),
+      );
+      expect(sendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ to: "Admin@X.com", templateKey: "test_email", locale: "ja" }),
+      );
+    });
+
     it("still lets a superadmin session pick any recipient (a platform, org-less test)", async () => {
       accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.manage"]));
       sendMock.mockResolvedValue({ outboxId: "o-13", status: "logged" });
@@ -554,6 +587,14 @@ describe("POST /api/administrator/email/test", () => {
       expect(orgMailBudgetMock).toHaveBeenCalledWith(expect.anything(), null, expect.anything());
       expect(sendMock).toHaveBeenCalledWith(
         expect.objectContaining({ to: "someone@elsewhere.test", organizationId: null }),
+      );
+      // F-102: an org-less row, which only a cross-org admin reads, so the
+      // recipient's language is looked up among every account.
+      expect(mailLocaleMock).toHaveBeenCalledWith(
+        "someone@elsewhere.test",
+        null,
+        expect.anything(),
+        expect.anything(),
       );
     });
   });

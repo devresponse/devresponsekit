@@ -10,6 +10,7 @@ import {
   ADMIN_TEST_EMAIL_LIMIT,
   enforceOrgAdminMailBudget,
 } from "@/lib/admin/admin-mail-budget.server";
+import { adminMailLocale } from "@/lib/admin/admin-mail-locale.server";
 import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { sendAppEmail } from "@/lib/email/send.server";
@@ -97,6 +98,11 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     to: parsed.data.to,
     templateKey: "test_email",
     organizationId,
+    // F-102: in the recipient's language, which for an org admin is their own
+    // (the address is theirs, above, and a member of the row's org). It went
+    // out in the default locale, as the send named no locale and no related
+    // user for `sendAppEmail` to read one from.
+    locale: await adminMailLocale(parsed.data.to, organizationId, request, guard.access),
     variables: {
       appName: getBrand().name,
       // F-07: the human behind an impersonated session, matching the audit row.

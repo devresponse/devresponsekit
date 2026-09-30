@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultLocale } from "@/config/i18n-config";
+import type { SupportedLocale } from "@/config/i18n-config";
 import { sendInvitationEmail } from "@/lib/invitations.server";
 
 /**
@@ -48,6 +48,7 @@ describe("sendInvitationEmail", () => {
       organizationName: "Acme",
       inviterAppUserId: "admin-1",
       plaintextToken: "tok-abc",
+      locale: "en",
     });
     expect(inviterSelect).toHaveBeenCalledTimes(1);
     expect(sendAppEmailMock).toHaveBeenCalledTimes(1);
@@ -73,6 +74,7 @@ describe("sendInvitationEmail", () => {
       organizationName: "Acme",
       inviterAppUserId: null,
       plaintextToken: "tok",
+      locale: "en",
     });
     expect(result).toEqual({ outboxId: "out-9", status: "failed" });
   });
@@ -89,6 +91,7 @@ describe("sendInvitationEmail", () => {
       organizationName: "Acme",
       inviterAppUserId: "admin-1",
       plaintextToken: "tok",
+      locale: "en",
     });
     const arg = sendAppEmailMock.mock.calls[0]![0] as {
       organizationId?: string | null;
@@ -104,21 +107,29 @@ describe("sendInvitationEmail", () => {
   // the accept link is anchored to that same locale. Before, the body relied on
   // `sendAppEmail`'s fallback while the link hard-coded `/en`. They matched only
   // by coincidence, and the comment claiming they matched was not enforced.
-  it("renders the email in the locale its accept link is anchored to", async () => {
-    await sendInvitationEmail({
-      to: "invitee@example.com",
-      organizationId: "org-1",
-      organizationName: "Acme",
-      inviterAppUserId: null,
-      plaintextToken: "tok",
-    });
-    const arg = sendAppEmailMock.mock.calls[0]![0] as {
-      locale?: string;
-      variables: { acceptUrl: string };
-    };
-    expect(arg.locale).toBe(defaultLocale);
-    expect(new URL(arg.variables.acceptUrl).pathname).toBe(`/${arg.locale}/invite`);
-  });
+  // F-102: that locale is the one the route resolved (`adminMailLocale`), not
+  // the default: every invitation went out in English with an `/en/` link.
+  it.each<SupportedLocale>(["ja", "uk"])(
+    "renders the email in %s and anchors its accept link to it",
+    async (locale) => {
+      await sendInvitationEmail({
+        to: "invitee@example.com",
+        organizationId: "org-1",
+        organizationName: "Acme",
+        inviterAppUserId: null,
+        plaintextToken: "tok",
+        locale,
+      });
+      const arg = sendAppEmailMock.mock.calls[0]![0] as {
+        locale?: string;
+        variables: { acceptUrl: string };
+      };
+      expect(arg.locale).toBe(locale);
+      const url = new URL(arg.variables.acceptUrl);
+      expect(url.pathname).toBe(`/${locale}/invite`);
+      expect(url.searchParams.get("token")).toBe("tok");
+    },
+  );
 
   it("falls back to the inviter email when there is no display name", async () => {
     inviterRow = { display_name: null, primary_email: "ada@x.com" };
@@ -128,6 +139,7 @@ describe("sendInvitationEmail", () => {
       organizationName: "Acme",
       inviterAppUserId: "admin-1",
       plaintextToken: "tok",
+      locale: "en",
     });
     const arg = sendAppEmailMock.mock.calls[0]![0] as { variables: { inviterName: string } };
     expect(arg.variables.inviterName).toBe("ada@x.com");
@@ -140,6 +152,7 @@ describe("sendInvitationEmail", () => {
       organizationName: "Acme",
       inviterAppUserId: null,
       plaintextToken: "tok",
+      locale: "en",
     });
     expect(inviterSelect).not.toHaveBeenCalled();
     const arg = sendAppEmailMock.mock.calls[0]![0] as { variables: { inviterName: string } };

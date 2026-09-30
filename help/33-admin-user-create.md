@@ -5,6 +5,7 @@ group: "4. Administrator console"
 order: 33
 route: /en/app/administrator/users/new
 area: admin
+requires: admin.users.create
 captured: 2026-07-10
 ---
 

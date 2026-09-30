@@ -5,6 +5,7 @@ group: "4. Administrator console"
 order: 45
 route: /en/app/administrator/email/templates
 area: admin
+requires: admin.email.read
 captured: 2026-07-10
 ---
 

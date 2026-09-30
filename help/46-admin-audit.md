@@ -5,7 +5,8 @@ group: "4. Administrator console"
 order: 46
 route: /en/app/administrator/audit
 area: admin
-captured: 2026-07-10
+requires: admin.audit.read
+captured: 2026-09-29
 ---
 
 # Administrator · Audit log
@@ -17,7 +18,7 @@ captured: 2026-07-10
 
 ## Key elements
 - Filters: **Event type** (free text, e.g. `admin.user.banned`), **Outcome** (Any/…), and **Actor** (Better Auth user id).
-- Table: Time, Event type, Outcome — the demo shows a series of `auth.session.created` events with `success` outcomes, one per sign-in of the seed users.
+- Table: Time, Event type, Outcome, Actor, Target — the capture shows the capture tool's own sign-ins (`auth.session.created`), the `admin.api_key.created` behind the [API keys](42-admin-api-keys.md) screenshot, and the fixture's back-dated history, all `success`.
 - Row click → detail panel with full event metadata.
 
 ## Actions available

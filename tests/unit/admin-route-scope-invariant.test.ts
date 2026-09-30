@@ -152,7 +152,7 @@ const OTHER_EXEMPT: Record<string, string> = {
   "api/docs/asset/[...path]/route.ts#GET":
     "static docs asset from the repo tree; no tenant data. Gated (session, membership, shell.view) in serveSpaceAsset",
   "api/help/asset/[...path]/route.ts#GET":
-    "static help asset from the repo tree; no tenant data. Gated (session, membership, shell.view) in serveSpaceAsset",
+    "static help asset from the repo tree; no tenant data, because its screenshots are captured from synthetic data only (F-89: help/capture.mjs refuses otherwise) and any member may fetch any of them. Gated (session, membership, shell.view) in serveSpaceAsset",
   "api/sso/jwks.json/route.ts#GET": "public JWKS; platform-global signing keys, no tenant data",
   "api/sso/consume/route.ts#GET":
     "consumer side of the handoff: the signed token IS the principal (jti + sub bound at launch); no session yet",

@@ -5,7 +5,8 @@ group: "4. Administrator console"
 order: 40
 route: /en/app/administrator/memberships
 area: admin
-captured: 2026-07-10
+requires: admin.orgs.read
+captured: 2026-09-29
 ---
 
 # Administrator · Memberships
@@ -30,4 +31,4 @@ A flat, cross-organization view of every user↔organization membership — the 
 `admin.orgs.read`.
 
 ## Observations
-Useful for answering "which org is this user in, and how did they get there?" across tenants without opening each organization. The demo shows the four seed users, all active in `default`.
+Useful for answering "which org is this user in, and how did they get there?" across tenants without opening each organization. The capture shows the fixture data: a cross-organization member has one row per organization it belongs to.

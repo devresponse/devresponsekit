@@ -5,7 +5,8 @@ group: "4. Administrator console"
 order: 42
 route: /en/app/administrator/api-keys
 area: admin
-captured: 2026-07-10
+requires: admin.apikeys.read
+captured: 2026-09-29
 ---
 
 # Administrator · API keys
@@ -18,10 +19,10 @@ Platform-wide inventory of every API key across all users and organizations — 
 ## Key elements
 - Explanatory header: inspect scopes and usage, rotate or revoke, or issue a key on behalf of a user; "Secrets are never shown here — only when a key is created or rotated."
 - Status filter (All / Active / Revoked) and an **Issue API key** button.
-- Table: Name, Prefix (e.g. `drk_live_7GR7uu2W…`), Owner, Scopes (count), Status, Last used, Expires, Created — with per-row **View** / **Rotate** / **Revoke**.
+- Table: Name, Prefix (the key's first characters, e.g. `drk_live_…`), Owner, Scopes (count), Status, Last used, Expires, Created — with per-row **View** / **Rotate** / **Revoke**.
 
 ## Actions available
-- View a key's scopes/usage; rotate (invalidates the old secret, shows a new one once); revoke; issue a key for any user (`admin.apikeys.manage`) — *none exercised.*
+- View a key's scopes/usage; rotate (invalidates the old secret, shows a new one once); revoke; issue a key for any user (`admin.apikeys.manage`) — *none exercised on this screen; the row shown was issued before the capture.*
 
 ## Navigation
 - Reached from: admin sidebar (APIs → API keys).
@@ -30,4 +31,4 @@ Platform-wide inventory of every API key across all users and organizations — 
 `admin.apikeys.read`; rotate/revoke/issue require `admin.apikeys.manage`.
 
 ## Observations
-Keys are stored hashed (SHA-256) — the prefix column plus last-used timestamp is the operational fingerprint. The demo shows one key ("test api", 4 scopes, active).
+Keys are stored hashed (SHA-256) — the prefix column plus last-used timestamp is the operational fingerprint. The capture shows one synthetic key, "Nightly report export", issued to a fixture organization administrator with 2 scopes and a 90-day expiry.

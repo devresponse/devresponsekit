@@ -6,11 +6,13 @@
 // out of the runtime image. It holds NO credentials — everything it needs comes
 // from the environment and it exits early (non-zero) when something is missing:
 //
-//   CAPTURE_BASE_URL   origin to capture, e.g. https://demo.example.com
+//   CAPTURE_BASE_URL   origin to capture, e.g. http://localhost:3000
 //   CAPTURE_EMAIL      account to sign in as (needs the admin-console
 //                      permissions for the /administrator screens)
 //   CAPTURE_PASSWORD   that account's password — inject it from a secret
 //                      store; never paste it into a script or a commit
+//   CAPTURE_SYNTHETIC_DATA  must be 1: confirms the target holds synthetic
+//                      data only (F-89, see below)
 //   CAPTURE_USER_ID    (optional) pin the representative user / role /
 //   CAPTURE_ROLE_ID    organization whose detail pages are captured. Left
 //   CAPTURE_ORG_ID     unset, each id is READ AT RUN TIME off the matching
@@ -22,7 +24,7 @@
 // non-zero listing whatever failed — a bad screenshot must never pass quietly.
 //
 // Run from the repo root (uses the repo's Playwright):
-//   CAPTURE_BASE_URL=... CAPTURE_EMAIL=... CAPTURE_PASSWORD=... node help/capture.mjs
+//   CAPTURE_SYNTHETIC_DATA=1 CAPTURE_BASE_URL=... CAPTURE_EMAIL=... CAPTURE_PASSWORD=... node help/capture.mjs
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
@@ -44,6 +46,21 @@ function requireEnv(name) {
 const BASE = new URL(requireEnv("CAPTURE_BASE_URL")).origin;
 const EMAIL = requireEnv("CAPTURE_EMAIL");
 const PASSWORD = requireEnv("CAPTURE_PASSWORD");
+
+// F-89: every screenshot is committed to the repository and served to every
+// member of every organization by the help image route, whatever `requires:`
+// its page carries. So the target must hold synthetic data only, never a live
+// console: the first walkthrough was shot against a production demo and
+// published its operator's email, public IP and an active API key's prefix.
+if (process.env.CAPTURE_SYNTHETIC_DATA?.trim() !== "1") {
+  console.error(
+    "help/capture.mjs: refusing to capture without CAPTURE_SYNTHETIC_DATA=1. Point " +
+      "CAPTURE_BASE_URL at a deployment seeded with synthetic data only (a local build on " +
+      "`pnpm db:provision` + `pnpm db:seed:dev`), then set it to confirm.",
+  );
+  process.exit(2);
+}
+
 const OUT = path.join("help", "screenshots");
 
 // [slug, route, options]

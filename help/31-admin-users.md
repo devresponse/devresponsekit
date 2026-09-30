@@ -5,7 +5,8 @@ group: "4. Administrator console"
 order: 31
 route: /en/app/administrator/users
 area: admin
-captured: 2026-07-10
+requires: admin.users.read
+captured: 2026-09-29
 ---
 
 # Administrator · Users
@@ -33,4 +34,4 @@ Platform-wide user management: browse, filter, export, and open every user accou
 `admin.users.read` to view; mutating actions map to the finer-grained `admin.users.*` permissions.
 
 ## Observations
-The demo contains 4 users, all active members of the Default Organization.
+The capture shows the synthetic seed data (`pnpm db:seed` plus `pnpm db:seed:dev`): 25 active users across the Default Organization and three fixture organizations, with the cross-organization members listing all three.

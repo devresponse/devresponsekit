@@ -55,6 +55,14 @@ For a deployment running 2.0.0.
    require actions pinned to a full-length commit SHA, and restrict the
    `production` environment's deployment branches to `main`, adding required
    reviewers with its first secret (I-09).
+3. **The old help screenshots.** Until F-89 the walkthrough's admin and
+   account screenshots, taken on the live demo, showed the operator's real
+   email addresses, public IP address and an active, non-expiring API key
+   (named "test api", owned by the operator) with its prefix, also quoted in
+   `help/42-admin-api-keys.md`. They are recaptured from synthetic data, but
+   the old files stay in the public repository's history (added in #346,
+   retaken in #347). Revoke that key on the demo if it is still active, and
+   decide whether to purge the old `help/screenshots/*.png` from history.
 
 ### Security fixes the satellite forks must port
 
@@ -108,6 +116,11 @@ of 2.0.0's list below. Each entry names what to carry over.
 - The optional Actions deploy installs its Vercel CLI from `vercel-cli/`'s
   lockfile, the audited tree `drk-deploy` runs, instead of an unlocked global
   `vercel@54` (I-09).
+- The administrator-console help pages are listed only to a viewer holding
+  the permission of the screen each documents, the screenshots that showed
+  real accounts, IP addresses and an API key are recaptured from synthetic
+  seed data, and `help/capture.mjs` refuses a target not confirmed synthetic
+  (`CAPTURE_SYNTHETIC_DATA=1`) (F-89).
 
 ### Fixed
 

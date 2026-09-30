@@ -20,6 +20,7 @@ import { parseFrontmatter } from "@/lib/docs/frontmatter";
  *    withheld, each with only a log line to show for it. For shipped content
  *    CI is the place to notice, so every file must parse clean and own its
  *    slug.
+ *  - F-89: help/ text names invented identities only (see realIdentities).
  */
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const APP_DIR = path.join(REPO_ROOT, "src", "app");
@@ -38,6 +39,45 @@ function walk(dir: string, predicate: (name: string) => boolean): string[] {
 }
 
 const isMarkdown = (name: string) => /\.mdx?$/i.test(name);
+
+/**
+ * F-89: help/ is served to every member of every org and sits in a public
+ * repository, and it once quoted a live API key's prefix beside screenshots of
+ * the operator's real email and public IP. Its text may only name invented
+ * identities: a mailbox on a reserved domain, a loopback, private or
+ * documentation IPv4 address, and no concrete key prefix (`drk_live_…` only).
+ */
+const EMAIL = /[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})/g;
+const RESERVED_MAIL_DOMAIN =
+  /(?:^|\.)(?:example\.(?:com|org|net)|example|test|local|invalid|localhost)$/i;
+const IPV4 = /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/g;
+const KEY_PREFIX = /\bdrk_(?:live|test)_[A-Za-z0-9]+/g;
+
+function isSyntheticIpv4(a: number, b: number, c: number): boolean {
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && c === 2) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113)
+  );
+}
+
+/** Every real-looking mailbox, public IPv4 address or concrete key prefix in `text`. */
+function realIdentities(text: string): string[] {
+  const found: string[] = [];
+  for (const [whole, domain] of text.matchAll(EMAIL)) {
+    if (!RESERVED_MAIL_DOMAIN.test(domain!)) found.push(whole);
+  }
+  for (const [whole, a, b, c] of text.matchAll(IPV4)) {
+    if (!isSyntheticIpv4(Number(a), Number(b), Number(c))) found.push(whole);
+  }
+  for (const [whole] of text.matchAll(KEY_PREFIX)) found.push(whole);
+  return found;
+}
 
 /**
  * A URL the CSP cannot load: an absolute `https?://…` **or** the
@@ -164,6 +204,47 @@ describe("documentation content hygiene", () => {
       }
     }
     expect(offenders, "Neither file is listed or served: keep one of them.").toEqual([]);
+  });
+
+  it("names no real mailbox, public IP address or key prefix in help/ (F-89)", () => {
+    const offenders: string[] = [];
+    const helpDir = path.join(REPO_ROOT, "help");
+    for (const file of walk(helpDir, (name) => /\.(?:mdx?|mjs)$/i.test(name))) {
+      const found = realIdentities(readFileSync(file, "utf8"));
+      if (found.length > 0) {
+        const rel = path.relative(REPO_ROOT, file).split(path.sep).join("/");
+        offenders.push(`${rel}: ${found.join(", ")}`);
+      }
+    }
+    expect(
+      offenders,
+      "help/ is served to every member and published with the repository: use a reserved " +
+        "domain (example.com, *.local, *.test), a documentation IP (192.0.2.x) and `drk_live_…`.",
+    ).toEqual([]);
+  });
+
+  it("detects a real mailbox, a public IP address and a key prefix (F-89)", () => {
+    // The scan above passes vacuously on clean content, so pin the detector.
+    for (const sample of [
+      "owner someone@gmail.com",
+      "ops@acme-corp.com",
+      "IP: 8.8.8.8",
+      "IP 1.1.1.1",
+      "Prefix `drk_live_Zz9Yy8Xx…`",
+      "drk_test_Ab12",
+    ]) {
+      expect(realIdentities(sample), sample).not.toEqual([]);
+    }
+    for (const sample of [
+      "admin@devresponse.local",
+      "recipient@example.com",
+      "user1@orga.local",
+      "someone@example.test",
+      "IP 127.0.0.1, 10.0.0.8, 192.168.1.20, 172.20.0.3, 192.0.2.10, 203.0.113.7",
+      "Prefix (e.g. `drk_live_…`)",
+    ]) {
+      expect(realIdentities(sample), sample).toEqual([]);
+    }
   });
 
   it("ships no remote image references in docs/ or help/ (review #215)", () => {

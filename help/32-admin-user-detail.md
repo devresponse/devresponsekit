@@ -5,7 +5,8 @@ group: "4. Administrator console"
 order: 32
 route: /en/app/administrator/users/{userId}
 area: admin
-captured: 2026-07-10
+requires: admin.users.read
+captured: 2026-09-29
 ---
 
 # Administrator · User detail

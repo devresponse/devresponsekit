@@ -79,14 +79,26 @@ excluded from the Docker build context and holds **no credentials** — pass
 them through the environment and it exits non-zero when one is missing:
 
 ```bash
-CAPTURE_BASE_URL=https://<host> CAPTURE_EMAIL=<admin account> CAPTURE_PASSWORD=<from your secret store>   node help/capture.mjs
+CAPTURE_SYNTHETIC_DATA=1 CAPTURE_BASE_URL=http://localhost:3000 CAPTURE_EMAIL=<admin account> CAPTURE_PASSWORD=<from your secret store>   node help/capture.mjs
 ```
 
+Capture only from a deployment holding **synthetic data**, never a live
+console: the screenshots are committed to the repository (the kit's is public)
+and the help image route serves them to every member of every organization, whatever the
+page embedding them requires (F-89). A local production build (`pnpm build`,
+then `pnpm start`, which serves `http://localhost:3000`, the origin
+`.env.example` gives `BETTER_AUTH_URL` and `NEXT_PUBLIC_APP_URL`) on a fresh
+database seeded with `pnpm db:provision` and `pnpm db:seed:dev` works; the
+script refuses to run until
+`CAPTURE_SYNTHETIC_DATA=1` confirms the target.
 The account needs the administrator-console permissions for the
 `/administrator` screens. `CAPTURE_USER_ID` / `CAPTURE_ROLE_ID` /
 `CAPTURE_ORG_ID` optionally pick the representative detail rows. Never inline
 a password in the script, a shell alias, or a commit — the secret-scan gate
-rejects quoted password literals under `help/` and `scripts/`.
+rejects quoted password literals under `help/` and `scripts/`. A new
+administrator-console help page needs `requires:` naming the permission its
+screen's page guards on (`tests/integration/help-filesystem-source.test.ts`
+checks it).
 
 ## Testing expectations
 

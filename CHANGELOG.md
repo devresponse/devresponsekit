@@ -171,6 +171,12 @@ of 2.0.0's list below. Each entry names what to carry over.
   real accounts, IP addresses and an API key are recaptured from synthetic
   seed data, and `help/capture.mjs` refuses a target not confirmed synthetic
   (`CAPTURE_SYNTHETIC_DATA=1`) (F-89).
+- The override floors for `brace-expansion` (`@1` to `^1.1.21`, `@5` to
+  `^5.0.12`) and `ajv>fast-uri` (`^3.1.8`) are raised, and `socks>ip-address`
+  gets a `^10.7.1` floor, for `GHSA-6j4f-fj2g-mc7p` and `GHSA-qhr7-859c-m2p7`
+  (high) and four moderate advisories. Every path is
+  development-only (eslint, Stryker, the OpenAPI generator), and
+  `pnpm audit --audit-level low` reports nothing.
 
 ### Fixed
 

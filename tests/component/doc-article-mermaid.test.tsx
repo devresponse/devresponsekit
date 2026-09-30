@@ -22,8 +22,10 @@ vi.mock("mermaid", () => ({
   },
 }));
 
+// Mutable so a test can switch themes; reset before each test.
+let resolvedTheme: "light" | "dark" = "light";
 vi.mock("@/components/theme/theme-provider", () => ({
-  useTheme: () => ({ resolvedTheme: "light" }),
+  useTheme: () => ({ resolvedTheme }),
 }));
 
 // Passthrough translator: returns the message key so assertions are stable.
@@ -37,6 +39,7 @@ describe("DocArticle mermaid rendering", () => {
   beforeEach(() => {
     renderMock.mockClear();
     initializeMock.mockClear();
+    resolvedTheme = "light";
   });
 
   it("renders a mermaid mount into SVG", async () => {
@@ -56,8 +59,8 @@ describe("DocArticle mermaid rendering", () => {
 
   it("sanitizes the rendered SVG but keeps Mermaid's output, incl. foreignObject labels", async () => {
     // Mermaid renders with securityLevel "strict", but DocArticle still runs the
-    // SVG through DOMPurify before innerHTML (defense in depth + the CodeQL
-    // js/xss-through-dom barrier). The sanitizer must NOT blank diagram text:
+    // SVG through DOMPurify before innerHTML (defense in depth). The sanitizer
+    // must NOT blank diagram text:
     // Mermaid puts node/edge labels in <foreignObject> HTML, so the config has to
     // keep that while still stripping scripts/handlers.
     renderMock.mockResolvedValueOnce({
@@ -154,6 +157,37 @@ describe("DocArticle mermaid rendering", () => {
     // The diagram geometry survives too — this is not an empty <svg>.
     expect(mount.querySelectorAll("rect").length).toBe(2);
     expect(mount.querySelector("marker")).not.toBeNull();
+  });
+
+  it("re-renders on a theme change from the cached source, kept out of any src slot (F-112)", async () => {
+    // The first render's SVG text must DIFFER from the source (the default mock
+    // echoes it), or re-reading the mount's textContent instead of the cache
+    // would send the same string and this test could not tell the two apart.
+    renderMock.mockResolvedValueOnce({
+      svg: '<svg data-testid="diagram"><text>rendered output</text></svg>',
+    });
+    const { container, rerender } = render(<DocArticle html={MERMAID_HTML} />);
+    await waitFor(() => {
+      expect(container.querySelector<HTMLElement>(".mermaid")?.dataset.rendered).toBe("true");
+    });
+    const mount = container.querySelector<HTMLElement>(".mermaid")!;
+    const source = "erDiagram\n  A ||--o{ B : has";
+    expect(mount.textContent).toBe("rendered output");
+    // The source is cached under data-mermaid-source: DOM text written to a
+    // `src`-named slot is what CodeQL's js/xss-through-dom flagged.
+    expect(mount.dataset.mermaidSource).toBe(source);
+    expect(mount.hasAttribute("data-src")).toBe(false);
+
+    // The mount's text is now the SVG's; a theme switch must re-render the
+    // ORIGINAL source, not Mermaid's own output. (A new `space` prop gets the
+    // memoized body past `memo` so it reads the switched theme.)
+    resolvedTheme = "dark";
+    rerender(<DocArticle html={MERMAID_HTML} space="help" />);
+    await waitFor(() => {
+      expect(initializeMock).toHaveBeenLastCalledWith(expect.objectContaining({ theme: "dark" }));
+      expect(renderMock).toHaveBeenCalledTimes(2);
+    });
+    expect(renderMock.mock.calls[1]![1]).toBe(source);
   });
 
   it("makes the rendered diagram an accessible button", async () => {

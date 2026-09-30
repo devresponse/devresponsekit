@@ -1,6 +1,28 @@
 import { THEME_STORAGE_KEY } from "./theme-config";
 
 /**
+ * A JavaScript string literal for `value` that is safe to place inside an
+ * inline `<script>` element.
+ *
+ * `JSON.stringify` alone yields a valid JS literal but not a safe one here: the
+ * HTML parser ends a script element at the first `</script`, before any JS
+ * parsing, so a value containing it would close the element and run what follows
+ * as markup (and `<!--` changes how the element is tokenized). Escaping `<` and
+ * `>` as `\u003c`/`\u003e` leaves the string's value unchanged while no markup
+ * can survive; U+2028/U+2029 are escaped too because pre-ES2019 engines treat
+ * them as line terminators inside a string literal. Today's only input is the
+ * constant storage key, so this makes the script's safety independent of that
+ * constant rather than fixing a live injection (F-112, CodeQL
+ * js/bad-code-sanitization).
+ */
+export function inlineScriptStringLiteral(value: string): string {
+  return JSON.stringify(value).replace(
+    /[<>\u2028\u2029]/g,
+    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/**
  * ThemeScript — the anti-flash (FOUC) theme initializer.
  *
  * The init logic: before the body paints, read the persisted theme (or the OS
@@ -9,7 +31,7 @@ import { THEME_STORAGE_KEY } from "./theme-config";
  * per-user and unknowable on the server), so this runs first to avoid a flash;
  * `<html suppressHydrationWarning>` absorbs the resulting class mismatch.
  */
-const THEME_INIT_SCRIPT = `(function(){try{var p=localStorage.getItem(${JSON.stringify(
+const THEME_INIT_SCRIPT = `(function(){try{var p=localStorage.getItem(${inlineScriptStringLiteral(
   THEME_STORAGE_KEY,
 )})||"system",t=p==="system"?(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):p,e=document.documentElement;e.classList.remove("light","dark");e.classList.add(t);e.style.colorScheme=t}catch(e){}})();`;
 

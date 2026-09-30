@@ -164,6 +164,54 @@ describe("ensureVerifiedJar", () => {
     expect(existsSync(jar)).toBe(false);
   });
 
+  it("streams the download through the hash to disk, never buffering the whole JAR (F-112)", async () => {
+    // The old buffer-then-writeFile form is the flow CodeQL's
+    // js/http-to-file-access flagged; the body must be consumed as a stream.
+    const streamingOnly = (async (url: string | URL | Request) => {
+      fetches.push(String(url));
+      const response = new Response(new Uint8Array(GOOD), { status: 200 });
+      return Object.assign(response, {
+        arrayBuffer: () => Promise.reject(new Error("buffered the whole body")),
+      });
+    }) as typeof fetch;
+    const result = await ensureVerifiedJar({
+      root: dir,
+      expected: { [VERSION]: GOOD_SHA },
+      fetchImpl: streamingOnly,
+    });
+    expect(result).toMatchObject({ sha256: GOOD_SHA, downloaded: true });
+    expect(await readFile(result.path)).toEqual(GOOD);
+  });
+
+  it("clears the partial temp file when the body fails mid-stream, and refuses an empty body", async () => {
+    const jar = path.resolve(dir, "cache/og", `${VERSION}.jar`);
+    const dropsMidBody = (async () => {
+      let sent = false;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (!sent) {
+            sent = true;
+            controller.enqueue(new Uint8Array(GOOD.subarray(0, 8)));
+          } else {
+            controller.error(new Error("connection reset"));
+          }
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as typeof fetch;
+    await expect(
+      ensureVerifiedJar({ root: dir, expected: { [VERSION]: GOOD_SHA }, fetchImpl: dropsMidBody }),
+    ).rejects.toThrow(/connection reset/);
+    expect(existsSync(`${jar}.download`)).toBe(false);
+    expect(existsSync(jar)).toBe(false);
+
+    const noBody = (async () => new Response(null, { status: 200 })) as typeof fetch;
+    await expect(
+      ensureVerifiedJar({ root: dir, expected: { [VERSION]: GOOD_SHA }, fetchImpl: noBody }),
+    ).rejects.toThrow(/Download failed: empty response body/);
+    expect(existsSync(jar)).toBe(false);
+  });
+
   it("fails closed on a failed download or a version with no pinned hash", async () => {
     await expect(
       ensureVerifiedJar({

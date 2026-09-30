@@ -107,14 +107,18 @@ const ArticleBody = memo(function ArticleBody({
 
       for (let i = 0; i < mounts.length; i++) {
         const el = mounts[i]!;
-        const source = el.dataset.src ?? el.textContent ?? "";
-        el.dataset.src = source;
+        // Cache the diagram source on the mount: after the first render its text is
+        // the SVG, and a theme change re-renders from the cached source. The key is
+        // `data-mermaid-source`, NOT `data-src` — `src` is a URL slot (lazy-loaders
+        // promote `data-src` into a real `src`), and writing DOM text under that name
+        // is the js/xss-through-dom flow CodeQL flagged (F-112).
+        const source = el.dataset.mermaidSource ?? el.textContent ?? "";
+        el.dataset.mermaidSource = source;
         try {
           const { svg } = await mermaid.render(`mmd-${i}-${source.length}`, source);
           if (cancelled) return;
-          // Defense in depth + the explicit sanitizer the CodeQL `js/xss-through-dom`
-          // flow requires (the diagram source is read from the DOM as text). DOMPurify
-          // still strips `<script>`, event handlers, and `javascript:` URLs regardless.
+          // Defense in depth: Mermaid already renders with securityLevel "strict", and
+          // DOMPurify still strips `<script>`, event handlers, and `javascript:` URLs.
           // This config MIRRORS Mermaid's own internal SVG-sanitize config, so the pass
           // is idempotent and never blanks diagram text: Mermaid renders node/edge labels
           // as HTML inside `<foreignObject>`, which DOMPurify only keeps when that element

@@ -235,6 +235,24 @@ export function parseListQuery(params: URLSearchParams, options: ParseListQueryO
 }
 
 /**
+ * Every value of the exact-match filter `filter[<name>]`, for an `in`
+ * predicate (F-74). The admin OpenAPI document declares each such filter
+ * repeatable ("repeat for multiple values", `explode: true`), and the
+ * generated SDK sends an array as one parameter per value, but most lists
+ * read only the string a single value parses to. A repeated filter is an
+ * array here, so they applied no filter at all and answered every row.
+ *
+ * A single value is a one-element list; an empty value, and a range
+ * (`[from]` / `[to]`), is none. An empty result means "no filter", as an
+ * absent or empty value always has.
+ */
+export function filterValues(query: ListQuery, name: string): string[] {
+  const value = Object.hasOwn(query.filters, name) ? query.filters[name] : undefined;
+  const values = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+  return values.filter((v) => v.length > 0);
+}
+
+/**
  * One `sort` value as a {@link SortSpec}: `field`, `field.asc` or
  * `field.desc`, else null.
  *

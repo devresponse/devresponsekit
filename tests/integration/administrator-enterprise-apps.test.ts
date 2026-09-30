@@ -26,6 +26,8 @@ const trxDeletes = vi.fn();
 /** F-82: the sweep of an app's handoff sessions (DB-backed in tests/db). */
 const endHandoffs = vi.fn();
 const logErrMock = vi.fn();
+/** F-74: each comparison a `where((eb) => …)` callback built, as `eb(...)` args. */
+const ebCalls: unknown[][] = [];
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -70,7 +72,10 @@ vi.mock("@/db/database", () => {
                 (cb as (eb: unknown) => unknown)(
                   new Proxy(() => ({}), {
                     get: () => () => ({}),
-                    apply: () => ({}),
+                    apply: (_target, _this, args: unknown[]) => {
+                      ebCalls.push(args);
+                      return {};
+                    },
                   }),
                 );
               } catch {
@@ -195,6 +200,7 @@ beforeEach(async () => {
     logErrMock,
   ])
     m.mockReset();
+  ebCalls.length = 0;
   itemsExecute.mockResolvedValue([]);
   endHandoffs.mockResolvedValue(0);
   selectFirst.mockResolvedValue({ total: "0" });
@@ -250,6 +256,18 @@ describe("GET /api/administrator/enterprise-apps", () => {
       { field: "sort_order", direction: "asc" },
       { field: "label", direction: "asc" },
     ]);
+  });
+
+  it("reads every value of a repeated organization filter, `null` as the global apps (F-74)", async () => {
+    // A repeated filter used to be dropped, which listed every app.
+    // tests/db/admin-list-repeated-filters.db.test.ts runs it against Postgres.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.read"]));
+    const org = "a1b2c3d4-e5f6-4890-abcd-ef1234567890";
+    const res = await GET(listReq(`?filter[organization_id]=${org}&filter[organization_id]=null`));
+    expect(res.status).toBe(200);
+    expect(ebCalls).toContainEqual(["a.organization_id", "is", null]);
+    expect(ebCalls).toContainEqual(["a.organization_id", "in", [org]]);
   });
 });
 

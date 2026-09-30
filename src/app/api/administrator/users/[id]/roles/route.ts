@@ -6,6 +6,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -66,9 +67,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
     base = base.where("ur.organization_id", "=", scope.organizationId);
   }
 
-  const orgIdFilter = query.filters.organization_id;
-  if (typeof orgIdFilter === "string" && orgIdFilter.length > 0) {
-    base = base.where("ur.organization_id", "=", orgIdFilter);
+  // Repeatable: any of its values matches (F-74). A repeated value used to be
+  // dropped, which listed the user's roles in every org.
+  const orgIds = filterValues(query, "organization_id");
+  if (orgIds.length > 0) {
+    base = base.where("ur.organization_id", "in", orgIds);
   }
 
   const itemsQuery = applySortAndPagination(

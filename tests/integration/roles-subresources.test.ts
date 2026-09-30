@@ -4,6 +4,7 @@ import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as PermsRoute from "@/app/api/administrator/roles/[id]/permissions/route";
 import type * as MembersRoute from "@/app/api/administrator/roles/[id]/members/route";
 import type * as DuplicateRoute from "@/app/api/administrator/roles/[id]/duplicate/route";
+import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 
 /**
  * ADR-0001 — role sub-resource scoping (0% covered before this suite).
@@ -70,7 +71,7 @@ function tableKey(t: unknown): string {
 function firstFor(table: string) {
   if (table === "app_roles") return state.role;
   if (table === "app_user_roles") return { total: "0" }; // members count
-  if (table === "trx") return { id: "new-role", key: "editor-copy" };
+  if (table === "trx") return { id: "ffffffff-ffff-4fff-8fff-ffffffffffff", key: "editor-copy" };
   return undefined;
 }
 function execFor(table: string): unknown[] {
@@ -536,7 +537,10 @@ describe("roles/[id]/duplicate — org scoping", () => {
   it("POST 201 for own-org role whose permissions the actor holds", async () => {
     // The mock source role confers admin.users.read; the actor must hold it.
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.create", "admin.users.read"]));
-    expect((await duplicatePOST(req("duplicate", { method: "POST" }), ctx)).status).toBe(201);
+    const res = await duplicatePOST(req("duplicate", { method: "POST" }), ctx);
+    expect(res.status).toBe(201);
+    // The spec's KeyCreated, as every create sharing it must answer (F-74).
+    await expectResponseMatchesSpec(res, "admin", "post", "/roles/{id}/duplicate");
   });
 
   it("POST 403 duplicating a role that confers a permission the actor lacks (AUTHZ-3)", async () => {

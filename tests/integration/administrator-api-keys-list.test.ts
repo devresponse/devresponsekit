@@ -199,7 +199,13 @@ describe("GET /api/administrator/api-keys", () => {
 
     it("filters by a credential status", async () => {
       await list(GET, "?filter[status]=revoked");
-      expect(statusWheres()).toEqual([["where", "k.status", "=", "revoked"]]);
+      expect(statusWheres()).toEqual([["where", "k.status", "in", ["revoked"]]]);
+    });
+
+    it("matches any of a repeated status, dropping one outside the vocabulary (F-74)", async () => {
+      // A repeated filter used to be dropped whole, which listed every key.
+      await list(GET, "?filter[status]=active&filter[status]=bogus&filter[status]=revoked");
+      expect(statusWheres()).toEqual([["where", "k.status", "in", ["active", "revoked"]]]);
     });
 
     it("ignores a value outside the credential vocabulary", async () => {
@@ -221,7 +227,7 @@ describe("GET /api/administrator/api-keys", () => {
         vi.resetModules();
         const widened = await import("@/app/api/administrator/api-keys/route");
         await list(widened.GET, "?filter[status]=expired");
-        expect(statusWheres()).toEqual([["where", "k.status", "=", "expired"]]);
+        expect(statusWheres()).toEqual([["where", "k.status", "in", ["expired"]]]);
       } finally {
         vi.doUnmock("@/lib/status-values");
       }

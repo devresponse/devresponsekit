@@ -10,6 +10,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -58,7 +59,8 @@ interface RouteContext {
  * GET /api/administrator/users/:id/memberships
  *
  * Paginated list of memberships for a specific user.
- * Filters: `status`, `organization_id`.
+ * Filters: `status`, `organization_id`, each repeatable: any of its values
+ * matches (F-74).
  *
  * Caller MUST hold `admin.users.read`.
  */
@@ -97,14 +99,15 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
     base = base.where("m.organization_id", "=", scope.organizationId);
   }
 
-  const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && statusFilter.length > 0) {
-    base = base.where("m.status", "=", statusFilter);
+  // F-74: a repeated filter used to be dropped, which listed every membership.
+  const statuses = filterValues(query, "status");
+  if (statuses.length > 0) {
+    base = base.where("m.status", "in", statuses);
   }
 
-  const orgIdFilter = query.filters.organization_id;
-  if (typeof orgIdFilter === "string" && orgIdFilter.length > 0) {
-    base = base.where("m.organization_id", "=", orgIdFilter);
+  const orgIds = filterValues(query, "organization_id");
+  if (orgIds.length > 0) {
+    base = base.where("m.organization_id", "in", orgIds);
   }
 
   const itemsQuery = applySortAndPagination(

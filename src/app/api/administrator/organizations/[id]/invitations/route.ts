@@ -16,6 +16,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -42,7 +43,8 @@ interface RouteContext {
  * GET /api/administrator/organizations/:id/invitations
  *
  * Paginated invitations for this organization. Filters: `status`
- * (pending/accepted/revoked/expired). `q` searches the invitee email.
+ * (pending/accepted/revoked/expired), repeatable: any of its values matches
+ * (F-74). `q` searches the invitee email.
  * Token hashes are never returned.
  *
  * Caller MUST hold `admin.orgs.read`.
@@ -72,14 +74,23 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
   // `expired` is a derived status, not a stored one: a `pending` row past
   // `expires_at` is dead (findValidInvitationByToken/consume reject it) but
   // the column still reads `pending`. Compute the effective status so the
-  // grid badge and the `status` filter tell the truth.
-  const statusFilter = query.filters.status;
-  if (statusFilter === "expired") {
-    base = base.where("i.status", "=", "pending").where("i.expires_at", "<=", sql<Date>`now()`);
-  } else if (statusFilter === "pending") {
-    base = base.where("i.status", "=", "pending").where("i.expires_at", ">", sql<Date>`now()`);
-  } else if (typeof statusFilter === "string" && statusFilter.length > 0) {
-    base = base.where("i.status", "=", statusFilter);
+  // grid badge and the `status` filter tell the truth. A repeated `status`
+  // matches any of its values (F-74); it used to be dropped, which listed
+  // every invitation.
+  const statuses = filterValues(query, "status");
+  if (statuses.length > 0) {
+    const stored = statuses.filter((s) => s !== "expired" && s !== "pending");
+    base = base.where((eb) =>
+      eb.or([
+        ...(statuses.includes("expired")
+          ? [eb.and([eb("i.status", "=", "pending"), eb("i.expires_at", "<=", sql<Date>`now()`)])]
+          : []),
+        ...(statuses.includes("pending")
+          ? [eb.and([eb("i.status", "=", "pending"), eb("i.expires_at", ">", sql<Date>`now()`)])]
+          : []),
+        ...(stored.length > 0 ? [eb("i.status", "in", stored)] : []),
+      ]),
+    );
   }
   if (query.q) {
     base = base.where("i.email", "ilike", likeContains(query.q));

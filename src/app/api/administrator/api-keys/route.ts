@@ -10,6 +10,7 @@ import {
   likeContains,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   offsetFor,
   parseListQuery,
   windowTotalColumn,
@@ -63,7 +64,7 @@ const SORT_COLUMNS: Record<string, string> = {
  *
  * Filters: `filter[status]` (one of `CREDENTIAL_STATUS_VALUES`, F-133; any
  * other value is ignored), `filter[app_user_id]`, `filter[organization_id]`
- * (UUIDs; anything else is a 400, F-63). `q` matches
+ * (UUIDs; anything else is a 400, F-63), each repeatable (F-74). `q` matches
  * case-insensitively against the key name, display prefix, and owner
  * email.
  */
@@ -92,19 +93,23 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("k.organization_id", "=", scope.organizationId);
   }
 
-  const statusFilter = CREDENTIAL_STATUS_VALUES.find((s) => s === query.filters.status);
-  if (statusFilter) {
-    base = base.where("k.status", "=", statusFilter);
+  // Each filter matches any of its values (F-74): a repeated one used to be
+  // dropped, which listed every key.
+  const statuses = filterValues(query, "status").filter((value) =>
+    CREDENTIAL_STATUS_VALUES.some((s) => s === value),
+  );
+  if (statuses.length > 0) {
+    base = base.where("k.status", "in", statuses);
   }
 
-  const ownerFilter = query.filters.app_user_id;
-  if (typeof ownerFilter === "string" && ownerFilter.length > 0) {
-    base = base.where("k.app_user_id", "=", ownerFilter);
+  const ownerIds = filterValues(query, "app_user_id");
+  if (ownerIds.length > 0) {
+    base = base.where("k.app_user_id", "in", ownerIds);
   }
 
-  const orgFilter = query.filters.organization_id;
-  if (typeof orgFilter === "string" && orgFilter.length > 0) {
-    base = base.where("k.organization_id", "=", orgFilter);
+  const orgIds = filterValues(query, "organization_id");
+  if (orgIds.length > 0) {
+    base = base.where("k.organization_id", "in", orgIds);
   }
 
   if (query.q) {

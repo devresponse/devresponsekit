@@ -10,6 +10,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   InvalidListQueryError,
   likeContains,
   MAX_PAGE,
@@ -371,6 +372,35 @@ describe("parseListQueryStrict", () => {
       ok: true,
       query: { page: 2, pageSize: 10, q: null, sort: [], filters: {} },
     });
+  });
+});
+
+describe("filterValues (F-74)", () => {
+  const opts = { allowedSortFields: [], allowedFilters: ["status", "created_at"] };
+
+  it("is every value of a repeated filter, where the lists read only a single one", () => {
+    const q = parseListQuery(p("filter[status]=blocked&filter[status]=suspended"), opts);
+    expect(q.filters.status).toEqual(["blocked", "suspended"]);
+    expect(filterValues(q, "status")).toEqual(["blocked", "suspended"]);
+  });
+
+  it("is a one-element list for a single value", () => {
+    expect(filterValues(parseListQuery(p("filter[status]=active"), opts), "status")).toEqual([
+      "active",
+    ]);
+  });
+
+  it("is empty (no filter) when absent or empty, and skips an empty repeat", () => {
+    expect(filterValues(parseListQuery(p(""), opts), "status")).toEqual([]);
+    expect(filterValues(parseListQuery(p("filter[status]="), opts), "status")).toEqual([]);
+    const mixed = parseListQuery(p("filter[status]=&filter[status]=active"), opts);
+    expect(filterValues(mixed, "status")).toEqual(["active"]);
+  });
+
+  it("is empty for a range filter, and for an inherited property name", () => {
+    const q = parseListQuery(p("filter[created_at][from]=2026-01-01"), opts);
+    expect(filterValues(q, "created_at")).toEqual([]);
+    expect(filterValues(q, "toString")).toEqual([]);
   });
 });
 

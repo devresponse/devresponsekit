@@ -6,6 +6,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -26,7 +27,8 @@ interface RouteContext {
  * Read-only paginated audit trail for a specific user — the `app_audit_events`
  * rows whose `app_user_id` is this user (events ABOUT the user). Selects the
  * same columns as the global audit explorer so the shared audit grid renders
- * it unchanged. Optional `event_type` / `outcome` filters.
+ * it unchanged. Optional `event_type` / `outcome` filters, each repeatable:
+ * any of its values matches (F-74).
  *
  * ADR-0001: org-scoped — an org admin sees only events in their own org (and
  * can only resolve a target user in their org); a SUPERADMIN sees every org,
@@ -62,14 +64,15 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
     base = base.where("e.organization_id", "=", scope.organizationId);
   }
 
-  const eventTypeFilter = query.filters.event_type;
-  if (typeof eventTypeFilter === "string" && eventTypeFilter.length > 0) {
-    base = base.where("e.event_type", "=", eventTypeFilter);
+  // F-74: a repeated filter used to be dropped, which listed the user's whole trail.
+  const eventTypes = filterValues(query, "event_type");
+  if (eventTypes.length > 0) {
+    base = base.where("e.event_type", "in", eventTypes);
   }
 
-  const outcomeFilter = query.filters.outcome;
-  if (typeof outcomeFilter === "string" && outcomeFilter.length > 0) {
-    base = base.where("e.outcome", "=", outcomeFilter);
+  const outcomes = filterValues(query, "outcome");
+  if (outcomes.length > 0) {
+    base = base.where("e.outcome", "in", outcomes);
   }
 
   const itemsQuery = applySortAndPagination(

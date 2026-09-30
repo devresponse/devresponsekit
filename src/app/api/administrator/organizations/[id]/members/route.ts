@@ -11,6 +11,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -140,8 +141,8 @@ async function refuseOutrankedMembers(
  * GET /api/administrator/organizations/:id/members
  *
  * Paginated list of memberships for this organization.
- * Filters: `status` (membership status).
- * `q` searches app_user display_name.
+ * Filters: `status` (membership status), repeatable: any of its values
+ * matches (F-74). `q` searches app_user display_name.
  *
  * Caller MUST hold `admin.orgs.read`.
  */
@@ -168,9 +169,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
     .innerJoin("app_users as u", "u.id", "m.app_user_id")
     .where("m.organization_id", "=", id);
 
-  const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && statusFilter.length > 0) {
-    base = base.where("m.status", "=", statusFilter);
+  // F-74: a repeated `status` used to be dropped, which listed every member.
+  const statuses = filterValues(query, "status");
+  if (statuses.length > 0) {
+    base = base.where("m.status", "in", statuses);
   }
 
   if (query.q) {

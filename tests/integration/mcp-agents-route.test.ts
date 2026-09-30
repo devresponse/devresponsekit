@@ -54,6 +54,7 @@ vi.mock("@/lib/admin/errors.server", () => ({
 import { GET } from "@/app/api/administrator/mcp-agents/route";
 import { DELETE, PATCH } from "@/app/api/administrator/mcp-agents/[id]/route";
 import { POST as APPROVE } from "@/app/api/administrator/mcp-agents/[id]/approve/route";
+import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 function ctx() {
@@ -280,6 +281,8 @@ describe("/api/administrator/mcp-agents", () => {
   it("revokes the agent client (DELETE)", async () => {
     const res = await DELETE(req(), ctx());
     expect(res.status).toBe(200);
+    // McpAgentRevoked, like AdminApiKeyRevoked (F-74), where `alreadyRevoked` is optional.
+    await expectResponseMatchesSpec(res, "admin", "delete", "/mcp-agents/{id}");
     expect(revokeOauthClient).toHaveBeenCalledWith(UUID, "actor-1");
     expect(auditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.mcp_agent.revoked" }),
@@ -304,6 +307,7 @@ describe("/api/administrator/mcp-agents", () => {
     revokeOauthClient.mockResolvedValue(false);
     const res = await DELETE(req(), ctx());
     expect(res.status).toBe(200);
+    await expectResponseMatchesSpec(res, "admin", "delete", "/mcp-agents/{id}");
     expect(await res.json()).toEqual({ ok: true, alreadyRevoked: true });
     expect(revokeOauthClient).toHaveBeenCalledWith(UUID, "actor-1");
     expect(auditEvent).not.toHaveBeenCalled();

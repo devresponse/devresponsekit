@@ -7,6 +7,7 @@ import type * as RolesRoute from "@/app/api/administrator/groups/[id]/roles/rout
 import type * as MembersRoute from "@/app/api/administrator/groups/[id]/members/route";
 import type * as UserGroupsRoute from "@/app/api/administrator/users/[id]/groups/route";
 import type * as UserTargetModule from "@/lib/admin/user-target.server";
+import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
@@ -106,7 +107,7 @@ function makeChain(table: string): unknown {
         if (prop === "executeTakeFirstOrThrow")
           return async () => {
             if (state.insertError) throw state.insertError;
-            return { id: "g-new", key: "new" };
+            return { id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", key: "new" };
           };
         if (prop === "execute") return async () => execFor(table);
         return (...args: unknown[]) => {
@@ -253,12 +254,13 @@ describe("groups list + create", () => {
     expect((await list.GET(req("groups"))).status).toBe(200);
   });
 
-  it("ORG ADMIN creates a group in their own org (201)", async () => {
+  it("ORG ADMIN creates a group in their own org (201, the spec's KeyCreated, F-74)", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.create"]));
     const res = await list.POST(
       req("groups", { method: "POST", body: { key: "team.x", name: "Team X" } }),
     );
     expect(res.status).toBe(201);
+    await expectResponseMatchesSpec(res, "admin", "post", "/groups");
   });
 
   it("409 key_taken on the (organization_id, key) unique, whatever the server's message language (F-132)", async () => {

@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as OrgsRouteModule from "@/app/api/administrator/organizations/route";
 import type * as OrgByIdRouteModule from "@/app/api/administrator/organizations/[id]/route";
+import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
@@ -288,15 +289,17 @@ describe("POST /api/administrator/organizations", () => {
     expect(body).toMatchObject({ error: "slug_taken" });
   });
 
-  it("returns 201 with created org on success", async () => {
+  it("returns 201 with the created org, in the shape the admin spec declares (F-74)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.create"]));
-    insertExecute.mockResolvedValue({
-      id: "new-org-id",
-      slug: "new-org",
-    });
+    const id = "a1b2c3d4-e5f6-4890-abcd-ef1234567890";
+    insertExecute.mockResolvedValue({ id, slug: "new-org" });
     const res = await POST(jsonReq({ slug: "new-org", name: "New Org" }));
     expect(res.status).toBe(201);
+    // `KeyCreated` requires `key`; the answer lacked it, so the generated
+    // SDK's `createOrganization(...).key` was undefined. `slug` stays.
+    const body = await expectResponseMatchesSpec(res, "admin", "post", "/organizations");
+    expect(body).toEqual({ ok: true, id, key: "new-org", slug: "new-org" });
   });
 });
 

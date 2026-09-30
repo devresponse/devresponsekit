@@ -7,6 +7,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -23,7 +24,7 @@ export const dynamic = "force-dynamic";
  * outbound email lands here regardless of delivery outcome, so this is
  * the operator's source of truth for "did the system try to email X".
  *
- * Filters:
+ * Filters, each repeatable (any of its values matches, F-74):
  *   - `filter[status]`       — pending | sent | failed | logged
  *   - `filter[template_key]` — exact template key
  *
@@ -69,14 +70,15 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("o.organization_id", "=", scope.organizationId);
   }
 
-  const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && statusFilter.length > 0) {
-    base = base.where("o.status", "=", statusFilter);
+  // F-74: a repeated filter used to be dropped, which listed every row.
+  const statuses = filterValues(query, "status");
+  if (statuses.length > 0) {
+    base = base.where("o.status", "in", statuses);
   }
 
-  const templateFilter = query.filters.template_key;
-  if (typeof templateFilter === "string" && templateFilter.length > 0) {
-    base = base.where("o.template_key", "=", templateFilter);
+  const templateKeys = filterValues(query, "template_key");
+  if (templateKeys.length > 0) {
+    base = base.where("o.template_key", "in", templateKeys);
   }
 
   if (query.q) {

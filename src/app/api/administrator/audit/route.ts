@@ -7,6 +7,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   type FilterValue,
   windowTotalColumn,
@@ -46,9 +47,10 @@ function parseIsoDate(value: string | undefined): Date | null {
  *
  * Read-only paginated view of `app_audit_events` (docs/admin-manager.md
  * §8.10). Supports the standard `ListResponse` envelope plus the audit-
- * explorer filters:
+ * explorer filters. Each exact-match filter may repeat and matches any of
+ * its values (F-74):
  *
- *   - `filter[event_type]` — single string match
+ *   - `filter[event_type]` — exact event type
  *   - `filter[outcome]`    — `success` | `failure` | `denied`
  *   - `filter[actor]`      — Better Auth actor user id (text)
  *   - `filter[app_user_id]`            — UUID (anything else is a 400, F-63)
@@ -95,35 +97,25 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("e.organization_id", "=", scope.organizationId);
   }
 
-  const eventTypeFilter = query.filters.event_type;
-  if (typeof eventTypeFilter === "string" && eventTypeFilter.length > 0) {
-    base = base.where("e.event_type", "=", eventTypeFilter);
-  }
+  // Each filter matches any of its values (F-74). A repeated one used to be
+  // dropped, so `filter[event_type]=a&filter[event_type]=b` read the whole log.
+  const eventTypes = filterValues(query, "event_type");
+  if (eventTypes.length > 0) base = base.where("e.event_type", "in", eventTypes);
 
-  const outcomeFilter = query.filters.outcome;
-  if (typeof outcomeFilter === "string" && outcomeFilter.length > 0) {
-    base = base.where("e.outcome", "=", outcomeFilter);
-  }
+  const outcomes = filterValues(query, "outcome");
+  if (outcomes.length > 0) base = base.where("e.outcome", "in", outcomes);
 
-  const actorFilter = query.filters.actor;
-  if (typeof actorFilter === "string" && actorFilter.length > 0) {
-    base = base.where("e.actor_better_auth_user_id", "=", actorFilter);
-  }
+  const actors = filterValues(query, "actor");
+  if (actors.length > 0) base = base.where("e.actor_better_auth_user_id", "in", actors);
 
-  const appUserIdFilter = query.filters.app_user_id;
-  if (typeof appUserIdFilter === "string" && appUserIdFilter.length > 0) {
-    base = base.where("e.app_user_id", "=", appUserIdFilter);
-  }
+  const appUserIds = filterValues(query, "app_user_id");
+  if (appUserIds.length > 0) base = base.where("e.app_user_id", "in", appUserIds);
 
-  const organizationIdFilter = query.filters.organization_id;
-  if (typeof organizationIdFilter === "string" && organizationIdFilter.length > 0) {
-    base = base.where("e.organization_id", "=", organizationIdFilter);
-  }
+  const organizationIds = filterValues(query, "organization_id");
+  if (organizationIds.length > 0) base = base.where("e.organization_id", "in", organizationIds);
 
-  const targetAppFilter = query.filters.target_application_id;
-  if (typeof targetAppFilter === "string" && targetAppFilter.length > 0) {
-    base = base.where("e.target_application_id", "=", targetAppFilter);
-  }
+  const targetApps = filterValues(query, "target_application_id");
+  if (targetApps.length > 0) base = base.where("e.target_application_id", "in", targetApps);
 
   const createdAt = query.filters.created_at;
   if (isRangeFilter(createdAt)) {

@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as ListRoute from "@/app/api/administrator/permissions/route";
 import type * as IdRoute from "@/app/api/administrator/permissions/[id]/route";
+import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
@@ -48,7 +49,7 @@ function makeChain(table: string): unknown {
         if (prop === "executeTakeFirstOrThrow")
           return async () => {
             if (state.insertError) throw state.insertError;
-            return { id: "perm-new", key: "custom.perm" };
+            return { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", key: "custom.perm" };
           };
         if (prop === "execute") return async () => [];
         return (...args: unknown[]) => {
@@ -130,9 +131,11 @@ describe("POST /permissions — SUPERADMIN-only create", () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.permissions.manage"]));
     expect((await POST(req("", { method: "POST", body }))).status).toBe(403);
   });
-  it("201 for a SUPERADMIN", async () => {
+  it("201 for a SUPERADMIN, answering the spec's KeyCreated (F-74)", async () => {
     accessGetter.mockResolvedValue(superadmin(["admin.permissions.manage"]));
-    expect((await POST(req("", { method: "POST", body }))).status).toBe(201);
+    const res = await POST(req("", { method: "POST", body }));
+    expect(res.status).toBe(201);
+    await expectResponseMatchesSpec(res, "admin", "post", "/permissions");
   });
   it("403 when lacking admin.permissions.manage entirely", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.read"]));

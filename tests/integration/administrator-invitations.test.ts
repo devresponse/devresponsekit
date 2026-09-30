@@ -26,6 +26,8 @@ const accessGetter = vi.fn();
 const auditMock = vi.fn();
 const selectFirst = vi.fn();
 const executeMock = vi.fn();
+/** F-74: each comparison a `where((eb) => …)` callback built, as `eb(...)` args. */
+const ebCalls: unknown[][] = [];
 const sendEmailMock = vi.fn();
 const createInvitationMock = vi.fn();
 const revokeInvitationMock = vi.fn();
@@ -100,7 +102,15 @@ vi.mock("@/db/database", () => {
           if (typeof cb === "function") {
             try {
               (cb as (eb: unknown) => unknown)(
-                new Proxy(() => ({}), { get: () => () => ({}), apply: () => ({}) }),
+                new Proxy(() => ({}), {
+                  get: () => () => ({}),
+                  apply: (_target, _this, args: unknown[]) => {
+                    // Only a filter's: the select's derived-status CASE
+                    // builds the same `expires_at <= now()` comparison.
+                    if (prop === "where") ebCalls.push(args);
+                    return {};
+                  },
+                }),
               );
             } catch {
               /* ignore */
@@ -193,6 +203,7 @@ beforeEach(async () => {
     mailLocaleMock,
   ])
     m.mockReset();
+  ebCalls.length = 0;
   orgMailBudgetMock.mockResolvedValue(null);
   mailLocaleMock.mockResolvedValue("fr");
   recipientCooldownMock.mockResolvedValue(null);
@@ -249,6 +260,31 @@ describe("GET /api/administrator/organizations/:id/invitations", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: unknown[] };
     expect(body.items).toHaveLength(1);
+  });
+
+  // F-74: a repeated `status` used to be dropped, which listed every
+  // invitation. tests/db/admin-list-repeated-filters.db.test.ts runs it
+  // against Postgres.
+  it("matches any of a repeated status, the derived ones by their own predicate", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
+    const expiresAfterNow = (call: unknown[]) => call[0] === "i.expires_at" && call[1] === ">";
+    const expiresByNow = (call: unknown[]) => call[0] === "i.expires_at" && call[1] === "<=";
+
+    let res = await listGET(
+      getReq(`${BASE}?filter[status]=expired&filter[status]=accepted`),
+      listCtx(),
+    );
+    expect(res.status).toBe(200);
+    expect(ebCalls).toContainEqual(["i.status", "in", ["accepted"]]);
+    expect(ebCalls.some(expiresByNow)).toBe(true);
+    expect(ebCalls.some(expiresAfterNow)).toBe(false);
+
+    ebCalls.length = 0;
+    res = await listGET(getReq(`${BASE}?filter[status]=pending&filter[status]=revoked`), listCtx());
+    expect(res.status).toBe(200);
+    expect(ebCalls).toContainEqual(["i.status", "in", ["revoked"]]);
+    expect(ebCalls.some(expiresAfterNow)).toBe(true);
+    expect(ebCalls.some(expiresByNow)).toBe(false);
   });
 });
 

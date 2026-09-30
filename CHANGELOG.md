@@ -217,6 +217,10 @@ of 2.0.0's list below. Each entry names what to carry over.
   language when the recipient belongs to the mail's organization, else in
   the sending admin's, and an invitation's link opens in the same language,
   not always `/en` (F-102).
+- **Dependabot.** The prod and dev minor/patch groups exclude `next` and
+  `eslint-config-next`, so only the `next` group can bump them in a version
+  update; group order alone let #492 bump `next` by itself. A security
+  update for either still arrives alone and needs the other bumped by hand.
 
 ## [2.0.0] - 2026-09-30
 

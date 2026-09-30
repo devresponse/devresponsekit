@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import matter from "gray-matter";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -59,6 +60,13 @@ const pkg = JSON.parse(read("package.json")) as {
 const securityMd = read("SECURITY.md");
 const lockfile = read("pnpm-lock.yaml");
 const dockerfile = read("Dockerfile");
+
+/** The parts of a `.github/dependabot.yml` `updates:` entry read below. */
+type DependabotUpdate = {
+  "package-ecosystem": string;
+  directory: string;
+  groups?: Record<string, Record<string, unknown>>;
+};
 
 /** Numeric `major.minor.patch` comparison (pre-release tags ignored). */
 function compareVersions(a: string, b: string): number {
@@ -257,23 +265,35 @@ describe("dependency governance: lockfile floors from the 2026-09 sweep", () => 
     // that each fail the pin above (#478 + #479). Groups are assigned
     // first-match-wins, so the pair's group must precede both of them, and it
     // must carry no dependency-type (next is prod, eslint-config-next is dev).
-    const dependabot = read(".github/dependabot.yml");
-    const start = dependabot.indexOf("- package-ecosystem: npm\n    directory: /\n");
-    expect(start, "dependabot.yml has the root npm entry").toBeGreaterThan(-1);
-    const end = dependabot.indexOf("\n  - package-ecosystem:", start);
-    const rootNpm = dependabot.slice(start, end === -1 ? undefined : end);
-    const groups = rootNpm.slice(rootNpm.indexOf("\n    groups:\n"));
-    const names = [...groups.matchAll(/^ {6}([a-z0-9-]+):$/gm)].map((m) => m[1]);
-    expect(names[0], "the next group is listed first").toBe("next");
-    expect(names).toEqual(expect.arrayContaining(["dev-minor-patch", "prod-minor-patch"]));
-    const nextGroup = groups.slice(
-      groups.indexOf("\n      next:\n"),
-      groups.indexOf("\n      dev-minor-patch:\n"),
+    //
+    // Order alone did not hold: a regenerated prod group PR (#492) took next
+    // without eslint-config-next. So every OTHER group must also exclude the
+    // pair (K1). GitHub silently ignores a dependabot.yml it cannot read, and
+    // a mis-indented key still greps, so this reads the parsed structure.
+    // gray-matter (a direct dependency) parses its block with js-yaml.
+    const config = matter(`---\n${read(".github/dependabot.yml")}\n---\n`).data as {
+      updates: DependabotUpdate[];
+    };
+    const rootNpm = config.updates.filter(
+      (u) => u["package-ecosystem"] === "npm" && u.directory === "/",
     );
-    expect(nextGroup).toContain('patterns: ["next", "eslint-config-next"]');
-    expect(nextGroup).toContain('update-types: ["major", "minor", "patch"]');
-    expect(nextGroup).toContain("applies-to: version-updates");
-    expect(nextGroup).not.toContain("dependency-type");
+    expect(rootNpm, "dependabot.yml has one root npm entry").toHaveLength(1);
+    const groups = rootNpm[0]!.groups ?? {};
+    expect(Object.keys(groups)[0], "the next group is listed first").toBe("next");
+    expect(groups.next).toEqual({
+      "applies-to": "version-updates",
+      patterns: ["next", "eslint-config-next"],
+      "update-types": ["major", "minor", "patch"],
+    });
+    expect(Object.keys(groups)).toEqual(
+      expect.arrayContaining(["dev-minor-patch", "prod-minor-patch"]),
+    );
+    for (const [name, group] of Object.entries(groups)) {
+      if (name === "next") continue;
+      expect(group["exclude-patterns"], `${name} excludes the next pair`).toEqual(
+        expect.arrayContaining(["next", "eslint-config-next"]),
+      );
+    }
   });
 });
 

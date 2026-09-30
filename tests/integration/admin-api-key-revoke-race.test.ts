@@ -13,6 +13,11 @@ import { NextRequest } from "next/server";
  * result: it answered `{ ok: true }` and wrote an `admin.api_key.revoked` row
  * naming this admin for a key someone else had already retired. The guard,
  * the key lookup, `revokeApiKey`, audit and the rate limiter are stubbed here.
+ *
+ * Each answer is also checked against the committed admin spec (F-74):
+ * `AdminApiKeyRevoked` requires `alreadyRevoked`, which the revoke that
+ * happened left out, so the generated SDK's `instanceOfAdminApiKeyRevoked`
+ * rejected it and `alreadyRevoked === false` never held.
  */
 const requireAdminPermission = vi.fn();
 const revokeApiKey = vi.fn();
@@ -46,9 +51,12 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
 vi.mock("@/lib/admin/access-scope.server", () => ({ canAccessOrg: () => true }));
 
 import { DELETE } from "@/app/api/administrator/api-keys/[id]/route";
+import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 
 const KEY_ID = "11111111-1111-4111-8111-111111111111";
 const ctx = () => ({ params: Promise.resolve({ id: KEY_ID }) });
+const revoked = (res: Response) =>
+  expectResponseMatchesSpec(res, "admin", "delete", "/api-keys/{id}");
 const del = () =>
   new NextRequest(`https://app.test/api/administrator/api-keys/${KEY_ID}`, {
     method: "DELETE",
@@ -77,7 +85,7 @@ describe("DELETE /api/administrator/api-keys/[id] — act on the revoke's result
   it("revokes an active key and audits it once", async () => {
     const res = await DELETE(del(), ctx());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await revoked(res)).toEqual({ ok: true, alreadyRevoked: false });
     expect(revokeApiKey).toHaveBeenCalledWith(KEY_ID, "actor-1", "leaked");
     expect(auditEvent).toHaveBeenCalledTimes(1);
     expect(auditEvent).toHaveBeenCalledWith(
@@ -90,7 +98,7 @@ describe("DELETE /api/administrator/api-keys/[id] — act on the revoke's result
     revokeApiKey.mockResolvedValue(false);
     const res = await DELETE(del(), ctx());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, alreadyRevoked: true });
+    expect(await revoked(res)).toEqual({ ok: true, alreadyRevoked: true });
     expect(revokeApiKey).toHaveBeenCalledTimes(1);
     expect(auditEvent).not.toHaveBeenCalled();
   });
@@ -104,7 +112,7 @@ describe("DELETE /api/administrator/api-keys/[id] — act on the revoke's result
       organization_id: "org-1",
     });
     const res = await DELETE(del(), ctx());
-    expect(await res.json()).toEqual({ ok: true, alreadyRevoked: true });
+    expect(await revoked(res)).toEqual({ ok: true, alreadyRevoked: true });
     expect(revokeApiKey).not.toHaveBeenCalled();
     expect(auditEvent).not.toHaveBeenCalled();
   });

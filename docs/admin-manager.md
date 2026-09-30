@@ -465,6 +465,15 @@ string for every list endpoint into `{ page, pageSize, sort, q, filters }`:
   each endpoint's documented columns.
 - **`filter[name]=v`** → `filters.name`; repeated values become an array;
   `filter[name][from]` / `[to]` produce a range. **Unknown filters are dropped.**
+  Every exact-match filter the admin OpenAPI document declares repeatable
+  matches any of its values (`in`, read through `filterValues`), on its list
+  and in the CSV export, as the SDK sends it. The one filter declared
+  single-valued is `GET /mcp-agents`' derived `filter[status]`
+  ([§8.13](#813-mcp-agents)): it reads one value, and a repeated one applies
+  no filter. Most lists used to read only a single value, so a
+  repeated filter was dropped and listed every row (F-74). Two values that
+  together match every row (`is_default=true` and `false`, roles
+  `scope=global` and `org`) apply no filter.
   A filter compared with a `uuid` column is declared in `uuidFilters` with the
   keywords it also takes (`filter[organization]=global` on roles,
   `filter[organization_id]=null` on enterprise apps): any other value that is

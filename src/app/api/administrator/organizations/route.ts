@@ -11,6 +11,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -29,7 +30,7 @@ export const dynamic = "force-dynamic";
  * Paginated list of `app_organizations` rows with member counts.
  * Returns the uniform `ListResponse` envelope from §5.1.
  *
- * Filters:
+ * Filters, each repeatable (any of its values matches, F-74):
  *   - `status` — organization status string
  *   - `is_default` — `"true"` or `"false"`
  *
@@ -60,16 +61,16 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("o.id", "=", scope.organizationId);
   }
 
-  const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && statusFilter.length > 0) {
-    base = base.where("o.status", "=", statusFilter);
+  // F-74: a repeated filter used to be dropped, which listed every org.
+  const statuses = filterValues(query, "status");
+  if (statuses.length > 0) {
+    base = base.where("o.status", "in", statuses);
   }
 
-  const isDefaultFilter = query.filters.is_default;
-  if (isDefaultFilter === "true") {
-    base = base.where("o.is_default", "=", true);
-  } else if (isDefaultFilter === "false") {
-    base = base.where("o.is_default", "=", false);
+  // Both `true` and `false` match every row, as neither does.
+  const isDefault = new Set(filterValues(query, "is_default"));
+  if (isDefault.has("true") !== isDefault.has("false")) {
+    base = base.where("o.is_default", "=", isDefault.has("true"));
   }
 
   if (query.q) {
@@ -225,5 +226,12 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     },
   });
 
-  return NextResponse.json({ ok: true, id: inserted.id, slug: inserted.slug }, { status: 201 });
+  // `key` is the slug under the name every `KeyCreated` answer uses (F-74):
+  // the spec and the SDK generated from it declare `{ ok, id, key }` here, as
+  // for the roles, permissions and groups that share the schema, so a
+  // client reading `.key` got `undefined`. `slug` stays for the console.
+  return NextResponse.json(
+    { ok: true, id: inserted.id, key: inserted.slug, slug: inserted.slug },
+    { status: 201 },
+  );
 });

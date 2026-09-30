@@ -8,6 +8,7 @@ import {
   likeContains,
   applyKeyset,
   buildKeysetSort,
+  filterValues,
   keysetCursorFrom,
   parseListQuery,
   type FilterValue,
@@ -519,18 +520,20 @@ function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_audit_events as e");
       if (scope.kind === "org") q = q.where("e.organization_id", "=", scope.organizationId);
-      const eventType = query.filters.event_type;
-      if (typeof eventType === "string") q = q.where("e.event_type", "=", eventType);
-      const outcome = query.filters.outcome;
-      if (typeof outcome === "string") q = q.where("e.outcome", "=", outcome);
-      const actor = query.filters.actor;
-      if (typeof actor === "string") q = q.where("e.actor_better_auth_user_id", "=", actor);
-      const appUserId = query.filters.app_user_id;
-      if (typeof appUserId === "string") q = q.where("e.app_user_id", "=", appUserId);
-      const orgId = query.filters.organization_id;
-      if (typeof orgId === "string") q = q.where("e.organization_id", "=", orgId);
-      const targetApp = query.filters.target_application_id;
-      if (typeof targetApp === "string") q = q.where("e.target_application_id", "=", targetApp);
+      // Each filter matches any of its values, as on `GET /audit` (F-74): a
+      // repeated one used to be dropped, which exported the whole log.
+      const eventTypes = filterValues(query, "event_type");
+      if (eventTypes.length > 0) q = q.where("e.event_type", "in", eventTypes);
+      const outcomes = filterValues(query, "outcome");
+      if (outcomes.length > 0) q = q.where("e.outcome", "in", outcomes);
+      const actors = filterValues(query, "actor");
+      if (actors.length > 0) q = q.where("e.actor_better_auth_user_id", "in", actors);
+      const appUserIds = filterValues(query, "app_user_id");
+      if (appUserIds.length > 0) q = q.where("e.app_user_id", "in", appUserIds);
+      const orgIds = filterValues(query, "organization_id");
+      if (orgIds.length > 0) q = q.where("e.organization_id", "in", orgIds);
+      const targetApps = filterValues(query, "target_application_id");
+      if (targetApps.length > 0) q = q.where("e.target_application_id", "in", targetApps);
       const createdAt = query.filters.created_at;
       if (isRangeFilter(createdAt)) {
         const from = parseIsoDate(createdAt.from);
@@ -598,11 +601,13 @@ function buildOrganizationsExporter(query: ListQuery, scope: OrgScope | null): E
       if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_organizations");
       if (scope.kind === "org") q = q.where("id", "=", scope.organizationId);
-      const status = query.filters.status;
-      if (typeof status === "string") q = q.where("status", "=", status);
-      const isDefault = query.filters.is_default;
-      if (isDefault === "true") q = q.where("is_default", "=", true);
-      else if (isDefault === "false") q = q.where("is_default", "=", false);
+      // Read as `GET /organizations` reads them (F-74).
+      const statuses = filterValues(query, "status");
+      if (statuses.length > 0) q = q.where("status", "in", statuses);
+      const isDefault = new Set(filterValues(query, "is_default"));
+      if (isDefault.has("true") !== isDefault.has("false")) {
+        q = q.where("is_default", "=", isDefault.has("true"));
+      }
       if (query.q) {
         const like = likeContains(query.q);
         q = q.where((eb) => eb.or([eb("slug", "ilike", like), eb("name", "ilike", like)]));
@@ -653,9 +658,11 @@ function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter 
           ]),
         );
       }
-      const scopeFilter = query.filters.scope;
-      if (scopeFilter === "global") q = q.where("organization_id", "is", null);
-      else if (scopeFilter === "org") q = q.where("organization_id", "is not", null);
+      // Read as `GET /roles` reads it (F-74): both scopes match every role.
+      const scopes = new Set(filterValues(query, "scope"));
+      if (scopes.has("global") !== scopes.has("org")) {
+        q = q.where("organization_id", scopes.has("global") ? "is" : "is not", null);
+      }
       if (query.q) {
         const like = likeContains(query.q);
         // The list's `q` also matches the owning org's name (F-41); an EXISTS
@@ -735,12 +742,13 @@ function buildMembershipsExporter(query: ListQuery, scope: OrgScope | null): Exp
       if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_organization_memberships as m");
       if (scope.kind === "org") q = q.where("m.organization_id", "=", scope.organizationId);
-      const status = query.filters.status;
-      if (typeof status === "string") q = q.where("m.status", "=", status);
-      const orgId = query.filters.organization_id;
-      if (typeof orgId === "string") q = q.where("m.organization_id", "=", orgId);
-      const source = query.filters.source_provider;
-      if (typeof source === "string") q = q.where("m.source_provider", "=", source);
+      // Read as `GET /memberships` reads them (F-74).
+      const statuses = filterValues(query, "status");
+      if (statuses.length > 0) q = q.where("m.status", "in", statuses);
+      const orgIds = filterValues(query, "organization_id");
+      if (orgIds.length > 0) q = q.where("m.organization_id", "in", orgIds);
+      const sources = filterValues(query, "source_provider");
+      if (sources.length > 0) q = q.where("m.source_provider", "in", sources);
       const seek = buildKeysetSort(query.sort, MEMBERSHIPS_NULLABLE_SORTS);
       const rows = await applyKeyset(
         q.select([
@@ -787,13 +795,19 @@ function buildEnterpriseAppsExporter(query: ListQuery, scope: OrgScope | null): 
       if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_enterprise_applications as a");
       if (scope.kind === "org") q = q.where("a.organization_id", "=", scope.organizationId);
-      const status = query.filters.status;
-      if (typeof status === "string") q = q.where("a.status", "=", status);
-      const orgId = query.filters.organization_id;
-      if (orgId === ENTERPRISE_APPS_GLOBAL_ORGANIZATION) {
-        q = q.where("a.organization_id", "is", null);
-      } else if (typeof orgId === "string") {
-        q = q.where("a.organization_id", "=", orgId);
+      // Read as `GET /enterprise-apps` reads them (F-74).
+      const statuses = filterValues(query, "status");
+      if (statuses.length > 0) q = q.where("a.status", "in", statuses);
+      const orgValues = filterValues(query, "organization_id");
+      if (orgValues.length > 0) {
+        const orgIds = orgValues.filter((value) => value !== ENTERPRISE_APPS_GLOBAL_ORGANIZATION);
+        const includeGlobal = orgIds.length < orgValues.length;
+        q = q.where((eb) =>
+          eb.or([
+            ...(includeGlobal ? [eb("a.organization_id", "is", null)] : []),
+            ...(orgIds.length > 0 ? [eb("a.organization_id", "in", orgIds)] : []),
+          ]),
+        );
       }
       if (query.q) {
         const like = likeContains(query.q);

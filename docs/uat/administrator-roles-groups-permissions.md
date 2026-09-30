@@ -140,7 +140,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-ROLES-NEW-S2 — As a Superadmin, I want to create a Global or org-scoped role, so that I can manage platform-wide and tenant roles.
-  - Acceptance criteria: Given the Global option, when I create a role with scope Global, then it has no owning org; when I pick an org, then it is scoped to that org. (An org admin attempting a Global role is rejected 403 server-side — `roles/route.ts:242`.)
+  - Acceptance criteria: Given the Global option, when I create a role with scope Global, then it has no owning org; when I pick an org, then it is scoped to that org. (An org admin attempting a Global role is rejected 403 server-side — `roles/route.ts:244`.)
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|

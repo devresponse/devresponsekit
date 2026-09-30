@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 import { pgForeignKeyViolation } from "../helpers/pg-errors";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as RolesRouteModule from "@/app/api/administrator/roles/route";
@@ -21,6 +22,8 @@ const insertExecute = vi.fn();
 const transactionExecute = vi.fn();
 const selectFirst = vi.fn();
 const userRolesCount = vi.fn();
+/** F-74: every `where(column, op, value)` the list chain was given. */
+const whereCalls: unknown[][] = [];
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -55,11 +58,15 @@ vi.mock("@/db/database", () => {
           }
           return (...args: unknown[]) => {
             const cb = args[0];
+            if (prop === "where" && typeof cb === "string") whereCalls.push(args);
             if (typeof cb === "function") {
               try {
                 (cb as (eb: unknown) => unknown)(
                   new Proxy(() => ({}), {
-                    get: () => () => ({}),
+                    // A subquery (`eb.selectFrom(…)`) is a chain too, so its
+                    // `where(column, op, value)` lands in `whereCalls`.
+                    get: (_target, ebProp) =>
+                      ebProp === "selectFrom" ? () => makeChain() : () => ({}),
                     apply: () => ({}),
                   }),
                 );
@@ -134,6 +141,7 @@ beforeEach(async () => {
     userRolesCount,
   ])
     m.mockReset();
+  whereCalls.length = 0;
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET, POST } = await import("@/app/api/administrator/roles/route"));
@@ -203,6 +211,28 @@ describe("GET /api/administrator/roles", () => {
     expect(body.total).toBe(1);
     expect(body.sort).toEqual([{ field: "key", direction: "asc" }]);
   });
+
+  // F-74: a repeated `scope` or `permission` used to be dropped, which listed
+  // every role. tests/db/admin-list-repeated-filters.db.test.ts runs both
+  // against Postgres; here the stub records the predicates the route builds.
+  it("reads a repeated scope, and applies none for both scopes", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.read"]));
+    expect((await GET(listReq("?filter[scope]=global&filter[scope]=global"))).status).toBe(200);
+    expect(whereCalls).toContainEqual(["r.organization_id", "is", null]);
+
+    whereCalls.length = 0;
+    expect((await GET(listReq("?filter[scope]=global&filter[scope]=org"))).status).toBe(200);
+    expect(whereCalls.filter(([column]) => column === "r.organization_id")).toEqual([]);
+  });
+
+  it("matches any of a repeated permission inside the exists subquery", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.read"]));
+    const res = await GET(listReq("?filter[permission]=admin.users.read&filter[permission]=x.y"));
+    expect(res.status).toBe(200);
+    expect(whereCalls).toContainEqual(["p.key", "in", ["admin.users.read", "x.y"]]);
+  });
 });
 
 describe("POST /api/administrator/roles", () => {
@@ -235,9 +265,11 @@ describe("POST /api/administrator/roles", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.create"]));
     selectFirst.mockResolvedValue(undefined); // no duplicate
-    insertExecute.mockResolvedValue({ id: "r-new", key: "x.y" });
+    insertExecute.mockResolvedValue({ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", key: "x.y" });
     const res = await POST(jsonReq({ key: "x.y", name: "X" }));
     expect(res.status).toBe(201);
+    // The spec's KeyCreated, as every create sharing it must answer (F-74).
+    await expectResponseMatchesSpec(res, "admin", "post", "/roles");
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.role.created", outcome: "success" }),
     );

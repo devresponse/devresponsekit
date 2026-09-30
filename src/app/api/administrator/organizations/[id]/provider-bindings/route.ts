@@ -10,6 +10,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -32,7 +33,7 @@ interface RouteContext {
  * GET /api/administrator/organizations/:id/provider-bindings
  *
  * Paginated list of provider bindings for this organization.
- * Filters: `provider`.
+ * Filters: `provider`, repeatable: any of its values matches (F-74).
  *
  * Caller MUST hold `admin.orgs.read`.
  */
@@ -56,9 +57,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
 
   let base = db.selectFrom("app_provider_organizations as p").where("p.organization_id", "=", id);
 
-  const providerFilter = query.filters.provider;
-  if (typeof providerFilter === "string" && providerFilter.length > 0) {
-    base = base.where("p.provider", "=", providerFilter);
+  // F-74: a repeated `provider` used to be dropped, which listed every binding.
+  const providers = filterValues(query, "provider");
+  if (providers.length > 0) {
+    base = base.where("p.provider", "in", providers);
   }
 
   const itemsQuery = applySortAndPagination(

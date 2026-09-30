@@ -7,6 +7,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
  * GET /api/administrator/memberships
  *
  * Cross-org search for memberships with joins to both user and org.
- * Filters:
+ * Filters, each repeatable (any of its values matches, F-74):
  *   - status — membership status
  *   - organization_id — filter to a specific org
  *   - source_provider — filter by source provider
@@ -62,19 +63,20 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("m.organization_id", "=", scope.organizationId);
   }
 
-  const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && statusFilter.length > 0) {
-    base = base.where("m.status", "=", statusFilter);
+  // F-74: a repeated filter used to be dropped, which listed every membership.
+  const statuses = filterValues(query, "status");
+  if (statuses.length > 0) {
+    base = base.where("m.status", "in", statuses);
   }
 
-  const orgIdFilter = query.filters.organization_id;
-  if (typeof orgIdFilter === "string" && orgIdFilter.length > 0) {
-    base = base.where("m.organization_id", "=", orgIdFilter);
+  const orgIds = filterValues(query, "organization_id");
+  if (orgIds.length > 0) {
+    base = base.where("m.organization_id", "in", orgIds);
   }
 
-  const providerFilter = query.filters.source_provider;
-  if (typeof providerFilter === "string" && providerFilter.length > 0) {
-    base = base.where("m.source_provider", "=", providerFilter);
+  const providers = filterValues(query, "source_provider");
+  if (providers.length > 0) {
+    base = base.where("m.source_provider", "in", providers);
   }
 
   if (query.q) {

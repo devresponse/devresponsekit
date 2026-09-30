@@ -2439,7 +2439,9 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             ),
             filterParam("filter[target_application_id]", "audit."),
             filterParam("filter[organization]", "roles — organization id, or `global`."),
-            filterParam("filter[scope]", "roles — `global` | `organization`."),
+            // `org`, the value the route reads: `organization` matched nothing
+            // the route knew and exported every role (F-74).
+            filterParam("filter[scope]", "roles — `global` | `org`."),
             filterParam("filter[source_provider]", "memberships."),
             ...rangeFilterParams("created_at").map((p) => ({
               ...p,

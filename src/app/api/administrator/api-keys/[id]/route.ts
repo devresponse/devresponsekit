@@ -79,7 +79,8 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * verification rejects revoked keys immediately. The operation is
  * idempotent: revoking an already-revoked key (including one a concurrent
  * request retired after the read below) returns `200` with
- * `alreadyRevoked: true` and no second audit row.
+ * `alreadyRevoked: true` and no second audit row; the revoke that happens
+ * answers `alreadyRevoked: false` (F-74).
  */
 const deleteBodySchema = z.object({ reason: z.string().max(500).optional() }).strict();
 
@@ -155,5 +156,9 @@ export const DELETE = withAdminRoute(async function DELETE(
     metadata: { apiKeyId: id, prefix: existing.key_prefix },
   });
 
-  return NextResponse.json({ ok: true });
+  // `alreadyRevoked` on every answer (F-74): the spec and the SDK generated
+  // from it require it on `AdminApiKeyRevoked`, so the bare `{ ok: true }` a
+  // first revoke returned failed the SDK's `instanceOfAdminApiKeyRevoked`
+  // and never matched `alreadyRevoked === false`.
+  return NextResponse.json({ ok: true, alreadyRevoked: false });
 });

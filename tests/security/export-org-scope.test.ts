@@ -245,3 +245,27 @@ describe("GET /export/[resource] — truncation signal (bug-3)", () => {
     expect(body).not.toContain("# export_truncated:");
   });
 });
+
+describe("GET /export/enterprise-apps — a repeated organization filter (F-74)", () => {
+  // Read as the list reads it: every value, `null` as the global apps. A
+  // repeated filter used to be dropped, which exported every app;
+  // tests/db/admin-list-repeated-filters.db.test.ts runs it against Postgres.
+  it("puts every named org, and the global predicate, in the query", async () => {
+    const orgB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const url = `http://test.local/api/administrator/export/enterprise-apps?filter[organization_id]=${orgB}&filter[organization_id]=null`;
+    accessGetter.mockResolvedValue(superadmin(["admin.apps.read"]));
+    const res = await GET(
+      {
+        nextUrl: new URL(url),
+        url,
+        headers: new Headers(),
+        method: "GET",
+      } as unknown as NextRequest,
+      ctx("enterprise-apps"),
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(state.whereValues).toEqual(expect.arrayContaining(["a.organization_id", "in", orgB]));
+    expect(state.whereValues).toContain("is");
+  });
+});

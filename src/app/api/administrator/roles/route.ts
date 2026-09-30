@@ -11,6 +11,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -35,6 +36,7 @@ export const dynamic = "force-dynamic";
  *     Repeat it to list several orgs' roles (F-154).
  *   - `scope` — `global` or `org`.
  *   - `permission` — permission key; returns roles holding that key.
+ *     Like `scope`, it may repeat and matches any of its values (F-74).
  *
  * `q` matches case-insensitively against `key`, `name` and the owning
  * organization's name. F-41: the superadmin role picker searches here, and
@@ -90,15 +92,15 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     );
   }
 
-  const scopeFilter = query.filters.scope;
-  if (scopeFilter === "global") {
-    base = base.where("r.organization_id", "is", null);
-  } else if (scopeFilter === "org") {
-    base = base.where("r.organization_id", "is not", null);
+  // A repeated `scope` or `permission` used to be dropped, which listed every
+  // role (F-74). Both scopes together match every role, as neither does.
+  const scopes = new Set(filterValues(query, "scope"));
+  if (scopes.has("global") !== scopes.has("org")) {
+    base = base.where("r.organization_id", scopes.has("global") ? "is" : "is not", null);
   }
 
-  const permFilter = query.filters.permission;
-  if (typeof permFilter === "string" && permFilter.length > 0 && permFilter.length <= 200) {
+  const permKeys = filterValues(query, "permission").filter((key) => key.length <= 200);
+  if (permKeys.length > 0) {
     base = base.where((eb) =>
       eb.exists(
         eb
@@ -106,7 +108,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
           .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
           .select(sql`1`.as("one"))
           .whereRef("rp.role_id", "=", "r.id")
-          .where("p.key", "=", permFilter),
+          .where("p.key", "in", permKeys),
       ),
     );
   }

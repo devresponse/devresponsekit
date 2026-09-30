@@ -21,6 +21,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  filterValues,
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
@@ -38,7 +39,7 @@ export const dynamic = "force-dynamic";
  * Paginated list of `app_enterprise_applications` rows. Returns the
  * uniform `ListResponse` envelope from §5.1.
  *
- * Filters:
+ * Filters, each repeatable (any of its values matches, F-74):
  *   - `status` — application status string
  *   - `organization_id` — UUID of the org scope (or `"null"` for global)
  *
@@ -85,18 +86,22 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("a.organization_id", "=", scope.organizationId);
   }
 
-  const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && statusFilter.length > 0) {
-    base = base.where("a.status", "=", statusFilter);
+  // F-74: a repeated filter used to be dropped, which listed every app.
+  const statuses = filterValues(query, "status");
+  if (statuses.length > 0) {
+    base = base.where("a.status", "in", statuses);
   }
 
-  const orgFilter = query.filters.organization_id;
-  if (typeof orgFilter === "string" && orgFilter.length > 0) {
-    if (orgFilter === "null") {
-      base = base.where("a.organization_id", "is", null);
-    } else {
-      base = base.where("a.organization_id", "=", orgFilter);
-    }
+  const orgValues = filterValues(query, "organization_id");
+  if (orgValues.length > 0) {
+    const orgIds = orgValues.filter((value) => value !== "null");
+    const includeGlobal = orgIds.length < orgValues.length;
+    base = base.where((eb) =>
+      eb.or([
+        ...(includeGlobal ? [eb("a.organization_id", "is", null)] : []),
+        ...(orgIds.length > 0 ? [eb("a.organization_id", "in", orgIds)] : []),
+      ]),
+    );
   }
 
   if (query.q) {

@@ -410,7 +410,7 @@ i18n: run `en` + `uk`; field labels and the created/updated line localize; the i
 
 - Route: `/app/administrator/users/[userId]` (Roles tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-roles-panel.tsx:48`
 - Purpose: Lists the application role assignments the user holds (role name, key, organization, assigned date). With the right permission, the operator can assign a role (dialog + picker) or remove one.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:40`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:90`, `_user-roles-panel.tsx:182`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:105`, `:242`). The **Assign** button also needs `admin.roles.read`, because its picker lists roles from `GET /api/administrator/roles`; Remove does not. The role name links to the role page only for a holder of `admin.roles.read`, and the organization to its page only for a holder of `admin.orgs.read`; otherwise both are plain text (F-67).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/roles`, which requires `admin.users.read` (`api/.../users/[id]/roles/route.ts:41`). The **assign** and **remove** actions (and the assign dialog) render only when the page passed `canAssign` = `admin.roles.assign` (`[userId]/page.tsx:90`, `_user-roles-panel.tsx:182`); those mutations hit `POST`/`DELETE /api/administrator/users/[id]/app-roles`, both requiring `admin.roles.assign` (`api/.../users/[id]/app-roles/route.ts:105`, `:242`). The **Assign** button also needs `admin.roles.read`, because its picker lists roles from `GET /api/administrator/roles`; Remove does not. The role name links to the role page only for a holder of `admin.roles.read`, and the organization to its page only for a holder of `admin.orgs.read`; otherwise both are plain text (F-67).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **sees the assignments list** (has `admin.users.read`) but **no** Assign button and **no** per-row Remove (lacks `admin.roles.assign`); role and organization names are plain text (lacks `admin.roles.read` and `admin.orgs.read`, F-67).
@@ -503,7 +503,7 @@ i18n: run `en` + `uk`; title, buttons, dialog, empty and error text localize.
 
 - Route: `/app/administrator/users/[userId]` (Memberships tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-memberships-panel.tsx:29`
 - Purpose: Lists the user's organization memberships (org slug/name, status, source provider, joined date). With permission, the operator can remove a membership.
-- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:66`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:92`, `_user-memberships-panel.tsx:120`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:431`). The organization slug links to the organization page only for a holder of `admin.orgs.read`, that page's guard, and is plain text otherwise (F-67).
+- Guard / who can access: the list grid reads `GET /api/administrator/users/[id]/memberships`, which requires `admin.users.read` (`api/.../users/[id]/memberships/route.ts:68`). The per-row Remove renders only when the page passed `canUpdate` = `admin.users.update` (`[userId]/page.tsx:92`, `_user-memberships-panel.tsx:120`); removal hits `DELETE …/memberships`, which requires `admin.users.update` (`api/.../users/[id]/memberships/route.ts:434`). The organization slug links to the organization page only for a holder of `admin.orgs.read`, that page's guard, and is plain text otherwise (F-67).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → sees the memberships list (`admin.users.read`) but **no** Remove action (lacks `admin.users.update`), and org slugs are plain text (lacks `admin.orgs.read`, F-67).
@@ -593,7 +593,7 @@ i18n: run `en` + `uk`; expiry/IP/user-agent labels, the empty message and both c
 
 - Route: `/app/administrator/users/[userId]` (Audit tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-audit-panel.tsx:12`
 - Purpose: The user-scoped audit trail — `app_audit_events` rows about this user — rendered by the shared audit grid with its global filter toolbar hidden (the view is already scoped). Each row opens a detail sheet with full metadata.
-- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:103`, `_user-detail-tabs.tsx:94`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:39`).
+- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:103`, `_user-detail-tabs.tsx:94`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:41`).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **Audit tab present and working** (the `admin` role holds `admin.audit.read`), scoped to ORG A.
@@ -623,7 +623,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Cross-tenant scoping → an org admin sees only ORG A events for the user; platform (null-org) events are Superadmin-only (`api/.../audit/route.ts:56`).
+1. Cross-tenant scoping → an org admin sees only ORG A events for the user; platform (null-org) events are Superadmin-only (`api/.../audit/route.ts:58`).
 2. Empty state → a user with no in-scope events shows the grid empty state.
 3. The metadata sheet renders JSON as text only — no value is executed (`_audit-grid.tsx:39`).
 

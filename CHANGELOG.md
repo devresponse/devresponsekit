@@ -88,6 +88,11 @@ of 2.0.0's list below. Each entry names what to carry over.
   (`403`, audited). An org admin could claim `crm` before the superadmin
   registering the real satellite, who then got `409` (I-01). Existing apps
   keep their names.
+- **Administrator API contract.** A repeated `filter[…]` on an administrator
+  list or CSV export matches any of its values, as the admin spec and SDK
+  declare; most lists used to drop it and answer every row. `POST
+  /organizations` also returns `key` (the slug), and a revoke that happens
+  answers `alreadyRevoked: false`, the shapes the spec declares (F-74).
 
 ### Security
 

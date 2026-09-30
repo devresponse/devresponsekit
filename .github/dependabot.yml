@@ -86,11 +86,23 @@ updates:
       # tests/unit/dependency-governance.test.ts pins the direct
       # eslint-config-next version to next's (the lint rules have to match the
       # runtime). next is a production dependency and eslint-config-next a
-      # development one, so the two groups below split every Next bump across
-      # two PRs that each fail that test on their own (#478 + #479, landed
-      # together as #481). A dependency joins the FIRST group it matches, so
-      # this group must stay above them. It has no `dependency-type`, so it
+      # development one, so the two groups below would split every Next bump
+      # across two PRs that each fail that test on their own (#478 + #479,
+      # landed together as #481). This group has no `dependency-type`, so it
       # spans both, and it takes majors too, which need the same pairing.
+      #
+      # Two mechanisms keep the pair here, because the first alone did not.
+      # Dependabot documents that a dependency joins the FIRST group it
+      # matches, so this group stays above the other two (#482). Yet when it
+      # regenerated the prod group's PR after closing #489, the new PR (#492)
+      # took next 16.3.6 -> 16.3.7 without eslint-config-next and could never
+      # pass (#494 superseded it). So both groups below also list the pair in
+      # `exclude-patterns`, leaving this group the only one that can take
+      # either in a version update. No group applies to security updates, so
+      # a security update for either package still arrives alone: bump the
+      # other in that PR by hand (the pin fails it until then). A pattern
+      # without `*` matches one exact name, so next-intl stays in the prod
+      # group. Keep the order AND the exclusions.
       next:
         applies-to: version-updates
         patterns: ["next", "eslint-config-next"]
@@ -99,10 +111,12 @@ updates:
         applies-to: version-updates
         dependency-type: development
         update-types: ["minor", "patch"]
+        exclude-patterns: ["next", "eslint-config-next"]
       prod-minor-patch:
         applies-to: version-updates
         dependency-type: production
         update-types: ["minor", "patch"]
+        exclude-patterns: ["next", "eslint-config-next"]
     commit-message:
       prefix: deps
       prefix-development: deps-dev

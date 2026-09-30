@@ -116,7 +116,7 @@ The administrator workspace is organized into navigation groups. Every screen an
 | **Communication** | Email (Outbox & Templates) | View sent/queued email; edit templates; send a test |
 | **Activity** | Audit Log | Search and filter the audit trail |
 
-Common console affordances include server-side **pagination**, **search**, per-field **filters**, **bulk actions** (e.g. approve/block/suspend/delete users), and **CSV export**.
+Common console affordances include server-side **pagination**, **search**, per-field **filters**, **bulk actions** (e.g. approve/block/suspend/soft-delete users), and **CSV export**.
 
 **Selected administrator flows:**
 
@@ -168,7 +168,7 @@ DevResponseKit uses a **three-tier** access model. See [Architecture → Authori
 | **Organization Admin** | Holds `admin.*` permissions (no `superuser`) | A single organization |
 | **User** | No `admin.*` permissions | Themselves only |
 
-The permission catalog contains **35** `admin.*` permission keys grouped by domain (users, roles, groups, organizations, permissions, enterprise apps, API keys, OAuth clients, audit, email). **Groups bundle roles, never raw permissions**, and are always scoped to a single organization — so a group is simply a convenient way to assign existing roles to many people at once, never a new source of authority. The full enumerated list lives in the [API Reference → Permission catalog](./admin-manager.md#61-permission-catalog).
+The permission catalog contains **36** `admin.*` permission keys grouped by domain (users, roles, groups, organizations, permissions, enterprise apps, API keys, OAuth clients, audit, email). **Groups bundle roles, never raw permissions**, and are always scoped to a single organization — so a group is simply a convenient way to assign existing roles to many people at once, never a new source of authority. The full enumerated list lives in the [API Reference → Permission catalog](./admin-manager.md#61-permission-catalog).
 
 ## How it fits together (non-technical)
 

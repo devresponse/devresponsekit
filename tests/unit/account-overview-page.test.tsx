@@ -124,3 +124,41 @@ describe("/app/account overview — organizations shown (F-65)", () => {
     expect(getAccountOverview).toHaveBeenCalledWith("u-target", null);
   });
 });
+
+/**
+ * F-151: the person's own data-subject export is offered on the overview as a
+ * plain link to `GET /api/account/export`. The route refuses an impersonated
+ * session (IMP-1), so the page does not offer the link there.
+ */
+describe("/app/account overview — data export link (F-151)", () => {
+  function hrefs(node: unknown, out: string[] = []): string[] {
+    if (!node || typeof node !== "object") return out;
+    if (Array.isArray(node)) {
+      for (const child of node) hrefs(child, out);
+      return out;
+    }
+    const props = (node as { props?: Record<string, unknown> }).props;
+    if (props) {
+      if (typeof props.href === "string") out.push(props.href);
+      hrefs(props.children, out);
+    }
+    return out;
+  }
+
+  it("links the export for a user acting as themselves", async () => {
+    requireSecureSession.mockResolvedValue({
+      session: { user: { id: "ba-target" }, session: {} },
+      access: ACCESS,
+    });
+    expect(hrefs(await Page(params))).toContain("/api/account/export");
+  });
+
+  it("does not offer it to an impersonated session", async () => {
+    requireSecureSession.mockResolvedValue({
+      session: { user: { id: "ba-target" }, session: { impersonatedBy: "ba-admin" } },
+      access: ACCESS,
+    });
+    listImpersonationReachableOrgIds.mockResolvedValue(null);
+    expect(hrefs(await Page(params))).not.toContain("/api/account/export");
+  });
+});

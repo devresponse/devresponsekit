@@ -2,11 +2,15 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
-import { canAccessUser } from "@/lib/admin/access-scope.server";
+import { canAccessUser, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
+import { mustUseRestore } from "@/lib/admin/deactivated-user";
+import { isErasedAccount } from "@/lib/admin/erased-user";
 import { isAgentServiceAccount } from "@/lib/admin/service-account";
+import { Button } from "@/components/ui/button";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { APP_USER_STATUS_VALUES } from "@/lib/status-values";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { EraseUserButton } from "./_erase-button";
 import { ImpersonateUserButton } from "./_impersonate-button";
 import { UserDetailTabs } from "./_user-detail-tabs";
 
@@ -116,6 +120,18 @@ export default async function AdministratorUserDetailPage({
   const canReadRoles = guard.access.permissions.includes("admin.roles.read");
   const canReadOrgs = guard.access.permissions.includes("admin.orgs.read");
   const isSelfTarget = guard.betterAuthUserId === user.better_auth_user_id;
+  // F-151: the data-subject export and erasure. The export link needs the
+  // export route's own key; the route still applies the rank guard and the
+  // shared-target rule, and answers 403 where they refuse. Erasure is offered
+  // only where the route would run it: a superadmin with cross-org reach, a
+  // soft-deleted account not yet erased, never an agent's service account.
+  const isErased = isErasedAccount({ appUserId: user.id, primaryEmail: user.primary_email });
+  const canExport = guard.access.permissions.includes("admin.users.export");
+  const canErase =
+    hasCrossOrgReach(guard.access) &&
+    mustUseRestore(user) &&
+    !isErased &&
+    !isAgentServiceAccount({ betterAuthUserId: user.better_auth_user_id });
 
   // ISO-string-ify timestamps so the value crosses the RSC/client
   // boundary cleanly (Date instances aren't serializable through
@@ -142,8 +158,19 @@ export default async function AdministratorUserDetailPage({
         <div className="space-y-1">
           <h1 className="text-lg font-semibold">{user.display_name ?? user.primary_email}</h1>
           <p className="text-muted-foreground text-sm">{user.primary_email}</p>
+          {isErased ? (
+            <p className="text-muted-foreground text-sm">{t("erasure.erasedNotice")}</p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
+          {canExport ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={`/api/administrator/users/${encodeURIComponent(user.id)}/export`} download>
+                {t("actions.exportData")}
+              </a>
+            </Button>
+          ) : null}
+          {canErase ? <EraseUserButton userId={user.id} email={user.primary_email} /> : null}
           {canImpersonate ? (
             <ImpersonateUserButton
               userId={user.id}

@@ -506,6 +506,8 @@
         "revokeSessions": "Revogar todas as sessões",
         "softDelete": "Eliminar (suave)",
         "restore": "Restaurar",
+        "exportData": "Exportar dados",
+        "erase": "Apagar dados pessoais",
         "impersonate": "Personificar",
         "stopImpersonating": "Parar de personificar",
         "confirm": "Confirmar",
@@ -537,6 +539,16 @@
         "selfError": "Não se pode personificar a si próprio.",
         "bannerLabel": "Está a personificar {email}.",
         "stopErrorToast": "Não foi possível parar de personificar. Tente novamente."
+      },
+      "erasure": {
+        "confirmTitle": "Apagar os dados pessoais de {email}?",
+        "confirmDescription": "Esta ação não pode ser desfeita. O endereço de e-mail passa a ser um pseudónimo, o nome e a imagem são removidos, todas as sessões e métodos de início de sessão são eliminados, os e-mails dirigidos a este utilizador são esvaziados e o endereço IP e o agente de utilizador dos seus próprios pedidos são apagados do registo de auditoria. As linhas de auditoria mantêm-se. Um utilizador apagado não pode ser restaurado.",
+        "confirmEmailLabel": "Escreva o endereço de e-mail do utilizador para confirmar",
+        "confirmAck": "Compreendo que isto é permanente e será auditado.",
+        "eraseButton": "Apagar definitivamente",
+        "successToast": "Os dados pessoais do utilizador foram apagados.",
+        "errorToast": "Não foi possível apagar os dados pessoais do utilizador.",
+        "erasedNotice": "Os dados pessoais deste utilizador foram apagados."
       },
       "dialogs": {
         "ban": {
@@ -1333,6 +1345,7 @@
     "no_changes": "Não foram fornecidas alterações.",
     "not_deactivated": "O utilizador não está desativado.",
     "use_restore": "Este utilizador foi eliminado de forma suave. Restaure-o primeiro.",
+    "user_erased": "Os dados pessoais deste utilizador foram apagados. Um utilizador apagado não pode ser restaurado.",
     "not_applicable_to_service_account": "Esta é a conta de serviço de um agente de IA, que não inicia sessão. Bloqueie-a aqui ou revogue-a em Agents.",
     "not_found": "Não encontrado.",
     "organization_not_found": "Organização não encontrada.",
@@ -1343,6 +1356,7 @@
     "role_organization_mismatch": "Esta função pertence a outra organização.",
     "slug_taken": "Este slug já está a ser utilizado.",
     "soft_delete_failed": "A eliminação suave falhou; tente novamente.",
+    "erase_failed": "Não foi possível apagar os dados do utilizador; tente novamente.",
     "unauthenticated": "É necessário iniciar sessão.",
     "unknown_resource": "Recurso desconhecido.",
     "untrusted_origin": "A origem do pedido não é fidedigna.",
@@ -1463,7 +1477,10 @@
       "noRoles": "Nenhuma função atribuída.",
       "permissions": "Permissões",
       "permissionsDescription": "Todas as ações que tem atualmente permissão para realizar, concedidas pelas suas funções na organização ativa.",
-      "noPermissions": "Não tem permissões na organização ativa."
+      "noPermissions": "Não tem permissões na organização ativa.",
+      "dataExport": "Os seus dados",
+      "dataExportDescription": "Transfira uma cópia dos dados que esta plataforma guarda sobre si: o seu perfil, organizações, funções, métodos de início de sessão, sessões, chaves de API (sem os respetivos segredos) e a sua atividade no registo de auditoria.",
+      "dataExportButton": "Transferir os meus dados (JSON)"
     },
     "security": {
       "passwordTitle": "Palavra-passe",

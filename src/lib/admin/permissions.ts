@@ -31,6 +31,10 @@ export const ADMIN_PERMISSION_CATALOG: ReadonlyArray<AdminPermissionDescriptor> 
   { key: "admin.users.setPassword", description: "Set or reset a user's password" },
   { key: "admin.users.sessions", description: "List or revoke user sessions" },
   { key: "admin.users.impersonate", description: "Impersonate another user" },
+  // F-151: the administrator data-subject export (`GET /users/[id]/export`),
+  // seeded by migration 0008. Its own key because the export aggregates what
+  // several reads show one at a time (sessions, credentials, the audit trail).
+  { key: "admin.users.export", description: "Export a user's personal data" },
   { key: "admin.roles.read", description: "Read application roles and permissions" },
   { key: "admin.roles.create", description: "Create application roles" },
   { key: "admin.roles.update", description: "Edit application roles" },

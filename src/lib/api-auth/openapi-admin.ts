@@ -221,7 +221,8 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
       {
         name: "Users",
         description: "User administration.",
-        "x-permissions": "`admin.users.*` (per action)",
+        "x-permissions":
+          "`admin.users.*` (per action; `POST …/erase`: `admin.users.delete` + **superadmin**)",
       },
       {
         name: "Roles",
@@ -551,6 +552,20 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
               required: ["mode"],
             },
           ],
+        },
+        // F-151: the API half of the console's double confirmation.
+        EraseUserRequest: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            confirmEmail: {
+              type: "string",
+              minLength: 1,
+              maxLength: 320,
+              description: "The user's current primary email, compared case-insensitively.",
+            },
+          },
+          required: ["confirmEmail"],
         },
         SetRoleRequest: {
           type: "object",
@@ -1623,6 +1638,65 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           summary: "Restore a soft-deleted user",
           parameters: [idParam()],
           responses: { "200": okResp("OkStatus"), ...writeErrors() },
+        },
+      },
+      "/users/{id}/export": {
+        get: {
+          operationId: "exportUserData",
+          tags: ["Users"],
+          summary: "Download one user's personal data as JSON (`admin.users.export`)",
+          description:
+            "F-151: the data-subject export for an access request, the same document the user " +
+            "downloads from `GET /api/account/export`: profile, identity, preferences, memberships, " +
+            "roles, groups, sign-in methods, sessions, API keys and OAuth clients (never a token, " +
+            "hash or secret), invitations, and the audit rows about or by the user. On an audit row " +
+            "where the user is only the actor, the other person's address and details are left " +
+            "out; an IP address and user agent are included only on the user's own requests. An " +
+            "organization administrator gets only their organization's rows of the " +
+            "organization-attributed sections (`organizationScope`); a user who belongs to other " +
+            "organizations too is superadmin-only (403), as is a target who outranks the caller. " +
+            "Rate-limited per actor (3 burst / one per 20 s); audited `admin.user.data_exported`.",
+          parameters: [idParam()],
+          responses: {
+            "200": {
+              description: "The export document (`Content-Disposition: attachment`)",
+              headers: { "Content-Disposition": { schema: { type: "string" } } },
+              ...json({ type: "object", additionalProperties: true }),
+            },
+            ...readErrors(),
+            "429": errRef("RateLimited"),
+          },
+        },
+      },
+      "/users/{id}/erase": {
+        post: {
+          operationId: "eraseUser",
+          tags: ["Users"],
+          summary: "Erase a soft-deleted user's personal data (superadmin only)",
+          description:
+            "F-151: irreversible. Requires `admin.users.delete` and cross-org reach, and a user " +
+            "who is already soft-deleted (`409 not_deactivated` otherwise). Revokes the user's " +
+            "bearer credentials, then runs `app_users_pseudonymise`: the addresses become " +
+            "`erased+<id>@erased.invalid`, the name and picture are removed, every session and " +
+            "sign-in method is deleted, mail addressed to the user is blanked, and the IP address " +
+            "and user agent of the user's own requests are cleared from the audit log, whose rows " +
+            "all remain. `confirmEmail` must equal the user's current address (`400 invalid_body` " +
+            "otherwise). A repeat changes nothing (`alreadyErased: true`); restore refuses an " +
+            "erased user (`409 user_erased`). An agent service account is " +
+            "`409 not_applicable_to_service_account`. Audited `admin.user.erased`.",
+          parameters: [idParam()],
+          requestBody: { required: true, ...json(ref("EraseUserRequest")) },
+          responses: {
+            "200": {
+              description: "OK",
+              ...json({
+                type: "object",
+                properties: { ok: { const: true }, alreadyErased: { type: "boolean" } },
+                required: ["ok", "alreadyErased"],
+              }),
+            },
+            ...writeErrors(),
+          },
         },
       },
       "/users/{id}/impersonate": {

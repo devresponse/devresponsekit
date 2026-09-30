@@ -373,6 +373,15 @@ describe("soft_delete / restore", () => {
       expect(txRun).not.toHaveBeenCalled();
     },
   );
+
+  // F-151: an erased account stays deleted, as on the single-row route.
+  it("restore refuses an erased account with user_erased and touches nothing", async () => {
+    const erased = { ...deletedTarget, primaryEmail: "erased+u1@erased.invalid" };
+    const out = await executeBulkUserAction("restore", erased, actor);
+    expect(out).toEqual({ ok: false, appUserId: "u1", error: "user_erased" });
+    expect(restoreBanMock).not.toHaveBeenCalled();
+    expect(txRun).not.toHaveBeenCalled();
+  });
 });
 
 describe("account-global actions refuse a shared target for a non-superadmin (AUTHZ-2)", () => {

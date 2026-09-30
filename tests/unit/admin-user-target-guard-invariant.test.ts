@@ -69,6 +69,10 @@ const EXEMPT: Record<string, { guard: RegExp; why: string }> = {
     guard: /\bhasCrossOrgReach\s*\(/,
     why: "cross-org reach only (an unbound superadmin), whom the rank guard exempts anyway",
   },
+  "erase/route.ts POST": {
+    guard: /\bhasCrossOrgReach\s*\(/,
+    why: "F-151: cross-org reach only (an unbound superadmin), whom the rank guard exempts anyway",
+  },
   "impersonate/route.ts POST": {
     guard: /"privilege_escalation"/,
     why: "its own escalation guard: the same subset test, in the actor's org and in every org the two share",

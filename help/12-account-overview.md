@@ -22,10 +22,13 @@ A read-only summary of the signed-in user's identity, organization memberships, 
 - **Identity** card: display name, email, status (Active), member-since date.
 - **Organizations** list with membership status (Default Organization · Active for the seed admin).
 - **Roles**: Administrator, Platform Administrator, Superuser (for the seed admin).
-- **Permissions**: the full effective permission list — 38 keys for the seed admin, from `admin.apikeys.manage` through `superuser`, including the `shell.view` membership baseline.
+- **Permissions**: the full effective permission list — 39 keys for the seed admin, from `admin.apikeys.manage` through `superuser`, including the `shell.view` membership baseline.
+
+- **Your data** card: a **Download my data (JSON)** link.
 
 ## Actions available
-- None on this tab — it is informational; edits happen on the sibling tabs.
+- **Download my data (JSON)** — downloads one JSON file with everything the platform holds about you: profile, organizations, roles, sign-in methods, sessions, API keys (never their secrets) and your activity in the audit log. Not offered while an administrator is impersonating you.
+- Nothing else on this tab is editable; edits happen on the sibling tabs.
 
 ## Navigation
 - Reached from: primary sidebar → Account.

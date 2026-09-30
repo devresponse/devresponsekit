@@ -506,6 +506,8 @@
         "revokeSessions": "吊销所有会话",
         "softDelete": "删除（软删除）",
         "restore": "恢复",
+        "exportData": "导出数据",
+        "erase": "抹除个人数据",
         "impersonate": "模拟登录",
         "stopImpersonating": "停止模拟登录",
         "confirm": "确认",
@@ -537,6 +539,16 @@
         "selfError": "您不能模拟登录自己。",
         "bannerLabel": "您正在模拟登录 {email}。",
         "stopErrorToast": "无法停止模拟登录。请重试。"
+      },
+      "erasure": {
+        "confirmTitle": "抹除 {email} 的个人数据？",
+        "confirmDescription": "此操作无法撤销。电子邮箱地址将被替换为假名，姓名和头像将被移除，所有会话和登录方式将被删除，发给该用户的邮件内容将被清空，其本人请求的 IP 地址和用户代理将从审计日志中清除。审计记录本身会保留。已抹除的用户无法恢复。",
+        "confirmEmailLabel": "输入该用户的电子邮箱地址以确认",
+        "confirmAck": "我了解此操作是永久性的，并将被审计。",
+        "eraseButton": "永久抹除",
+        "successToast": "已抹除该用户的个人数据。",
+        "errorToast": "无法抹除该用户的个人数据。",
+        "erasedNotice": "该用户的个人数据已被抹除。"
       },
       "dialogs": {
         "ban": {
@@ -1333,6 +1345,7 @@
     "no_changes": "未提供任何更改。",
     "not_deactivated": "该用户未被停用。",
     "use_restore": "该用户已被软删除。请先恢复该用户。",
+    "user_erased": "该用户的个人数据已被抹除。已抹除的用户无法恢复。",
     "not_applicable_to_service_account": "这是 AI 代理的服务账户，它没有登录。请在此处封禁它，或在 Agents 中撤销它。",
     "not_found": "未找到。",
     "organization_not_found": "未找到组织。",
@@ -1343,6 +1356,7 @@
     "role_organization_mismatch": "此角色属于另一个组织。",
     "slug_taken": "此标识已被使用。",
     "soft_delete_failed": "软删除失败；请重试。",
+    "erase_failed": "抹除用户数据失败；请重试。",
     "unauthenticated": "需要登录。",
     "unknown_resource": "未知资源。",
     "untrusted_origin": "请求来源不受信任。",
@@ -1463,7 +1477,10 @@
       "noRoles": "未分配任何角色。",
       "permissions": "权限",
       "permissionsDescription": "您当前在活跃组织中由角色授予的、所有获准执行的操作。",
-      "noPermissions": "您在活跃组织中没有任何权限。"
+      "noPermissions": "您在活跃组织中没有任何权限。",
+      "dataExport": "您的数据",
+      "dataExportDescription": "下载本平台保存的关于您的数据副本：您的个人资料、组织、角色、登录方式、会话、API 密钥（不含其机密）以及您在审计日志中的活动。",
+      "dataExportButton": "下载我的数据（JSON）"
     },
     "security": {
       "passwordTitle": "密码",

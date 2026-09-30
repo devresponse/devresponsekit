@@ -52,6 +52,10 @@ const FROZEN: ReadonlyArray<[id: string, sha256: string]> = [
     "0007-uniqueness-search-indexes-token-scrub.sql",
     "83cfadc52081321bbf06cf05d74480a482824e5d3e733e81956d6c5b70a16e19",
   ],
+  [
+    "0008-user-data-export-erasure.sql",
+    "a30fde495d3062758e59d84ee613d7c11a08535ac3414ce85d1d0a010a0aae50",
+  ],
 ];
 
 describe("normalizeMigrationSql", () => {

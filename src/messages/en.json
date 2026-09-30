@@ -506,6 +506,8 @@
         "revokeSessions": "Revoke all sessions",
         "softDelete": "Delete (soft)",
         "restore": "Restore",
+        "exportData": "Export data",
+        "erase": "Erase personal data",
         "impersonate": "Impersonate",
         "stopImpersonating": "Stop impersonating",
         "confirm": "Confirm",
@@ -537,6 +539,16 @@
         "selfError": "You cannot impersonate yourself.",
         "bannerLabel": "You are impersonating {email}.",
         "stopErrorToast": "Could not stop impersonating. Try again."
+      },
+      "erasure": {
+        "confirmTitle": "Erase the personal data of {email}?",
+        "confirmDescription": "This cannot be undone. The email address becomes a pseudonym, the name and picture are removed, every session and sign-in method is deleted, email addressed to this user is blanked, and the IP address and user agent of their own requests are cleared from the audit log. The audit rows themselves remain. An erased user cannot be restored.",
+        "confirmEmailLabel": "Type the user's email address to confirm",
+        "confirmAck": "I understand this is permanent and will be audited.",
+        "eraseButton": "Erase permanently",
+        "successToast": "The user's personal data has been erased.",
+        "errorToast": "Could not erase the user's personal data.",
+        "erasedNotice": "This user's personal data has been erased."
       },
       "dialogs": {
         "ban": {
@@ -1333,6 +1345,7 @@
     "no_changes": "No changes were provided.",
     "not_deactivated": "The user is not deactivated.",
     "use_restore": "This user is soft-deleted. Restore the user first.",
+    "user_erased": "This user's personal data has been erased. An erased user cannot be restored.",
     "not_applicable_to_service_account": "This is an AI agent's service account, which has no sign-in. Block it here, or revoke it under Agents.",
     "not_found": "Not found.",
     "organization_not_found": "Organization not found.",
@@ -1343,6 +1356,7 @@
     "role_organization_mismatch": "This role belongs to a different organization.",
     "slug_taken": "This slug is already in use.",
     "soft_delete_failed": "Soft delete failed; please retry.",
+    "erase_failed": "Erasing the user's data failed; please retry.",
     "unauthenticated": "Sign-in is required.",
     "unknown_resource": "Unknown resource.",
     "untrusted_origin": "The request origin is not trusted.",
@@ -1463,7 +1477,10 @@
       "noRoles": "No roles assigned.",
       "permissions": "Permissions",
       "permissionsDescription": "Every action you're currently allowed to perform, granted by your roles in the active organization.",
-      "noPermissions": "You have no permissions in the active organization."
+      "noPermissions": "You have no permissions in the active organization.",
+      "dataExport": "Your data",
+      "dataExportDescription": "Download a copy of the data this platform holds about you: your profile, organizations, roles, sign-in methods, sessions, API keys (without their secrets) and your activity in the audit log.",
+      "dataExportButton": "Download my data (JSON)"
     },
     "security": {
       "passwordTitle": "Password",

@@ -357,16 +357,18 @@ describe("requireAdminPermission — a bearer denial's organization stamp (F-32)
 });
 
 describe("ADMIN_PERMISSION_CATALOG", () => {
-  it("has 35 entries with unique keys (docs/admin-manager.md §6.1 + email + credential + group governance)", async () => {
+  it("has 36 entries with unique keys (docs/admin-manager.md §6.1 + email + credential + group governance + data export)", async () => {
     // Import from the canonical, non-server-only source so the test
     // asserts the source of truth rather than the re-export surface.
     const { ADMIN_PERMISSION_CATALOG } = await import("@/lib/admin/permissions");
-    expect(ADMIN_PERMISSION_CATALOG).toHaveLength(35);
+    expect(ADMIN_PERMISSION_CATALOG).toHaveLength(36);
     const keys = new Set(ADMIN_PERMISSION_CATALOG.map((p) => p.key));
-    expect(keys.size).toBe(35);
+    expect(keys.size).toBe(36);
     // Spot-check a representative sample.
     expect(keys.has("admin.users.read")).toBe(true);
     expect(keys.has("admin.users.impersonate")).toBe(true);
+    // F-151: the administrator data-subject export (migration 0008).
+    expect(keys.has("admin.users.export")).toBe(true);
     expect(keys.has("admin.audit.read")).toBe(true);
     expect(keys.has("admin.permissions.manage")).toBe(true);
     expect(keys.has("admin.email.read")).toBe(true);

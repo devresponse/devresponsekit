@@ -296,7 +296,7 @@ that fix the common fields per call-site so handlers stay declarative.
 
 The catalog lives in `src/lib/admin/permissions.ts` as
 `ADMIN_PERMISSION_CATALOG` — a single source of truth shared by the runtime
-helper and the database seed, so they cannot drift. It holds **35 `admin.*`
+helper and the database seed, so they cannot drift. It holds **36 `admin.*`
 keys**, plus the `superuser` marker and the user-level `shell.view` /
 `audit.view` markers. `ANY_ADMIN_PERMISSION` is the full set of admin keys, used
 by the layout's "any admin" gate.
@@ -313,6 +313,7 @@ by the layout's "any admin" gate.
 | | `admin.users.setPassword` | Set or reset a user's password |
 | | `admin.users.sessions` | List or revoke user sessions |
 | | `admin.users.impersonate` | Impersonate another user (§19) |
+| | `admin.users.export` | Export a user's personal data ([Data export and erasure](#data-export-and-erasure-f-151)) |
 | **Roles** | `admin.roles.read` | Read application roles and permissions |
 | | `admin.roles.create` | Create application roles |
 | | `admin.roles.update` | Edit application roles |
@@ -712,12 +713,14 @@ Manages the application user lifecycle and per-user administration.
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
 | `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). It is a membership add, and an `active` one an approval, so a confined caller also needs `admin.users.update` or `admin.orgs.manage` (F-69), plus `admin.users.manage` for `initialAppStatus: "active"`, each as permission and (bearer) scope; an address whose email domain is bound to another org is refused too. Each refusal is 403 `forbidden` before anything is written, audited `admin.user.create_denied` (reason `enrolment_not_permitted`, `activation_not_permitted` or `email_domain_claimed`; F-480, below). The enrolled membership carries no sign-up source, so the org's sign-up policy never activates it at sign-in. A superadmin's cookie session creates the user in no org, as before. A context with no org is refused with 403 `forbidden` before anything is written (defence in depth: the guard admits only an active member, whose context always names an org). The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` and an `administrator.access.denied` row otherwise, F-13, F-58). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
-| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore (`POST /users/[id]/restore`). The edit (display name and preferred locale) is account-global, so it is rank-gated and a user shared with other orgs is superadmin-only (403 `forbidden` and an `admin.user.action_denied` row, F-61, F-58). The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2). The soft-delete revokes the user's API keys and OAuth clients, and restore puts back a ban the soft-delete replaced; restoring a user who is not soft-deleted is 409 `not_deactivated` (see [Soft-delete and restore](#soft-delete-and-restore-f-57-i-19)). An agent service account is 409 `not_applicable_to_service_account` for soft-delete and restore, and its rename is not mirrored to Better Auth (F-77, [§8.13](#813-mcp-agents)) |
+| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore (`POST /users/[id]/restore`). The edit (display name and preferred locale) is account-global, so it is rank-gated and a user shared with other orgs is superadmin-only (403 `forbidden` and an `admin.user.action_denied` row, F-61, F-58). The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2). The soft-delete revokes the user's API keys and OAuth clients, and restore puts back a ban the soft-delete replaced; restoring a user who is not soft-deleted is 409 `not_deactivated` (see [Soft-delete and restore](#soft-delete-and-restore-f-57-i-19)), and restoring an erased one 409 `user_erased` (F-151). An agent service account is 409 `not_applicable_to_service_account` for soft-delete and restore, and its rename is not mirrored to Better Auth (F-77, [§8.13](#813-mcp-agents)) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2). A soft-deleted user is 409 `use_restore` (F-57). Approving or reactivating an agent service account also needs `admin.clients.manage`, as the Agents console's approve does: 403 `forbidden` and an `admin.user.action_denied` row (reason `agent_requires_clients_manage`) otherwise (F-77, [§8.13](#813-mcp-agents)). A `block` / `suspend` that changes the account-wide status (a superadmin's cookie session, or any caller on a user in no org but the one it acts in) also ends every session the user holds and the ones they opened by impersonating someone, so `reactivate` brings none back; the event's `metadata.sessionsRevoked` is `true`. A caller confined to one org, meaning an org admin or any API key or JWT, a superadmin's included (MACHINE-2), changes only that membership of a user shared with other orgs and ends no session. If ending the sessions fails, the status stays applied and the call returns 502 `auth_revoke_all_failed` with an `admin.user.sessions_revoke_all_failed` row; a retry is safe (F-147) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself). A ban that would leave no superadmin able to sign in is undone and returns 409 `last_superadmin` (REVOKE-2, F-56). A soft-deleted user is 409 `use_restore` (F-57), and an agent service account 409 `not_applicable_to_service_account`: it has no Better Auth user (F-77, [§8.13](#813-mcp-agents)). While the ban lasts, the invitations the user sent admit nobody: accepting or resending one is refused and voids it (F-149). An invitation nobody tried to accept or resend during the ban works again after `/unban`, so revoke the user's pending invitations before lifting a ban imposed for cause (see [Sign-up Policy §6](./auth-signup-policy.md#6-invitations)); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it signs the user out everywhere: their own sessions and the ones they opened by impersonating someone. It also revokes every API key they own and every OAuth client that acts as them, which ends the tokens minted from those too. The reset email changes nothing until the user completes the reset, which does the same (F-08, F-10, §19). A user gets at most one admin-sent reset email per 10 minutes, and a confined caller's reset emails spend the org's daily admin-mail budget (429 `rate_limited`, F-64, §2.5). A failed step returns 502 and is safe to retry, though a failed reset email has already used the user's 10 minutes. An agent service account has no password: 409 `not_applicable_to_service_account` in both modes (F-77). `admin.user.password_set` / `.password_reset_email_sent`, plus an `api_key.revoked` / `oauth_client.revoked` row per credential with `metadata.reason` `password_set` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`). Needs cross-org reach, so only a superadmin's cookie session: every API key and JWT is bound to one org (MACHINE-2, [design §3](./design-api-keys-and-tokens.md#3-caller-resolution)) and gets 403 `forbidden`, audited as `administrator.access.denied` (reason `cross_org_reach_required`, F-58). An agent service account is 409 `not_applicable_to_service_account` (F-77) |
 | `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). A session is not tied to an org, so both revokes (all, or one by id) of a user shared with other orgs are superadmin-only (403 `forbidden` and an `admin.user.action_denied` row, AUTHZ-2; F-60, F-58). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
+| `GET /users/[id]/export` | `admin.users.export` | The user's data as a JSON download (F-151, [Data export and erasure](#data-export-and-erasure-f-151)). Rank-gated, and a user shared with other orgs is superadmin-only (403 `forbidden` and an `admin.user.action_denied` row); an org admin's document holds only their org's rows. Export tier rate limit; `admin.user.data_exported` with the section sizes |
+| `POST /users/[id]/erase` | `admin.users.delete` + cross-org reach | Erase a soft-deleted user's personal data; cannot be undone (F-151, below). 403 `forbidden` without cross-org reach (an `administrator.access.denied` row), 409 `not_deactivated` unless soft-deleted, 400 `invalid_body` unless `confirmEmail` is the user's address, 409 `not_applicable_to_service_account` for an agent, 500 `erase_failed` (`admin.user.erase_failed`) on a failure; `admin.user.erased` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19. An agent service account is 409 `not_applicable_to_service_account`, and the user detail page does not offer **Impersonate** for one (F-77) |
 | `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `POST …/app-roles` and `POST …/groups` grant only to an active member of the role's or group's org (404 `user_not_found`, F-154, below). `PATCH/DELETE …/memberships` are rank-gated, and `DELETE …/app-roles` and `DELETE …/memberships` are conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2). `DELETE …/memberships` also deletes the user's roles and group memberships in that org (F-12, §8.3) |
 | `POST /users/bulk` | per-action key | Batch actions; see §13, §19 |
@@ -946,8 +949,9 @@ status code; `/api/v1` returns the RFC 7807 twin.
   account that signs in. Restore applies only to a soft-deleted account, whose
   grants already do not count, and leaves it `pending_approval`; the bulk
   `restore` refuses any other account per row with `not_deactivated`, as the
-  single-row route does with 409 (F-56). Of these, only restore applies to a
-  soft-deleted account (`use_restore`, F-57).
+  single-row route does with 409 (F-56), and an erased one with `user_erased`
+  (F-151). Of these, only restore applies to a soft-deleted account
+  (`use_restore`, F-57).
 - **Authority conferred through a GROUP.** See §8.3.
 
 **Concurrency.** The check shares the writing transaction, and the grant read
@@ -1123,6 +1127,94 @@ user `pending_approval`, to be approved again, in each of their organizations
   again finishes it. Block and suspend revoke nothing: they are reversible by
   design, and the owner's status and ban already stop the credentials while
   they last (AUTH-1).
+
+#### Data export and erasure (F-151)
+
+An access request (GDPR Art. 15, PIPEDA) and an erasure request (GDPR Art. 17)
+each have a path in the console; neither needs a database session.
+
+**Export.** A signed-in user downloads their own data from **Account →
+Overview → Your data** (`GET /api/account/export`). It takes a cookie session:
+an API key or JWT gets 403 `forbidden` (an `account.access.denied` row, reason
+`session_required`), and so does an impersonated session (IMP-1). An
+administrator holding `admin.users.export` downloads a user's from the user's
+detail page (**Export data**, `GET /api/administrator/users/[id]/export`).
+Both return the same JSON document (`src/lib/user-data/export.server.ts`):
+
+- the profile, the Better Auth identity and the preferences;
+- memberships, roles and groups;
+- sign-in methods (provider and account id, never the password hash or a
+  provider token) and sessions (times, IP address, user agent, whether
+  impersonated, never the token);
+- API keys and OAuth clients (never a hash or a secret);
+- the invitations addressed to the user or accepted by them;
+- the newest 50 000 audit rows about the user or made by them, including an
+  invitation sent to them, whose row names them only in `metadata.email`
+  (`auditEventsTruncated` says when there were more).
+
+On an audit row the user only made (an invitation they sent, an action they
+took on someone else) the other person's address, the reason and the metadata
+are left out. An IP address and user agent appear only on the user's own
+requests, never an administrator's. An org admin's export holds only their
+org's memberships, roles, groups, keys, clients, invitations and audit rows
+(`organizationScope` in the document); the rank guard and the shared-target
+rule apply as for the other account-level actions, so a user who also belongs
+to another org is exported by a superadmin. Both exports are rate-limited on
+the export tier (3 burst, one per 20 s) and audited (`account.data_exported`,
+`admin.user.data_exported`) with the section sizes only. `admin.users.export`
+arrived with migration 0008: superadmins hold it, `pnpm db:seed` gives it to
+the seeded `admin.platform` role with the rest of the catalog, and any other
+role gets it only when an administrator adds it (**Administrator → Roles**).
+
+**Erasure** is a superadmin's action, in two steps:
+
+1. **Soft-delete** the user (above). That bans them, blocks every membership
+   and revokes their credentials, and restore can still undo it.
+2. On the user's detail page, **Erase personal data**: tick the
+   acknowledgement and type the user's address
+   (`POST /api/administrator/users/[id]/erase` with `confirmEmail`). It needs
+   `admin.users.delete` and cross-org reach, and a soft-deleted user. It
+   revokes the user's credentials again (`api_key.revoked` /
+   `oauth_client.revoked`, reason `owner_deleted`), runs the database function
+   `app_users_pseudonymise` (migration 0008), and writes `admin.user.erased`
+   with a count per step, under the pseudonym. **It cannot be undone.** The
+   function writes a row of its own too, `db.user.pseudonymised` (the counts,
+   the database login and its `SET ROLE`), so a call made outside this route
+   is on record as well.
+
+What the function changes, in one transaction, as the table owner:
+
+| Where | What happens |
+| --- | --- |
+| `app_users` | `primary_email` becomes `erased+<id>@erased.invalid`; `display_name` is cleared |
+| Better Auth `user` | `email` becomes the same pseudonym, `name` becomes `Erased user`, `image` is cleared; the ban stays |
+| Better Auth `session`, `account`, `verification` | the user's rows are deleted: every session ends, the password hash and the social logins go, and so do pending reset tokens |
+| `app_user_locale_preferences` | deleted |
+| `app_api_keys`, `app_oauth_clients` | any still active is revoked; each key's `last_used_ip` is cleared |
+| `app_organization_invitations` | addressed to the user: the address is pseudonymised and a pending one revoked |
+| `app_outbox` | addressed to the user: the address is pseudonymised, the subject, bodies, variables and delivery payload blanked, and a pending row failed (`recipient_erased`) so it is never sent |
+| `app_audit_events` | the address is pseudonymised wherever it names the user: the `email` column, and the `email` key of the metadata, where `admin.organization.invitation_created` keeps the invitee's address. The IP address and user agent are cleared on the user's own requests. A row an administrator wrote about the user keeps that administrator's address. No row is deleted and nothing else on a row changes ([§12.1](#121-audit-posture-append-only--retention)) |
+
+The user's addresses are their `primary_email`, their Better Auth email and
+the address of each invitation they accepted, compared lowercased. Kept on
+purpose: the rows themselves (memberships, role and group assignments, audit
+rows), so every foreign key and the history still resolve; free text an
+administrator typed (status, deactivation and ban reasons, an audit row's
+`reason`); and the rest of the audit `metadata`, which holds ids and codes.
+Review the free text by hand when a request requires it. Mail addressed to
+other people is left as it was, including the invitations the user sent: each
+names them as the inviter (their display name, or their address when they had
+none) in the invitee's `app_outbox` row, which stays until outbox retention
+removes it (`OUTBOX_RETENTION_DAYS`, 90 days by default, sent and failed
+rows).
+
+An erased user is final. Restore answers 409 `user_erased` (bulk: a per-row
+`user_erased`), the detail page says the data was erased and offers neither
+action again, and a repeated erase changes nothing (`alreadyErased: true`). An
+agent's service account holds no personal data and cannot be erased (409
+`not_applicable_to_service_account`). Erasure does not shorten retention: the
+pseudonymised audit rows age out at `AUDIT_RETENTION_DAYS` like any other
+(§12.1).
 
 ### 8.2 Organizations
 
@@ -1967,10 +2059,11 @@ pages leaves a row and a probe of its API does not.
 
 The audit log is a tamper-evident compliance record. A row-level
 `BEFORE UPDATE OR DELETE` trigger (`app_audit_events_block_mutation`, installed
-by `0001-initial-schema.sql` and replaced by `0005-integrity-constraints.sql`)
-**raises on any UPDATE or DELETE**; INSERTs are unaffected. The one UPDATE it
-permits is the org-deletion `SET NULL` tombstone (organization_id → null with
-every other column unchanged).
+by `0001-initial-schema.sql`, replaced by `0005-integrity-constraints.sql` and
+again by `0008-user-data-export-erasure.sql`) **raises on any UPDATE or
+DELETE**; INSERTs are unaffected. It permits two UPDATEs: the org-deletion
+`SET NULL` tombstone (organization_id → null with every other column
+unchanged), and an erasure's pseudonymisation (next list).
 
 What the trigger does and does not guarantee (review #83):
 
@@ -1986,6 +2079,23 @@ What the trigger does and does not guarantee (review #83):
   `DATABASE_URL` to the runtime role (next bullet); that residual gap is
   documented, tested (`tests/db/schema-integrity.db.test.ts`), and closed only
   by the role switch.
+- **An erasure is the only other UPDATE (F-151).** `app_users_pseudonymise(app_user_id)`
+  (0008) is a `SECURITY DEFINER` function owned by the schema owner, like the
+  prune function, and the admin erase route calls it ([§8.1](#data-export-and-erasure-f-151)).
+  The trigger lets its UPDATE through only when the effective role is the
+  table owner, the transaction-local `app.audit_pseudonymise` marker it sets
+  is on, and the row changes in nothing but `email` and an existing
+  `metadata.email` (each to an `erased+<id>@erased.invalid` pseudonym),
+  `ip_address` and `user_agent` (to NULL). Another column, another metadata
+  key, another value, or the marker set from a runtime-role session is
+  refused (`tests/db/user-data-export-erasure.db.test.ts`); the owner-session
+  caveat above applies to this marker too. Unlike the prune function it has
+  no age floor, and the runtime role can call it after deactivating an
+  account itself (it holds `UPDATE` on `app_users`): a stolen runtime
+  credential can therefore pseudonymise, never delete, the rows that name an
+  account, recent ones included. Every call writes a `db.user.pseudonymised`
+  row (the account, the counts, the database login and its `SET ROLE`), which
+  that credential cannot remove.
 - **The retention window is owner-controlled, not caller-controlled.** The
   function clamps the `days` it is asked for to a floor of **30 days** baked
   into its owner-owned body (and caps each batch at 10 000 rows), so a
@@ -1997,7 +2107,8 @@ What the trigger does and does not guarantee (review #83):
   application connects as the least-privilege `<DB_SCHEMA>_runtime` role
   ([Deployment §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended))
   it holds `INSERT`/`SELECT` only on `app_audit_events` — no `UPDATE`,
-  `DELETE` or `TRUNCATE` — and executes the prune function by grant. Until an
+  `DELETE` or `TRUNCATE` — and executes the prune and erasure functions by
+  grant. Until an
   operator switches the runtime to that role, the application still connects
   as the owner, which can disable the trigger like any owner; the trigger then
   guards against accidental or scripted mutation, not against a compromised

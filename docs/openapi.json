@@ -71,6 +71,7 @@
               "admin.users.setPassword": "admin.users.setPassword",
               "admin.users.sessions": "admin.users.sessions",
               "admin.users.impersonate": "admin.users.impersonate",
+              "admin.users.export": "admin.users.export",
               "admin.roles.read": "admin.roles.read",
               "admin.roles.create": "admin.roles.create",
               "admin.roles.update": "admin.roles.update",

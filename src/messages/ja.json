@@ -506,6 +506,8 @@
         "revokeSessions": "すべてのセッションを取り消し",
         "softDelete": "削除（ソフト）",
         "restore": "復元",
+        "exportData": "データをエクスポート",
+        "erase": "個人データを消去",
         "impersonate": "代理ログイン",
         "stopImpersonating": "代理ログインを終了",
         "confirm": "確認",
@@ -537,6 +539,16 @@
         "selfError": "自分自身を代理ログインすることはできません。",
         "bannerLabel": "{email} として代理ログインしています。",
         "stopErrorToast": "代理ログインを終了できませんでした。もう一度お試しください。"
+      },
+      "erasure": {
+        "confirmTitle": "{email} の個人データを消去しますか？",
+        "confirmDescription": "この操作は元に戻せません。メールアドレスは仮名に置き換えられ、名前と画像は削除され、すべてのセッションとサインイン方法が削除され、このユーザー宛てのメールは内容が消去され、本人のリクエストの IP アドレスとユーザーエージェントは監査ログから消去されます。監査ログの行自体は残ります。消去されたユーザーは復元できません。",
+        "confirmEmailLabel": "確認のため、ユーザーのメールアドレスを入力してください",
+        "confirmAck": "この操作が取り消せず、監査されることを理解しています。",
+        "eraseButton": "完全に消去",
+        "successToast": "ユーザーの個人データを消去しました。",
+        "errorToast": "ユーザーの個人データを消去できませんでした。",
+        "erasedNotice": "このユーザーの個人データは消去されています。"
       },
       "dialogs": {
         "ban": {
@@ -1333,6 +1345,7 @@
     "no_changes": "変更が指定されていません。",
     "not_deactivated": "このユーザーは無効化されていません。",
     "use_restore": "このユーザーはソフト削除されています。先にユーザーを復元してください。",
+    "user_erased": "このユーザーの個人データは消去されています。消去されたユーザーは復元できません。",
     "not_applicable_to_service_account": "これは AI エージェントのサービスアカウントで、サインインはありません。ここでブロックするか、Agents で取り消してください。",
     "not_found": "見つかりません。",
     "organization_not_found": "組織が見つかりません。",
@@ -1343,6 +1356,7 @@
     "role_organization_mismatch": "このロールは別の組織に属しています。",
     "slug_taken": "このスラッグはすでに使用されています。",
     "soft_delete_failed": "ソフト削除に失敗しました。もう一度お試しください。",
+    "erase_failed": "ユーザーのデータを消去できませんでした。もう一度お試しください。",
     "unauthenticated": "サインインが必要です。",
     "unknown_resource": "不明なリソースです。",
     "untrusted_origin": "リクエストのオリジンは信頼されていません。",
@@ -1463,7 +1477,10 @@
       "noRoles": "ロールが割り当てられていません。",
       "permissions": "権限",
       "permissionsDescription": "アクティブな組織でのロールによって付与された、現在実行を許可されているすべての操作。",
-      "noPermissions": "アクティブな組織での権限がありません。"
+      "noPermissions": "アクティブな組織での権限がありません。",
+      "dataExport": "あなたのデータ",
+      "dataExportDescription": "このプラットフォームが保持しているあなたに関するデータのコピーをダウンロードします：プロフィール、組織、ロール、サインイン方法、セッション、API キー（シークレットを除く）、監査ログ内のあなたのアクティビティ。",
+      "dataExportButton": "自分のデータをダウンロード（JSON）"
     },
     "security": {
       "passwordTitle": "パスワード",

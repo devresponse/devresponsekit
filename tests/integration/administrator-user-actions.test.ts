@@ -1863,6 +1863,33 @@ describe("soft-deleted users: one precondition, earlier bans kept, credentials r
     );
   });
 
+  // F-151: erasure is final. An erased account (its address is its own
+  // pseudonym) is refused before the ban is read or put back.
+  it("POST …/restore refuses an erased user with 409 user_erased and changes nothing", async () => {
+    accessGetter.mockResolvedValue(superadmin());
+    dbMock.mockResolvedValueOnce({
+      ...deletedRow,
+      primary_email: `erased+${TARGET_ID}@erased.invalid`,
+    });
+    const { POST } = await import("@/app/api/administrator/users/[id]/restore/route");
+
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/restore`, {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual(
+      expect.objectContaining({ error: "user_erased", message: "errors.user_erased" }),
+    );
+    expect(authRestoreBan).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.restored" }),
+    );
+  });
+
   // Reading the soft-delete's audit record is a database read. A failure there
   // is the generic 500, never reported or audited as the authentication
   // service refusing the (un)ban (502 auth_ban_failed / auth_unban_failed).

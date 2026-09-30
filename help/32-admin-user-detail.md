@@ -17,12 +17,14 @@ captured: 2026-09-29
 The management hub for a single account (captured for the seed "Local Admin" user). Everything an administrator can know or change about a user hangs off this page's tabs.
 
 ## Key elements
-- Header: display name, email, status badge, and an **Impersonate** button.
+- Header: display name, email, status badge, and the **Export data**, **Erase personal data** and **Impersonate** buttons, each shown only where the caller may use it.
 - Tabs: **Overview** (captured), **Roles**, **Groups**, **Memberships**, **Sessions**, **Audit**.
 - Overview fields: email, display name, preferred locale, app user ID, Better Auth user ID, created/updated timestamps.
 
 ## Actions available
 - **Impersonate** (`admin.users.impersonate`) — act as this user; during impersonation the actor holds only the target's permissions and stops via the impersonation banner. *Not exercised in this walkthrough.*
+- **Export data** (`admin.users.export`) — download this user's data as JSON, for an access request.
+- **Erase personal data** (superadmin only, on a soft-deleted user) — replace the user's address, name and sign-in data with a pseudonym while keeping every audit row. It cannot be undone, so it asks for a tick and the user's address typed out. *Not exercised in this walkthrough.*
 - Per-tab management: assign roles/groups, manage org memberships, revoke sessions, review the user's audit trail, set password, ban/suspend (behind the respective `admin.users.*` permissions).
 
 ## Navigation

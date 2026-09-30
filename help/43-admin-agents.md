@@ -5,6 +5,7 @@ group: "4. Administrator console"
 order: 43
 route: /en/app/administrator/agents
 area: admin
+requires: admin.clients.read
 captured: 2026-07-10
 ---
 

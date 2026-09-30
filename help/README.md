@@ -3,11 +3,15 @@ title: "Introduction"
 description: "What this walkthrough covers, how it was captured, and the app map."
 group: "1. Overview"
 order: 0
-captured: 2026-07-10
+captured: 2026-09-29
 ---
 # DevResponseKit demo walkthrough
 
-A screenshot-based tour of **https://demo.devresponse.ca**, captured 2026-07-10 at 1440×900 (light theme, English locale), signed in as an account that holds the full administrator-console permission set. Every screen has its own page embedding its screenshots. The images are produced by the repository's capture tooling, which is not part of the served help content; see the repository's CONTRIBUTING guide to regenerate them.
+A screenshot-based tour of the app at 1440×900 (light theme, English locale), signed in as an account that holds the full administrator-console permission set. Most screens were captured from **https://demo.devresponse.ca** on 2026-07-10. The screens that showed real accounts, IP addresses or an API key (Account · Security and the administrator overview, users, user detail, organization detail, memberships, API keys, email outbox and audit log) were recaptured on 2026-09-29 from a local build running on the repository's synthetic seed data, so every name, email address, IP address and key prefix in them is invented. Every screen has its own page embedding its screenshots. The images are produced by the repository's capture tooling, which is not part of the served help content; see the repository's CONTRIBUTING guide to regenerate them.
+
+## Who sees which page
+
+The public and application pages are listed to every member. Each administrator-console page (30–46) is listed only to a viewer holding the permission its screen requires, named by `requires:` in the page's frontmatter. The overview's screen opens for any `admin.*` permission, which `requires:` cannot express, so its page requires `admin.users.read`, the read every seeded administrator role holds. The images are served to every signed-in member whichever page embeds them, and they are committed to the repository, so a screenshot must only ever show synthetic data.
 
 ## App map
 
@@ -74,7 +78,7 @@ demo.devresponse.ca
 - **Token-gated pages**: `/reset-password` and the invitation-accept flow need a live emailed token.
 - **Create/editor forms beyond the captured representatives**: `roles/new`, `groups/new`, `organizations/new`, `enterprise-apps/new`, `api-keys/new`, and per-entity editor pages follow the same form pattern as [Create user](33-admin-user-create.md) and the captured detail pages.
 - **Duplicate detail pages**: one representative user, role, and organization detail was captured; sibling rows render identically.
-- **Mutating states**: nothing was created, edited, deleted, invited, impersonated, or toggled; the login form was the only form submitted. Dark theme and non-English locales were left uncaptured for consistency.
+- **Mutating states**: nothing was created, edited, deleted, invited, impersonated, or toggled; the login form was the only form submitted (before the 2026-09-29 recapture, one API key was issued to a fixture account so the API keys screen has a row). Dark theme and non-English locales were left uncaptured for consistency.
 - **In-page tab states** (user detail's Roles/Sessions/… tabs, org detail's Providers/Authentication/Settings tabs, role detail's Members/Settings tabs): documented textually in each screen doc; only the default tab was photographed.
 
 ## Observations worth knowing

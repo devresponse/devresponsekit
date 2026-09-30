@@ -5,7 +5,8 @@ group: "4. Administrator console"
 order: 44
 route: /en/app/administrator/email
 area: admin
-captured: 2026-07-10
+requires: admin.email.read
+captured: 2026-09-29
 ---
 
 # Administrator · Email outbox
@@ -18,8 +19,8 @@ The inspectable record of the platform's outbox-first email design: "Every outbo
 ## Key elements
 - Filters: **Status** (Any/…) and **Template key** (e.g. `password_reset`).
 - **Send test email** control with a recipient field.
-- Table: Created, To, Subject, Template — the demo shows 4 recorded messages: three "Verify your email address" (`email_verification`) and one "Reset your password" (`password_reset`), matching the seed users' sign-ups.
-- Pagination (4 rows, page size selectable).
+- Table: Created, To, Subject, Template — the capture shows the fixture accounts' "Verify your email address" (`email_verification`) messages, each **Logged** because the local build it was taken from has no delivery provider.
+- Pagination (page size selectable).
 
 ## Actions available
 - Filter the outbox; send a test email (`admin.email.manage`) — *not exercised.*

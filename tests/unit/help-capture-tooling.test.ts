@@ -62,6 +62,23 @@ describe("help/capture.mjs reads credentials from the environment only (#1)", ()
     },
   );
 
+  it.each([[undefined], [""], ["0"], ["yes"]])(
+    "refuses to capture unless CAPTURE_SYNTHETIC_DATA=1 confirms a synthetic target (F-89, %o)",
+    (flag) => {
+      // The first walkthrough was shot against a production console and
+      // published its operator's email, public IP and a live key's prefix.
+      const vars: Record<string, string> = {
+        CAPTURE_BASE_URL: "http://127.0.0.1:9",
+        CAPTURE_EMAIL: "someone@example.test",
+        CAPTURE_PASSWORD: "unused-placeholder",
+      };
+      if (flag !== undefined) vars.CAPTURE_SYNTHETIC_DATA = flag;
+      const { status, stderr } = run(vars);
+      expect(status).toBe(2);
+      expect(stderr).toContain("refusing to capture without CAPTURE_SYNTHETIC_DATA=1");
+    },
+  );
+
   it("rejects a base URL that is not a URL before signing in", () => {
     const { status, stderr } = run({
       CAPTURE_BASE_URL: "not a url",

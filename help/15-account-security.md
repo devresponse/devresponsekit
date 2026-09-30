@@ -5,7 +5,7 @@ group: "3. Application"
 order: 15
 route: /en/app/account/security
 area: app
-captured: 2026-07-10
+captured: 2026-09-29
 ---
 
 # Account · Security
@@ -31,4 +31,4 @@ Self-service credential and session hygiene: change the password and inspect or 
 Any signed-in user; self-scoped. Administrators can additionally manage any user's sessions from the admin user detail page.
 
 ## Observations
-The session card shown in the capture is the walkthrough's own browser session (IP and user-agent are displayed verbatim).
+The two session cards are the capture tool's own headless-browser sessions against a local build. IP address and user agent are shown verbatim, which is one reason the walkthrough is captured from synthetic data only.

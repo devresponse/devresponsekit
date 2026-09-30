@@ -120,6 +120,11 @@ input. `<script>` / `<style>` / event handlers / `javascript:` URLs are stripped
   is always what was authorized.
 - The image route is auth-guarded and rate-limited per user
   (`DEFAULT_DOCS_ASSET_LIMIT`: a 60-request burst, then 2 per second; I-06).
+  It serves any image under the space's root to every member, whichever
+  document embeds it, so `requires` and `visibility` gate a document's text,
+  not its images. An image must be fit for every member: the help
+  walkthrough's screenshots are captured from synthetic data only, and its
+  administrator-console pages carry `requires` (F-89).
 
 ---
 

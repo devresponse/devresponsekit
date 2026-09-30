@@ -34,4 +34,4 @@ Self-service account registration with email/password or a social provider.
 Public.
 
 ## Observations
-The sign-up policy that controls activation is visible (and editable) on the admin **Organizations** page as "Platform sign-up defaults" — see [38-admin-organizations](38-admin-organizations.md).
+The sign-up policy that controls activation is set on the administrator console's **Organizations** screen as "Platform sign-up defaults". Administrators holding `admin.orgs.read` can see it there and read its walkthrough page, [38-admin-organizations](38-admin-organizations.md); editing it takes `admin.orgs.manage`.

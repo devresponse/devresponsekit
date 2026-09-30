@@ -5,7 +5,8 @@ group: "4. Administrator console"
 order: 39
 route: /en/app/administrator/organizations/{orgId}
 area: admin
-captured: 2026-07-10
+requires: admin.orgs.read
+captured: 2026-09-29
 ---
 
 # Administrator · Organization detail
@@ -13,12 +14,12 @@ captured: 2026-07-10
 ![Admin organization detail](screenshots/39-admin-org-detail.png)
 
 ## Purpose
-Manages a single tenant (captured for the seed "Default Organization"): its members, invitations, identity-provider bindings, authentication policy, and settings.
+Manages a single tenant (captured for the fixture organization "ORG A"): its members, invitations, identity-provider bindings, authentication policy, and settings.
 
 ## Key elements
-- Header: organization name, slug, status badge, and Default badge.
+- Header: organization name, slug, status badge, and (on the default organization) a Default badge.
 - Tabs: **Members** (captured), **Providers**, **Authentication**, **Settings**.
-- Members tab: table of members (User, Status, Source — e.g. "email", Joined) with per-row **Remove**, plus an **Invitations** section with an **Invite member** button (empty invitation list on the demo).
+- Members tab: table of members (User, Status, Source — e.g. "email", Joined) with per-row **Remove**, plus an **Invitations** section with an **Invite member** button (no pending invitations in the capture).
 
 ## Actions available
 - Remove members, invite members (sends an invitation email) — *not exercised.*
@@ -34,4 +35,4 @@ Manages a single tenant (captured for the seed "Default Organization"): its memb
 `admin.orgs.read` to view. Members, invitations and provider bindings need `admin.orgs.manage` (binding a new provider also needs a Superadmin); the Authentication policy needs `admin.orgs.update`; the Settings tab needs `admin.orgs.update` and a Superadmin.
 
 ## Observations
-All four demo users are members here via the "email" source. Invitation-based onboarding (visible as the Invitations section) pairs with the "Invitation required" approval mode on the sign-up policy.
+ORG A's ten members (its seven own accounts and the three cross-organization fixture members) all joined via the "email" source. Invitation-based onboarding (visible as the Invitations section) pairs with the "Invitation required" approval mode on the sign-up policy.

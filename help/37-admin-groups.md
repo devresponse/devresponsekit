@@ -5,6 +5,7 @@ group: "4. Administrator console"
 order: 37
 route: /en/app/administrator/groups
 area: admin
+requires: admin.groups.read
 captured: 2026-07-10
 ---
 

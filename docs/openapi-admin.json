@@ -139,6 +139,15 @@
           "type": "string"
         },
         "description": "Case-insensitive search."
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "The `ETag` the record's GET (or a previous PATCH) answered. When it is not the record's current tag the PATCH writes nothing and answers `412 precondition_failed`. Omitted, or `*`, the write is last-write-wins."
       }
     },
     "responses": {
@@ -184,6 +193,24 @@
       },
       "Conflict": {
         "description": "Conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AdminError"
+            }
+          }
+        }
+      },
+      "PreconditionFailed": {
+        "description": "`precondition_failed`: the `If-Match` tag is not the record's current one, because it was saved since it was read. Nothing was written; re-read the record and reapply the change (F-39).",
+        "headers": {
+          "ETag": {
+            "description": "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to have a stale write refused (412) instead of applied.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -1438,6 +1465,27 @@
           "ids"
         ]
       },
+      "PermissionsPatchRequest": {
+        "type": "object",
+        "description": "Permission keys to attach and to detach, applied in one transaction. At least one key in all; a key on both sides, or an empty body, is `400 invalid_body`.",
+        "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500
+          }
+        },
+        "additionalProperties": false
+      },
       "PermissionsResult": {
         "type": "object",
         "properties": {
@@ -1874,6 +1922,29 @@
         "required": [
           "roleIds"
         ]
+      },
+      "GroupRolesPatchRequest": {
+        "type": "object",
+        "description": "Role ids to bundle and to unbundle, applied in one transaction. At least one id in all; an id on both sides, or an empty body, is `400 invalid_body`.",
+        "properties": {
+          "add": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 500
+          },
+          "remove": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 500
+          }
+        },
+        "additionalProperties": false
       },
       "GroupRolesResult": {
         "type": "object",
@@ -5916,6 +5987,14 @@
                   "$ref": "#/components/schemas/RoleDetailEnvelope"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to have a stale write refused (412) instead of applied.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -5947,6 +6026,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "requestBody": {
@@ -5968,6 +6050,14 @@
                   "$ref": "#/components/schemas/Ok"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to have a stale write refused (412) instead of applied.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -5984,6 +6074,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -6242,6 +6335,72 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateRolePermissions",
+        "tags": [
+          "Roles"
+        ],
+        "summary": "Attach and detach a role's permissions in one transaction",
+        "description": "F-38: the permission editor's save. Both sides are checked before anything is written (a key the caller does not hold is `403`; detaching `superuser` from the last role carrying it is `409 last_superadmin`), then applied together, so the save lands whole or not at all. One `admin.role.permissions_changed` row records the keys actually attached and detached.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionsPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Conflict: `last_superadmin`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminError"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -6636,6 +6795,14 @@
                   "$ref": "#/components/schemas/GroupDetailEnvelope"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to have a stale write refused (412) instead of applied.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -6667,6 +6834,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "requestBody": {
@@ -6688,6 +6858,14 @@
                   "$ref": "#/components/schemas/Ok"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to have a stale write refused (412) instead of applied.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -6704,6 +6882,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -7086,6 +7267,65 @@
             "$ref": "#/components/responses/RateLimited"
           }
         }
+      },
+      "patch": {
+        "operationId": "updateGroupRoles",
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Attach and detach a group's roles in one transaction",
+        "description": "F-38: the Roles editor's save. Both sides are checked before anything is written (a role to attach outside the group's organization is `404 role_not_found`; a role conferring a permission the caller does not hold is `403`), then applied together, so the save lands whole or not at all. One `admin.group.roles_changed` row records the roles actually attached and detached.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupRolesPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupRolesResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
       }
     },
     "/organizations": {
@@ -7234,6 +7474,14 @@
                   "$ref": "#/components/schemas/OrganizationDetail"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to have a stale write refused (412) instead of applied.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -7265,6 +7513,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
           }
         ],
         "requestBody": {
@@ -7286,6 +7537,14 @@
                   "$ref": "#/components/schemas/Ok"
                 }
               }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The record's weak content tag. Send it back as `If-Match` on the record's PATCH to have a stale write refused (412) instead of applied.",
+                "schema": {
+                  "type": "string"
+                }
+              }
             }
           },
           "400": {
@@ -7301,7 +7560,17 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "Conflict: `slug_taken`; `organization_is_default` (`isDefault: false` on the default organization); `last_superadmin` (a `status` other than `active` would suspend the platform's last superuser grant)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminError"
+                }
+              }
+            }
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -7904,7 +8173,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "Conflict: `organization_not_active` (the organization is not `active`, F-09); `member_exists`; `invitation_exists`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminError"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -8022,7 +8298,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "description": "Conflict: `organization_not_active` (the organization is not `active`, F-09); `invitation_inviter_lacks_standing` (the invitation is voided)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminError"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"

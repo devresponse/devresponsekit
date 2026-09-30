@@ -606,7 +606,7 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  * forgets, which is why the last two sit in shared cores, not in routes):
  *
  *   1. `DELETE /users/[id]/app-roles`        — assignment revoke
- *   2. `DELETE /roles/[id]/permissions`      — `superuser` stripped off a role
+ *   2. `DELETE|PATCH /roles/[id]/permissions` — `superuser` stripped off a role
  *   3. `PATCH|DELETE /users/[id]/memberships`
  *   4. `PATCH|DELETE /organizations/[id]/members`
  *   5. `performAdminStatusChange` (review #444) — the shared status core behind

@@ -25,6 +25,8 @@ import type {
   BulkUserResult,
   CreateUserRequest,
   DeleteMembershipsRequest,
+  EraseUser200Response,
+  EraseUserRequest,
   MembershipList,
   Ok,
   OkCount,
@@ -68,6 +70,10 @@ import {
     CreateUserRequestToJSON,
     DeleteMembershipsRequestFromJSON,
     DeleteMembershipsRequestToJSON,
+    EraseUser200ResponseFromJSON,
+    EraseUser200ResponseToJSON,
+    EraseUserRequestFromJSON,
+    EraseUserRequestToJSON,
     MembershipListFromJSON,
     MembershipListToJSON,
     OkFromJSON,
@@ -143,6 +149,15 @@ export interface CreateUserOperationRequest {
 export interface DeleteUserRequest {
     id: string;
     reasonRequest?: ReasonRequest;
+}
+
+export interface EraseUserOperationRequest {
+    id: string;
+    eraseUserRequest: EraseUserRequest;
+}
+
+export interface ExportUserDataRequest {
+    id: string;
 }
 
 export interface GetUserRequest {
@@ -598,6 +613,102 @@ export class UsersApi extends runtime.BaseAPI {
      */
     async deleteUser(requestParameters: DeleteUserRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Ok> {
         const response = await this.deleteUserRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * F-151: irreversible. Requires `admin.users.delete` and cross-org reach, and a user who is already soft-deleted (`409 not_deactivated` otherwise). Revokes the user\'s bearer credentials, then runs `app_users_pseudonymise`: the addresses become `erased+<id>@erased.invalid`, the name and picture are removed, every session and sign-in method is deleted, mail addressed to the user is blanked, and the IP address and user agent of the user\'s own requests are cleared from the audit log, whose rows all remain. `confirmEmail` must equal the user\'s current address (`400 invalid_body` otherwise). A repeat changes nothing (`alreadyErased: true`); restore refuses an erased user (`409 user_erased`). An agent service account is `409 not_applicable_to_service_account`. Audited `admin.user.erased`.
+     * Erase a soft-deleted user\'s personal data (superadmin only)
+     */
+    async eraseUserRaw(requestParameters: EraseUserOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<EraseUser200Response>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling eraseUser().'
+            );
+        }
+
+        if (requestParameters['eraseUserRequest'] == null) {
+            throw new runtime.RequiredError(
+                'eraseUserRequest',
+                'Required parameter "eraseUserRequest" was null or undefined when calling eraseUser().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+        const response = await this.request({
+            path: `/users/{id}/erase`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: EraseUserRequestToJSON(requestParameters['eraseUserRequest']),
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => EraseUser200ResponseFromJSON(jsonValue));
+    }
+
+    /**
+     * F-151: irreversible. Requires `admin.users.delete` and cross-org reach, and a user who is already soft-deleted (`409 not_deactivated` otherwise). Revokes the user\'s bearer credentials, then runs `app_users_pseudonymise`: the addresses become `erased+<id>@erased.invalid`, the name and picture are removed, every session and sign-in method is deleted, mail addressed to the user is blanked, and the IP address and user agent of the user\'s own requests are cleared from the audit log, whose rows all remain. `confirmEmail` must equal the user\'s current address (`400 invalid_body` otherwise). A repeat changes nothing (`alreadyErased: true`); restore refuses an erased user (`409 user_erased`). An agent service account is `409 not_applicable_to_service_account`. Audited `admin.user.erased`.
+     * Erase a soft-deleted user\'s personal data (superadmin only)
+     */
+    async eraseUser(requestParameters: EraseUserOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<EraseUser200Response> {
+        const response = await this.eraseUserRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * F-151: the data-subject export for an access request, the same document the user downloads from `GET /api/account/export`: profile, identity, preferences, memberships, roles, groups, sign-in methods, sessions, API keys and OAuth clients (never a token, hash or secret), invitations, and the audit rows about or by the user. On an audit row where the user is only the actor, the other person\'s address and details are left out; an IP address and user agent are included only on the user\'s own requests. An organization administrator gets only their organization\'s rows of the organization-attributed sections (`organizationScope`); a user who belongs to other organizations too is superadmin-only (403), as is a target who outranks the caller. Rate-limited per actor (3 burst / one per 20 s); audited `admin.user.data_exported`.
+     * Download one user\'s personal data as JSON (`admin.users.export`)
+     */
+    async exportUserDataRaw(requestParameters: ExportUserDataRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<{ [key: string]: any; }>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling exportUserData().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+        const response = await this.request({
+            path: `/users/{id}/export`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse<any>(response);
+    }
+
+    /**
+     * F-151: the data-subject export for an access request, the same document the user downloads from `GET /api/account/export`: profile, identity, preferences, memberships, roles, groups, sign-in methods, sessions, API keys and OAuth clients (never a token, hash or secret), invitations, and the audit rows about or by the user. On an audit row where the user is only the actor, the other person\'s address and details are left out; an IP address and user agent are included only on the user\'s own requests. An organization administrator gets only their organization\'s rows of the organization-attributed sections (`organizationScope`); a user who belongs to other organizations too is superadmin-only (403), as is a target who outranks the caller. Rate-limited per actor (3 burst / one per 20 s); audited `admin.user.data_exported`.
+     * Download one user\'s personal data as JSON (`admin.users.export`)
+     */
+    async exportUserData(requestParameters: ExportUserDataRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<{ [key: string]: any; }> {
+        const response = await this.exportUserDataRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

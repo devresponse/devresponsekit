@@ -8,28 +8,28 @@ import { RolePermissionsEditor } from "@/app/[locale]/(secure)/app/administrator
 import { GroupRolesEditor } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-roles-editor";
 
 /**
- * F-38: both dual-list editors save through one POST and one DELETE that are
- * not atomic, via the shared `useDualListSave`.
+ * F-38: both dual-list editors save through ONE atomic `PATCH { add, remove }`,
+ * via the shared `useDualListSave`.
  *
- * Before the fix, when the DELETE was refused (403 AUTHZ-3 / REVOKE-1, 409
- * REVOKE-2) after the POST had landed, the editor showed a generic error and
- * kept its old baseline, so the admin moved the keys back, Save went quiet,
- * and the grant the POST had committed stayed live and invisible. These pin,
- * for BOTH editors: additions go first (so a swap of the role or permission
- * the actor's own authority comes through completes instead of stranding the
- * collection empty); a refused addition sends no DELETE; after any failure
- * the lists and the baseline are reset to a fresh GET of the server's set;
- * the refusal is named; nothing moves while a save is in flight; and an
- * editor that cannot re-read the server locks itself.
+ * They used to send a POST of the additions and then a DELETE of the removals.
+ * When the DELETE was refused (403 AUTHZ-3 / REVOKE-1, 409 REVOKE-2) after the
+ * POST had landed, the editor showed a generic error and kept its old
+ * baseline, so the admin moved the keys back, Save went quiet, and the grant
+ * the POST had committed stayed live and invisible. These pin, for BOTH
+ * editors: one PATCH carries both sides; a swap of the role or permission the
+ * actor's own authority comes through completes (the server judges both sides
+ * against the authority the request found); a refused save lands nothing;
+ * after any failure the lists and the baseline are reset to a fresh GET of the
+ * server's set; the refusal is named; nothing moves while a save is in
+ * flight; and an editor that cannot re-read the server locks itself.
  *
- * Each editor is driven against a small in-memory server: a successful DELETE
- * or POST really changes the set the next GET returns.
+ * Each editor is driven against a small in-memory server: a successful PATCH
+ * really changes the set the next GET returns, all of it or none of it.
  */
 interface Harness {
   name: string;
   render(): ReactElement;
   saveUrl: string;
-  bodyKey: "ids" | "roleIds";
   /** Assigned before the test; `dropped` is removed and `extra` added by `stage`. */
   initial: string[];
   kept: string;
@@ -60,7 +60,6 @@ const roleEditor: Harness = {
     />
   ),
   saveUrl: "/api/administrator/roles/r1/permissions",
-  bodyKey: "ids",
   initial: ["admin.users.ban", "admin.users.read"],
   kept: "admin.users.read",
   dropped: "admin.users.ban",
@@ -86,7 +85,6 @@ const groupEditor: Harness = {
   name: "GroupRolesEditor",
   render: () => <GroupRolesEditor groupId="g1" canAssign canReadRoles />,
   saveUrl: "/api/administrator/groups/g1/roles",
-  bodyKey: "roleIds",
   initial: ["role-ban", "role-read"],
   kept: "role-read",
   dropped: "role-ban",
@@ -125,25 +123,21 @@ function jsonRes(body: unknown, status = 200) {
 }
 
 interface ServerOpts {
-  deleteStatus?: number;
-  deleteBody?: unknown;
-  /** The DELETE's rows go although it answers with an error (a commit, then a failure). */
-  deleteCommitsAnyway?: boolean;
-  postStatus?: number;
-  postBody?: unknown;
-  /** The POST's rows land although it answers with an error (a commit, then a failure). */
-  postCommitsAnyway?: boolean;
+  patchStatus?: number;
+  patchBody?: unknown;
+  /** The PATCH's changes commit although it answers with an error (a commit, then a failure). */
+  patchCommitsAnyway?: boolean;
   /** Status of every GET of the collection once a write has been sent. */
   rereadStatus?: number;
-  /** Hold the DELETE open until `gate.release()` is called. */
-  holdDelete?: boolean;
+  /** Hold the PATCH open until `gate.release()` is called. */
+  holdPatch?: boolean;
   /**
    * An actor whose own admin authority comes through the collection being
    * edited (the group bundles the role that grants them `admin.groups.*`, or
    * the role is their only source of `admin.roles.update`). The server
-   * recomputes their permissions on every request (src/lib/auth-status.ts), so
-   * once its set holds none of these ids every request to the collection is
-   * refused 403 `forbidden`, the re-read included.
+   * recomputes their permissions at the start of every request
+   * (src/lib/auth-status.ts), so once its set holds none of these ids every
+   * request to the collection is refused 403 `forbidden`, the re-read included.
    */
   authorityFrom?: string[];
 }
@@ -165,17 +159,16 @@ function serve(h: Harness, opts: ServerOpts = {}) {
       if (writes > 0 && opts.rereadStatus) return jsonRes({}, opts.rereadStatus);
       return jsonRes(h.getBody([...server].sort()));
     }
-    if (u === h.saveUrl) {
-      const ids = (JSON.parse(init?.body ?? "{}") as Record<string, string[]>)[h.bodyKey] ?? [];
-      if (method === "DELETE") {
-        if (opts.holdDelete) await new Promise<void>((resolve) => (gate.release = resolve));
-        const status = opts.deleteStatus ?? 200;
-        if (status === 200 || opts.deleteCommitsAnyway) for (const id of ids) server.delete(id);
-        return jsonRes(status === 200 ? { ok: true } : (opts.deleteBody ?? {}), status);
+    if (u === h.saveUrl && method === "PATCH") {
+      const { add, remove } = JSON.parse(init?.body ?? "{}") as { add: string[]; remove: string[] };
+      if (opts.holdPatch) await new Promise<void>((resolve) => (gate.release = resolve));
+      const status = opts.patchStatus ?? 200;
+      // One transaction: both sides land, or neither does.
+      if (status === 200 || opts.patchCommitsAnyway) {
+        for (const id of add) server.add(id);
+        for (const id of remove) server.delete(id);
       }
-      const status = opts.postStatus ?? 200;
-      if (status === 200 || opts.postCommitsAnyway) for (const id of ids) server.add(id);
-      return jsonRes(status === 200 ? { ok: true } : (opts.postBody ?? {}), status);
+      return jsonRes(status === 200 ? { ok: true } : (opts.patchBody ?? {}), status);
     }
     const aux = h.aux(u);
     if (aux !== undefined) return jsonRes(aux);
@@ -184,16 +177,13 @@ function serve(h: Harness, opts: ServerOpts = {}) {
   return { server, gate };
 }
 
-/** The POST / DELETE calls the editor sent, in order, with the ids each named. */
-function writeCalls(h: Harness): Array<{ method: string; ids: string[] }> {
+/** Every write the editor sent, in order, with the method and body of each. */
+function writeCalls(): Array<{ method: string; body: unknown }> {
   return fetchMock.mock.calls
-    .filter(([, init]) => {
-      const method = (init as { method?: string } | undefined)?.method;
-      return method === "POST" || method === "DELETE";
-    })
+    .filter(([, init]) => (init as { method?: string } | undefined)?.method !== undefined)
     .map(([, init]) => {
       const { method, body } = init as { method: string; body: string };
-      return { method, ids: (JSON.parse(body) as Record<string, string[]>)[h.bodyKey] ?? [] };
+      return { method, body: JSON.parse(body) as unknown };
     });
 }
 
@@ -250,7 +240,7 @@ afterEach(() => {
 });
 
 describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
-  it("sends the POST before the DELETE, then adopts the server's re-read set", async () => {
+  it("sends ONE PATCH carrying both sides, then adopts the server's re-read set", async () => {
     serve(h);
     const user = userEvent.setup();
     renderWithIntl(h.render());
@@ -259,9 +249,8 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     await user.click(button("Save changes"));
 
     expect(await screen.findByRole("status")).toHaveTextContent(h.messages.saved);
-    expect(writeCalls(h)).toEqual([
-      { method: "POST", ids: [h.extra] },
-      { method: "DELETE", ids: [h.dropped] },
+    expect(writeCalls()).toEqual([
+      { method: "PATCH", body: { add: [h.extra], remove: [h.dropped] } },
     ]);
     expect(fetchMock.mock.calls.at(-1)).toEqual([h.saveUrl, { credentials: "same-origin" }]);
     expect(values(lists().assigned)).toEqual([h.extra, h.kept].sort());
@@ -271,10 +260,10 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
 
   it("completes a swap of the item the actor's own authority comes through", async () => {
     // `dropped` is the actor's only source of admin authority today and
-    // `extra` an equivalent replacement. Removals-first would commit the
-    // DELETE, lose the authority, have the POST refused (403) and the re-read
-    // refused too, stranding every holder with neither; the actor could not
-    // put `dropped` back (AUTHZ-3). Additions-first completes the swap.
+    // `extra` an equivalent replacement. The server judges both sides against
+    // the authority the request found, so the removal cannot refuse the
+    // addition; sent as a DELETE first, it would have stranded every holder
+    // with neither, and the actor could not put `dropped` back (AUTHZ-3).
     serve(h, { authorityFrom: [h.dropped, h.extra] });
     const user = userEvent.setup();
     renderWithIntl(h.render());
@@ -284,16 +273,13 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
 
     expect(await screen.findByRole("status")).toHaveTextContent(h.messages.saved);
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(writeCalls(h)).toEqual([
-      { method: "POST", ids: [h.extra] },
-      { method: "DELETE", ids: [h.dropped] },
-    ]);
+    expect(writeCalls()).toHaveLength(1);
     expect(values(lists().assigned)).toEqual([h.extra, h.kept].sort());
     expect(lists().available).toBeEnabled();
   });
 
-  it("a refused addition (403) sends no DELETE, resets to the server's set and names the guard", async () => {
-    serve(h, { postStatus: 403, postBody: { error: "forbidden" } });
+  it("a refused save (403) lands nothing, resets to the server's set and names the guard", async () => {
+    serve(h, { patchStatus: 403, patchBody: { error: "forbidden" } });
     const user = userEvent.setup();
     renderWithIntl(h.render());
     await ready(h);
@@ -301,62 +287,19 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     await user.click(button("Save changes"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(h.messages.forbidden);
-    // The removal was never sent, so a swap the actor may not complete
-    // removes nothing.
-    expect(writeCalls(h)).toEqual([{ method: "POST", ids: [h.extra] }]);
-    // The lists show what the server holds: the staged moves are undone.
+    expect(writeCalls()).toHaveLength(1);
+    // Neither side landed: the staged addition is not granted, the staged
+    // removal did not happen, and the lists show exactly that.
     expect(values(lists().assigned)).toEqual([...h.initial].sort());
     expect(values(lists().available)).toContain(h.extra);
     expect(button("Save changes")).toBeDisabled();
     expectRefreshedOnce(h);
   });
 
-  it("a refused removal (403) after the addition landed shows the grant and names the guard", async () => {
-    serve(h, { deleteStatus: 403, deleteBody: { error: "forbidden" } });
-    const user = userEvent.setup();
-    renderWithIntl(h.render());
-    await ready(h);
-    await stage(user, h);
-    await user.click(button("Save changes"));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(h.messages.forbidden);
-    expect(writeCalls(h)).toEqual([
-      { method: "POST", ids: [h.extra] },
-      { method: "DELETE", ids: [h.dropped] },
-    ]);
-    // The committed grant is in Assigned, next to the item that stayed.
-    expect(values(lists().assigned)).toEqual([...h.initial, h.extra].sort());
-    expect(button("Save changes")).toBeDisabled();
-    // The page is refreshed too, so a tab switch re-seeds the half-applied set.
-    expectRefreshedOnce(h);
-    // The baseline IS the server's set, so taking the grant back out is a real
-    // pending change the admin can save.
-    await user.selectOptions(lists().assigned, h.extra);
-    await user.click(button("Remove"));
-    expect(button("Save changes")).toBeEnabled();
-  });
-
-  it.each([
-    { label: "a POST that fails", fails: { postStatus: 500 }, commits: true },
-    { label: "a POST that fails", fails: { postStatus: 500 }, commits: false },
-    {
-      label: "a DELETE that fails after the POST landed",
-      fails: { deleteStatus: 500 },
-      commits: true,
-    },
-    {
-      label: "a DELETE that fails after the POST landed",
-      fails: { deleteStatus: 500 },
-      commits: false,
-    },
-  ])(
-    "$label (rows committed anyway: $commits) shows the server's set, never the stale baseline",
-    async ({ fails, commits }) => {
-      const { server } = serve(h, {
-        ...fails,
-        postCommitsAnyway: commits,
-        deleteCommitsAnyway: commits,
-      });
+  it.each([{ commits: true }, { commits: false }])(
+    "a PATCH that fails (committed anyway: $commits) shows the server's set, never the stale baseline",
+    async ({ commits }) => {
+      const { server } = serve(h, { patchStatus: 500, patchCommitsAnyway: commits });
       const user = userEvent.setup();
       renderWithIntl(h.render());
       await ready(h);
@@ -364,22 +307,14 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
       await user.click(button("Save changes"));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(h.messages.failed);
-      // The POST lands unless it failed without committing; the DELETE runs
-      // only after a POST that answered ok, and lands only if it did too or
-      // committed anyway.
-      const postLanded = !("postStatus" in fails) || commits;
-      const deleteLanded = !("postStatus" in fails) && commits;
-      const expected = [
-        ...h.initial.filter((id) => !(deleteLanded && id === h.dropped)),
-        ...(postLanded ? [h.extra] : []),
-      ].sort();
+      const expected = commits ? [h.extra, h.kept].sort() : [...h.initial].sort();
       expect(values(lists().assigned)).toEqual([...server].sort());
       expect(values(lists().assigned)).toEqual(expected);
       expectRefreshedOnce(h);
-      // The baseline IS the server's set, so moving `extra` back is a real
-      // pending change: Save wakes up instead of going quiet over a live grant.
+      // The baseline IS the server's set, so moving `extra` is a real pending
+      // change: Save wakes up instead of going quiet over a live grant.
       expect(button("Save changes")).toBeDisabled();
-      if (postLanded) {
+      if (commits) {
         await user.selectOptions(lists().assigned, h.extra);
         await user.click(button("Remove"));
       } else {
@@ -390,10 +325,10 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     },
   );
 
-  it("names the last-superadmin refusal (409 last_superadmin) and shows what landed", async () => {
+  it("names the last-superadmin refusal (409 last_superadmin), and nothing lands", async () => {
     serve(h, {
-      deleteStatus: 409,
-      deleteBody: { error: "last_superadmin", message: "errors.last_superadmin" },
+      patchStatus: 409,
+      patchBody: { error: "last_superadmin", message: "errors.last_superadmin" },
     });
     const user = userEvent.setup();
     renderWithIntl(h.render());
@@ -402,17 +337,13 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     await user.click(button("Save changes"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(LAST_SUPERADMIN);
-    expect(writeCalls(h)).toEqual([
-      { method: "POST", ids: [h.extra] },
-      { method: "DELETE", ids: [h.dropped] },
-    ]);
-    // The refused removal is still Assigned; the addition is shown as landed.
-    expect(values(lists().assigned)).toEqual([...h.initial, h.extra].sort());
+    // The refused removal is still Assigned, and the addition was not made.
+    expect(values(lists().assigned)).toEqual([...h.initial].sort());
     expectRefreshedOnce(h);
   });
 
   it("keeps the generic message for a 409 that is not last_superadmin", async () => {
-    serve(h, { deleteStatus: 409, deleteBody: { error: "conflict" } });
+    serve(h, { patchStatus: 409, patchBody: { error: "conflict" } });
     const user = userEvent.setup();
     renderWithIntl(h.render());
     await ready(h);
@@ -423,7 +354,7 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
   });
 
   it("disables Add, Remove, Save and both lists while a save is in flight", async () => {
-    const { gate } = serve(h, { holdDelete: true });
+    const { gate } = serve(h, { holdPatch: true });
     const user = userEvent.setup();
     renderWithIntl(h.render());
     await ready(h);
@@ -445,12 +376,12 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
 
     gate.release();
     expect(await screen.findByRole("status")).toHaveTextContent(h.messages.saved);
-    expect(writeCalls(h)).toEqual([{ method: "DELETE", ids: [h.dropped] }]);
+    expect(writeCalls()).toEqual([{ method: "PATCH", body: { add: [], remove: [h.dropped] } }]);
     expect(lists().available).toBeEnabled();
   });
 
   it("locks the editor when a save fails and the server's set cannot be re-read", async () => {
-    serve(h, { deleteStatus: 500, rereadStatus: 500 });
+    serve(h, { patchStatus: 500, rereadStatus: 500 });
     const user = userEvent.setup();
     renderWithIntl(h.render());
     await ready(h);

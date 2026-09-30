@@ -39,6 +39,8 @@ export interface OrganizationDetailJson {
   isResolvedDefault: boolean;
   memberCount: number;
   bindingCount: number;
+  /** The organization's ETag (F-39), for the Settings form's `If-Match`. */
+  etag: string;
 }
 
 export function OrganizationDetailTabs({
@@ -112,6 +114,7 @@ export function OrganizationDetailTabs({
           initialStatus={org.status}
           initialIsDefault={org.isDefault}
           isResolvedDefault={org.isResolvedDefault}
+          etag={org.etag}
           canUpdate={canEditSettings}
         />
       </TabsContent>

@@ -1,7 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import type { Kysely } from "kysely";
 import { z } from "zod";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -15,6 +17,7 @@ import {
 import { boundedRequestList, refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { dualListPatchSchema } from "@/lib/validation/dual-list";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +31,11 @@ async function loadGroup(id: string) {
     .executeTakeFirst();
 }
 
-async function currentRoleIds(groupId: string): Promise<string[]> {
-  const rows = await db
+async function currentRoleIds(
+  groupId: string,
+  executor: Kysely<AppDatabase> = db,
+): Promise<string[]> {
+  const rows = await executor
     .selectFrom("app_group_roles")
     .select("role_id")
     .where("group_id", "=", groupId)
@@ -73,9 +79,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
  * deserves. `isUuid` (the shared `UUID_RE`) is the single source of truth so
  * body ids and path ids accept exactly the same shape.
  */
-const idsSchema = z
-  .object({ roleIds: z.array(z.string().refine(isUuid, "invalid_uuid")).min(1).max(500) })
-  .strict();
+const roleIdSchema = z.string().refine(isUuid, "invalid_uuid");
+const idsSchema = z.object({ roleIds: z.array(roleIdSchema).min(1).max(500) }).strict();
+/** PATCH: `{ add?, remove? }` role ids (F-38, `dualListPatchSchema`). */
+const patchSchema = dualListPatchSchema(roleIdSchema);
 
 /**
  * POST /api/administrator/groups/[id]/roles
@@ -291,4 +298,145 @@ export const DELETE = withAdminRoute(async function DELETE(
   });
 
   return NextResponse.json({ ok: true, roleIds: await currentRoleIds(id) });
+});
+
+/**
+ * PATCH /api/administrator/groups/[id]/roles
+ *
+ * F-38: the Roles editor's save, in ONE request. Body
+ * `{ add?: string[], remove?: string[] }` (role ids; at least one, and none on
+ * both sides), applied in one transaction, so a save lands whole or not at
+ * all. The editor used to send a POST and then a DELETE, and a DELETE refused
+ * after its POST had landed left the bundled role conferred on every member.
+ * Caller MUST hold `admin.groups.assign`.
+ *
+ * Every guard runs before anything is written, as on POST and DELETE: each
+ * role to add must belong to the group's org (404 `role_not_found`), and a
+ * non-SUPERADMIN, or any bearer credential (P1-1), may add or remove only
+ * roles whose conferred permissions they hold (AUTHZ-3 / REVOKE-1: 403 and an
+ * `admin.permission.conferral_denied` row naming the direction, F-58). Both
+ * sets are judged against the actor's authority as this request found it, so
+ * swapping the role the actor's own `admin.groups.assign` comes through for an
+ * equivalent one succeeds. REVOKE-2 does not apply: it counts direct
+ * assignments only (see `DELETE /groups/[id]`).
+ *
+ * One `admin.group.roles_changed` row records the delta applied, read from
+ * `RETURNING`. POST and DELETE keep working for API clients.
+ */
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
+  const guard = await requireAdminPermission(request, "admin.groups.assign");
+  if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.groups.assign",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
+  );
+  if (limited) return limited;
+
+  const { id } = await ctx.params;
+  if (!isUuid(id)) return adminErrorResponse("invalid_id", 400, request);
+
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return adminErrorResponse("invalid_body", 400, request);
+  }
+  const parsed = patchSchema.safeParse(json);
+  if (!parsed.success) return adminErrorResponse("invalid_body", 400, request);
+  const { add, remove } = parsed.data;
+
+  const group = await loadGroup(id);
+  if (!group || !canAccessOrg(guard.access, group.organization_id)) {
+    return adminErrorResponse("not_found", 404, request);
+  }
+
+  // Every role to ADD must exist AND belong to the group's own org, as on
+  // POST (`add` is already deduplicated). A removal names no such rule: a
+  // role the group does not bundle removes nothing, as on DELETE.
+  if (add.length > 0) {
+    const roles = await db
+      .selectFrom("app_roles")
+      .select(["id", "organization_id"])
+      .where("id", "in", add)
+      .execute();
+    if (roles.filter((r) => r.organization_id === group.organization_id).length !== add.length) {
+      return adminErrorResponse("role_not_found", 404, request);
+    }
+  }
+
+  // AUTHZ-3 (add) and REVOKE-1 (remove), each measured against the roles the
+  // body names, exactly as POST and DELETE measure them.
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const sides = [
+      ["group_roles_add", add],
+      ["group_roles_remove", remove],
+    ] as const;
+    for (const [action, roleIds] of sides) {
+      if (roleIds.length === 0) continue;
+      const unheld = unheldPermissionKeys(conferrable, await permissionKeysForRoles(roleIds));
+      if (unheld.length > 0) {
+        const requested = boundedRequestList(roleIds);
+        return refuseUnconferrable(guard, request, {
+          action,
+          organizationId: group.organization_id,
+          unheld,
+          metadata: {
+            groupId: id,
+            key: group.key,
+            requestedRoleIds: requested.ids,
+            requestedRoleCount: requested.count,
+          },
+        });
+      }
+    }
+  }
+
+  const outcome = await db.transaction().execute(async (trx) => {
+    // Review #218: the composite FKs (migration 0005) reject a role from any
+    // other org even if the same-org check above were bypassed.
+    const inserted =
+      add.length > 0
+        ? await trx
+            .insertInto("app_group_roles")
+            .values(
+              add.map((roleId) => ({
+                group_id: id,
+                role_id: roleId,
+                organization_id: group.organization_id,
+              })),
+            )
+            .onConflict((oc) => oc.doNothing())
+            .returning("role_id")
+            .execute()
+        : [];
+    const deleted =
+      remove.length > 0
+        ? await trx
+            .deleteFrom("app_group_roles")
+            .where("group_id", "=", id)
+            .where("role_id", "in", remove)
+            .returning("role_id")
+            .execute()
+        : [];
+    return { inserted, deleted, roleIds: await currentRoleIds(id, trx) };
+  });
+
+  await auditOrgAction("admin.group.roles_changed", "success", {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: group.organization_id,
+    metadata: {
+      groupId: id,
+      key: group.key,
+      added: outcome.inserted.map((r) => r.role_id).sort(),
+      removed: outcome.deleted.map((r) => r.role_id).sort(),
+    },
+  });
+
+  return NextResponse.json({ ok: true, roleIds: outcome.roleIds });
 });

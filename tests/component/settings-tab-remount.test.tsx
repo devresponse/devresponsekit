@@ -75,7 +75,12 @@ import { pickChangedFields } from "@/lib/forms/use-saved-form-baseline";
 const fetchMock = vi.fn();
 
 function jsonRes(body: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body };
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(),
+    json: async () => body,
+  };
 }
 
 /** The bodies of every call with `method`, parsed, in order. */
@@ -115,6 +120,7 @@ describe("organization Settings tab (F-39)", () => {
     isResolvedDefault: false,
     memberCount: 3,
     bindingCount: 0,
+    etag: 'W/"o1-v1"',
   };
   const renderOrg = (org: OrganizationDetailJson) => (
     <OrganizationDetailTabs
@@ -238,6 +244,7 @@ describe("organization Settings tab — SUPERADMIN-only writes (F-66)", () => {
           isResolvedDefault: false,
           memberCount: 3,
           bindingCount: 0,
+          etag: 'W/"o1-v1"',
         }}
         canManage
         canUpdate
@@ -275,6 +282,7 @@ describe("organization Authentication tab (F-39)", () => {
     isResolvedDefault: false,
     memberCount: 3,
     bindingCount: 0,
+    etag: 'W/"o1-v1"',
   };
   const renderOrg = (authSettings: AuthPolicySettingsJson | null) => (
     <OrganizationDetailTabs
@@ -415,6 +423,7 @@ describe.each([
         description,
         permissionKeys: [],
         memberCount: 0,
+        etag: 'W/"r1-v1"',
       };
       return <RoleDetailTabs role={role} canUpdate canReadUsers />;
     },
@@ -423,7 +432,13 @@ describe.each([
     kind: "group",
     url: "/api/administrator/groups/g1",
     render: (name: string, description: string | null) => {
-      const group: GroupDetailJson = { id: "g1", key: "support", name, description };
+      const group: GroupDetailJson = {
+        id: "g1",
+        key: "support",
+        name,
+        description,
+        etag: 'W/"g1-v1"',
+      };
       return <GroupDetailTabs group={group} canUpdate canAssign canReadRoles canReadUsers />;
     },
   },
@@ -577,11 +592,12 @@ describe("role Permissions tab (F-39)", () => {
     description: null,
     permissionKeys,
     memberCount: 0,
+    etag: 'W/"r1-v1"',
   });
   const INITIAL = ["admin.users.ban", "admin.users.read"];
   const SAVED = ["admin.users.read", "admin.users.update"];
 
-  /** An in-memory role-permissions collection: writes change what GET returns. */
+  /** An in-memory role-permissions collection: a PATCH changes what GET returns (F-38). */
   function serve(): Set<string> {
     const server = new Set(INITIAL);
     fetchMock.mockImplementation(async (u: string, init?: { method?: string; body?: string }) => {
@@ -589,9 +605,11 @@ describe("role Permissions tab (F-39)", () => {
       const method = init?.method ?? "GET";
       if (url.startsWith("/api/administrator/permissions")) return jsonRes({ items: CATALOG });
       if (url === "/api/administrator/roles/r1/permissions") {
-        const ids = method === "GET" ? [] : (JSON.parse(init!.body!) as { ids: string[] }).ids;
-        if (method === "POST") ids.forEach((id) => server.add(id));
-        if (method === "DELETE") ids.forEach((id) => server.delete(id));
+        if (method === "PATCH") {
+          const { add, remove } = JSON.parse(init!.body!) as { add: string[]; remove: string[] };
+          add.forEach((id) => server.add(id));
+          remove.forEach((id) => server.delete(id));
+        }
         return jsonRes(method === "GET" ? { permissions: [...server].sort() } : { ok: true });
       }
       throw new Error(`unrouted fetch: ${method} ${url}`);
@@ -671,7 +689,7 @@ describe("role Permissions tab (F-39)", () => {
 
     expect(values(lists().assigned)).toEqual([...INITIAL, "admin.users.update"].sort());
     expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
-    expect(bodies("POST")).toEqual([]);
+    expect(bodies("PATCH")).toEqual([]);
   });
 });
 

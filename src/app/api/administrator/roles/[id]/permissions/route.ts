@@ -1,7 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import type { Kysely } from "kysely";
 import { z } from "zod";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -23,6 +25,7 @@ import {
 import { refuseUnconferrable, type RefusingGuard } from "@/lib/admin/refusals.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { dualListPatchSchema } from "@/lib/validation/dual-list";
 
 export const dynamic = "force-dynamic";
 
@@ -66,20 +69,22 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
 });
 
 /**
- * POST/DELETE body shared schema. The dual-list editor saves through both
- * (one POST for `toAdd`, THEN one DELETE for `toRemove`); both endpoints
- * accept the same `{ ids }` body. Each write is atomic on its own, but the
- * pair is not — see `src/lib/admin/dual-list-save.client.ts` for how the
- * editor keeps a half-applied save visible (F-38).
+ * POST/DELETE body shared schema: both endpoints accept the same `{ ids }`
+ * body. Each write is atomic on its own; a client that adds and removes in one
+ * save uses PATCH (below), which applies both in one transaction, as the
+ * dual-list editor does (F-38).
  *
  * `ids` are permission keys (not row UUIDs) — the editor works in the
  * domain language of "admin.users.read" rather than opaque ids.
  */
+const permissionKeySchema = z.string().min(1).max(120);
 const idsSchema = z
   .object({
-    ids: z.array(z.string().min(1).max(120)).min(1).max(500),
+    ids: z.array(permissionKeySchema).min(1).max(500),
   })
   .strict();
+/** PATCH: `{ add?, remove? }` permission keys (F-38, `dualListPatchSchema`). */
+const patchSchema = dualListPatchSchema(permissionKeySchema);
 
 async function loadRoleHeader(roleId: string) {
   return db
@@ -89,8 +94,11 @@ async function loadRoleHeader(roleId: string) {
     .executeTakeFirst();
 }
 
-async function currentPermissionKeys(roleId: string): Promise<string[]> {
-  const rows = await db
+async function currentPermissionKeys(
+  roleId: string,
+  executor: Kysely<AppDatabase> = db,
+): Promise<string[]> {
+  const rows = await executor
     .selectFrom("app_role_permissions as rp")
     .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
     .select(["p.key as key"])
@@ -407,4 +415,160 @@ export const DELETE = withAdminRoute(async function DELETE(
   });
 
   return NextResponse.json({ ok: true, permissions: finalKeys });
+});
+
+/**
+ * PATCH /api/administrator/roles/[id]/permissions
+ *
+ * F-38: the dual-list editor's save, in ONE request. Body
+ * `{ add?: string[], remove?: string[] }` (permission keys; at least one, and
+ * none on both sides). Both sets are applied in one transaction, so a save
+ * lands whole or not at all. The editor used to send a POST and then a
+ * DELETE, and a DELETE refused after its POST had landed left the addition
+ * committed, live for every holder of the role.
+ *
+ * Every guard runs before anything is written:
+ *   - AUTHZ-3 / REVOKE-1 on `add`, then on `remove`, exactly as POST and
+ *     DELETE apply them (403 and an `admin.permission.conferral_denied` row
+ *     naming the direction). Both are judged against the actor's authority as
+ *     this request found it, so swapping the permission the actor's own
+ *     `admin.roles.update` comes through for an equivalent one succeeds: the
+ *     removal cannot take away the authority the addition is judged by.
+ *   - REVOKE-2: removing `superuser` from the last role that carries it is 409
+ *     `last_superadmin`, checked in the writing transaction under its row
+ *     locks, and nothing is added either.
+ *
+ * One `admin.role.permissions_changed` row records the delta applied, read
+ * from `RETURNING` (a key already attached is not `added`, one never attached
+ * is not `removed`), and the resulting set. Caller MUST hold
+ * `admin.roles.update`. POST and DELETE keep working for API clients.
+ */
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
+  const guard = await requireAdminPermission(request, "admin.roles.update");
+  if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.roles.permissions",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
+  );
+  if (limited) return limited;
+
+  const { id } = await ctx.params;
+  if (!isUuid(id)) {
+    return adminErrorResponse("invalid_id", 400, request);
+  }
+
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return adminErrorResponse("invalid_body", 400, request);
+  }
+  const parsed = patchSchema.safeParse(json);
+  if (!parsed.success) {
+    return adminErrorResponse("invalid_body", 400, request);
+  }
+  const { add, remove } = parsed.data;
+
+  const role = await loadRoleHeader(id);
+  if (!role) return adminErrorResponse("not_found", 404, request);
+  // ADR-0001: confine an org admin to their org's roles (404 to avoid
+  // confirming a foreign/global role exists).
+  if (!canAccessOrg(guard.access, role.organization_id)) {
+    return adminErrorResponse("not_found", 404, request);
+  }
+  // AUTHZ-3 (add) and REVOKE-1 (remove), on the raw requested keys as POST
+  // and DELETE measure them, so an unknown key is refused here too. A bearer
+  // credential is bounded by its scopes and never takes the SUPERADMIN
+  // fast-path (P1-1). A refusal is audited (F-58) and writes nothing.
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheldAdded = unheldPermissionKeys(conferrable, add);
+    if (unheldAdded.length > 0) {
+      return refuseUnheldKeys(guard, request, role, "role_permissions_add", unheldAdded);
+    }
+    const unheldRemoved = unheldPermissionKeys(conferrable, remove);
+    if (unheldRemoved.length > 0) {
+      return refuseUnheldKeys(guard, request, role, "role_permissions_remove", unheldRemoved);
+    }
+  }
+
+  // Keys not in the catalog resolve to nothing, as on POST and DELETE.
+  const permRows = await db
+    .selectFrom("app_permissions")
+    .select(["id", "key"])
+    .where("key", "in", [...add, ...remove])
+    .execute();
+  const resolved = permRows.map((r) => ({ id: r.id, key: r.key }));
+  const toAdd = resolved.filter((p) => add.includes(p.key));
+  const toRemove = resolved.filter((p) => remove.includes(p.key));
+
+  // REVOKE-2, as on DELETE: only a removal that lands counts.
+  const strippingSuperuser = toRemove.some((r) => r.key === SUPERADMIN_PERMISSION);
+  const outcome = await db.transaction().execute(async (trx) => {
+    if (strippingSuperuser && (await wouldStripLastGlobalSuperuser({ roleIds: [id] }, trx))) {
+      return "last_superadmin" as const;
+    }
+    const inserted =
+      toAdd.length > 0
+        ? await trx
+            .insertInto("app_role_permissions")
+            .values(toAdd.map((p) => ({ role_id: id, permission_id: p.id })))
+            .onConflict((oc) => oc.doNothing())
+            .returning("permission_id")
+            .execute()
+        : [];
+    const deleted =
+      toRemove.length > 0
+        ? await trx
+            .deleteFrom("app_role_permissions")
+            .where("role_id", "=", id)
+            .where(
+              "permission_id",
+              "in",
+              toRemove.map((p) => p.id),
+            )
+            .returning("permission_id")
+            .execute()
+        : [];
+    return { inserted, deleted, resulting: await currentPermissionKeys(id, trx) };
+  });
+
+  if (outcome === "last_superadmin") {
+    await auditRoleAction(LAST_SUPERADMIN_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: role.organization_id,
+      requestId: guard.requestId,
+      reason: LAST_SUPERADMIN_REASON,
+      metadata: {
+        action: "role_permissions_detach",
+        roleId: id,
+        key: role.key,
+        added: toAdd.map((p) => p.key).sort(),
+        removed: toRemove.map((p) => p.key).sort(),
+      },
+    });
+    return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
+
+  await auditRoleAction("admin.role.permissions_changed", "success", {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: role.organization_id,
+    metadata: {
+      roleId: id,
+      key: role.key,
+      added: appliedKeys(outcome.inserted, resolved),
+      removed: appliedKeys(outcome.deleted, resolved),
+      resulting: outcome.resulting,
+    },
+  });
+
+  return NextResponse.json({ ok: true, permissions: outcome.resulting });
 });

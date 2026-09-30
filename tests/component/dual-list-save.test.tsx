@@ -18,7 +18,6 @@ const fetchMock = vi.fn();
 
 const endpoint: DualListEndpoint = {
   url: "/api/x",
-  bodyKey: "ids",
   readAssigned: (body) => (body as { ids: string[] }).ids,
 };
 
@@ -36,39 +35,56 @@ afterEach(() => {
 });
 
 describe("saveDualListDiff", () => {
-  it("sends only the non-empty writes, POST first, each with the endpoint's body key", async () => {
+  it("sends ONE PATCH carrying both sides of the diff, then re-reads the server", async () => {
     fetchMock.mockResolvedValue(jsonRes({ ids: ["b", "c"] }));
     const result = await saveDualListDiff(endpoint, ["a", "b"], ["c", "b"]);
 
     expect(fetchMock.mock.calls.map(([, init]) => (init as { method?: string }).method)).toEqual([
-      "POST",
-      "DELETE",
+      "PATCH",
       undefined,
     ]);
     expect(JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body)).toEqual({
-      ids: ["c"],
-    });
-    expect(JSON.parse((fetchMock.mock.calls[1]![1] as { body: string }).body)).toEqual({
-      ids: ["a"],
+      add: ["c"],
+      remove: ["a"],
     });
     expect(result).toEqual({ error: null, synced: ["b", "c"] });
   });
 
-  it("stops at a refused POST: the DELETE is never sent, and the server is re-read", async () => {
+  it("sends an empty side as an empty list (an add-only save)", async () => {
+    fetchMock.mockResolvedValue(jsonRes({ ids: ["a", "b"] }));
+    await saveDualListDiff(endpoint, ["a"], ["a", "b"]);
+    expect(JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body)).toEqual({
+      add: ["b"],
+      remove: [],
+    });
+  });
+
+  it("sends nothing when the lists match the baseline, and still re-reads", async () => {
+    fetchMock.mockResolvedValue(jsonRes({ ids: ["a"] }));
+    expect(await saveDualListDiff(endpoint, ["a"], ["a"])).toEqual({ error: null, synced: ["a"] });
+    expect(fetchMock.mock.calls.map(([, init]) => init)).toEqual([{ credentials: "same-origin" }]);
+  });
+
+  it("classifies a refused PATCH (403) and re-reads the server", async () => {
     fetchMock.mockImplementation(async (_url: string, init?: { method?: string }) =>
-      init?.method === "POST" ? jsonRes({ error: "forbidden" }, 403) : jsonRes({ ids: ["a"] }),
+      init?.method === "PATCH" ? jsonRes({ error: "forbidden" }, 403) : jsonRes({ ids: ["a"] }),
     );
     expect(await saveDualListDiff(endpoint, ["a"], ["b"])).toEqual({
       error: "forbidden",
       synced: ["a"],
     });
-    expect(fetchMock.mock.calls.map(([, init]) => (init as { method?: string }).method)).toEqual([
-      "POST",
-      undefined,
-    ]);
   });
 
-  it("adopts the saved set when every write landed but the re-read failed", async () => {
+  it("classifies 409 last_superadmin", async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: { method?: string }) =>
+      init?.method === "PATCH"
+        ? jsonRes({ error: "last_superadmin" }, 409)
+        : jsonRes({ ids: ["a"] }),
+    );
+    expect((await saveDualListDiff(endpoint, ["a"], [])).error).toBe("lastSuperadmin");
+  });
+
+  it("adopts the saved set when the PATCH landed but the re-read failed", async () => {
     fetchMock.mockImplementation(async (_url: string, init?: { method?: string }) =>
       init?.method ? jsonRes({ ok: true }) : jsonRes({}, 500),
     );
@@ -89,7 +105,7 @@ describe("saveDualListDiff", () => {
     });
   });
 
-  it("returns `synced: null` when a write failed and the re-read threw too", async () => {
+  it("returns `synced: null` when the PATCH failed and the re-read threw too", async () => {
     fetchMock.mockImplementation(async (_url: string, init?: { method?: string }) => {
       if (init?.method) return jsonRes({}, 500);
       throw new TypeError("network down");
@@ -121,7 +137,7 @@ describe("useDualListSave", () => {
   it("resolves a second save issued while one is in flight to null, sending nothing", async () => {
     let release = () => {};
     fetchMock.mockImplementation(async (_url: string, init?: { method?: string }) => {
-      if (init?.method === "DELETE") await new Promise<void>((r) => (release = r));
+      if (init?.method === "PATCH") await new Promise<void>((r) => (release = r));
       return jsonRes({ ids: [] });
     });
     const { result } = renderHook(() => useDualListSave(endpoint));
@@ -139,7 +155,7 @@ describe("useDualListSave", () => {
       release();
       await first;
     });
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
     expect(result.current.saving).toBe(false);
     expect(result.current.stale).toBe(false);
   });

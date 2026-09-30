@@ -266,6 +266,54 @@ describe("error responses (#195)", () => {
     expect(bulk.properties.filters.properties.status.type).toEqual(["array", "string"]);
   });
 
+  it("F-09: the org PATCH and the invitation writes name the 409 codes they answer", () => {
+    const conflictOf = (path: string, method: "post" | "patch") =>
+      (doc.paths[path]![method]!.responses["409"] as unknown as { description: string })
+        .description;
+    expect(conflictOf("/organizations/{id}", "patch")).toMatch(/`last_superadmin`/);
+    expect(conflictOf("/organizations/{id}", "patch")).toMatch(/`organization_is_default`/);
+    expect(conflictOf("/organizations/{id}", "patch")).toMatch(/`slug_taken`/);
+    expect(conflictOf("/organizations/{id}/invitations", "post")).toMatch(
+      /`organization_not_active`/,
+    );
+    expect(conflictOf("/organizations/{id}/invitations/{invitationId}/resend", "post")).toMatch(
+      /`organization_not_active`/,
+    );
+  });
+
+  it("F-39: the org, role and group PATCH take an optional If-Match and document the 412", () => {
+    expect(doc.components.parameters.IfMatch).toMatchObject({
+      name: "If-Match",
+      in: "header",
+      required: false,
+    });
+    for (const path of ["/organizations/{id}", "/roles/{id}", "/groups/{id}"]) {
+      const item = doc.paths[path]!;
+      expect(item.patch!.parameters).toContainEqual({ $ref: "#/components/parameters/IfMatch" });
+      expect(item.patch!.responses["412"]).toEqual({
+        $ref: "#/components/responses/PreconditionFailed",
+      });
+      for (const op of [item.get!, item.patch!]) {
+        expect(op.responses["200"]).toMatchObject({ headers: { ETag: expect.any(Object) } });
+      }
+    }
+  });
+
+  it("F-38: the dual-list collections take one atomic PATCH { add, remove }", () => {
+    expect(doc.paths["/roles/{id}/permissions"]!.patch).toMatchObject({
+      operationId: "updateRolePermissions",
+    });
+    expect(doc.paths["/groups/{id}/roles"]!.patch).toMatchObject({
+      operationId: "updateGroupRoles",
+    });
+    for (const name of ["PermissionsPatchRequest", "GroupRolesPatchRequest"]) {
+      expect(doc.components.schemas[name]).toMatchObject({
+        additionalProperties: false,
+        properties: { add: { maxItems: 500 }, remove: { maxItems: 500 } },
+      });
+    }
+  });
+
   it("listAuditEvents documents the created_at range filter", () => {
     const names = doc.paths["/audit"]!.get!.parameters!.map((p) => p.name);
     expect(names).toContain("filter[created_at][from]");

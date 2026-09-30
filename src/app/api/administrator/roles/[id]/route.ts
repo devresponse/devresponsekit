@@ -15,7 +15,9 @@ import {
   isForeignKeyViolation,
   loadRoleOrThrow,
 } from "@/lib/admin/roles.server";
+import { lockedRoleEtag, ROLE_ETAG_COLUMNS, roleEtag } from "@/lib/admin/record-etag.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { ifMatchPinsVersion, ifMatchSatisfied } from "@/lib/api-auth/etag";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +28,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  * GET /api/administrator/roles/[id]
  *
  * Fetches a single role plus its permission keys and member count.
- * Caller MUST hold `admin.roles.read`.
+ * Caller MUST hold `admin.roles.read`. The `ETag` is the role's content tag
+ * (F-39), which a PATCH may send back as `If-Match`.
  */
 export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
@@ -44,7 +47,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
     if (!canAccessOrg(guard.access, role.organization_id)) {
       return adminErrorResponse("not_found", 404, request);
     }
-    return NextResponse.json({ role });
+    return NextResponse.json({ role }, { headers: { ETag: roleEtag(role) } });
   } catch (err) {
     if (err instanceof AdminError && err.code === "role_not_found") {
       return adminErrorResponse("not_found", 404, request);
@@ -59,6 +62,12 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
  * Partial update of name / description. The `key` is intentionally
  * read-only after creation (mirrors §8.4 — "Settings" tab) so audit
  * trails referencing it stay valid.
+ *
+ * F-39: an `If-Match` naming a tag other than the role's current one (see
+ * `record-etag.server.ts`) is refused with 412 `precondition_failed`, and
+ * nothing is written; the 412 carries the current `ETag`. The comparison runs
+ * under a row lock in the writing transaction. Without `If-Match` the update
+ * is last-write-wins, as before. A 200 carries the updated role's `ETag`.
  */
 export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.update");
@@ -110,7 +119,33 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
     return adminErrorResponse("not_found", 404, request);
   }
 
-  await db.updateTable("app_roles").set(updates).where("id", "=", id).execute();
+  const ifMatch = request.headers.get("if-match");
+  const outcome = await db.transaction().execute(async (trx) => {
+    if (ifMatchPinsVersion(ifMatch)) {
+      const current = await lockedRoleEtag(trx, id);
+      if (current === null) return { kind: "vanished" as const };
+      if (!ifMatchSatisfied(ifMatch, current)) return { kind: "stale" as const, etag: current };
+    }
+    const updated = await trx
+      .updateTable("app_roles")
+      .set(updates)
+      .where("id", "=", id)
+      .returning(ROLE_ETAG_COLUMNS)
+      .executeTakeFirst();
+    return updated
+      ? { kind: "updated" as const, etag: roleEtag(updated) }
+      : { kind: "vanished" as const };
+  });
+  // Deleted by a concurrent request after the read above.
+  if (outcome.kind === "vanished") {
+    return adminErrorResponse("not_found", 404, request);
+  }
+  if (outcome.kind === "stale") {
+    return adminErrorResponse("precondition_failed", 412, request, {
+      requestId: guard.requestId,
+      headers: { ETag: outcome.etag },
+    });
+  }
 
   await auditRoleAction("admin.role.updated", "success", {
     request,
@@ -119,7 +154,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
     metadata: { roleId: id, key: existing.key, fields: Object.keys(updates) },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true }, { headers: { ETag: outcome.etag } });
 });
 
 /**

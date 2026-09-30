@@ -702,7 +702,8 @@
       "invitationExists": "Já existe um convite pendente para este endereço.",
       "lastSuperadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la.",
       "organizationNotActive": "Esta organização não está ativa. Reative-a antes de convidar alguém.",
-      "saveStateUnknown": "Não foi possível recarregar o estado salvo. Recarregue a página antes de fazer mais alterações."
+      "saveStateUnknown": "Não foi possível recarregar o estado salvo. Recarregue a página antes de fazer mais alterações.",
+      "editConflict": "Outra pessoa salvou este registro depois que você o abriu, por isso suas alterações não foram salvas. O formulário agora mostra as alterações dessa pessoa e mantém suas edições: revise-as e salve novamente."
     },
     "roles": {
       "title": "Funções",
@@ -1374,6 +1375,7 @@
     "forbidden_while_impersonating": "Esta ação não está disponível enquanto você personifica outro usuário.",
     "last_superadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la.",
     "organization_not_active": "Esta organização não está ativa. Reative-a primeiro.",
+    "precondition_failed": "Este registro foi alterado depois que você o carregou. Recarregue-o e tente novamente.",
     "internal_error": "Ocorreu um erro no servidor. Indique o ID do pedido ao contactar o suporte.",
     "invalid_time_zone": "O fuso horário não é reconhecido.",
     "invalid_locale": "Este idioma não é suportado.",

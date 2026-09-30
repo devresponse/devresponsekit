@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { loadGroupDetail } from "@/lib/admin/groups.server";
+import { groupEtag } from "@/lib/admin/record-etag.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { GroupDetailTabs } from "./_group-detail-tabs";
 
@@ -62,6 +63,7 @@ export default async function AdministratorGroupDetailPage({
           key: group.key,
           name: group.name,
           description: group.description,
+          etag: groupEtag(group),
         }}
         canUpdate={canUpdate}
         canAssign={canAssign}

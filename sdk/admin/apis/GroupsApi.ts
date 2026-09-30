@@ -23,6 +23,7 @@ import type {
   GroupMemberList,
   GroupRoleIdsRequest,
   GroupRoles,
+  GroupRolesPatchRequest,
   GroupRolesResult,
   KeyCreated,
   Ok,
@@ -47,6 +48,8 @@ import {
     GroupRoleIdsRequestToJSON,
     GroupRolesFromJSON,
     GroupRolesToJSON,
+    GroupRolesPatchRequestFromJSON,
+    GroupRolesPatchRequestToJSON,
     GroupRolesResultFromJSON,
     GroupRolesResultToJSON,
     KeyCreatedFromJSON,
@@ -115,6 +118,12 @@ export interface RemoveGroupRolesRequest {
 export interface UpdateGroupOperationRequest {
     id: string;
     updateGroupRequest: UpdateGroupRequest;
+    ifMatch?: string;
+}
+
+export interface UpdateGroupRolesRequest {
+    id: string;
+    groupRolesPatchRequest: GroupRolesPatchRequest;
 }
 
 /**
@@ -624,6 +633,10 @@ export class GroupsApi extends runtime.BaseAPI {
 
         headerParameters['Content-Type'] = 'application/json';
 
+        if (requestParameters['ifMatch'] != null) {
+            headerParameters['If-Match'] = String(requestParameters['ifMatch']);
+        }
+
         if (this.configuration && this.configuration.accessToken) {
             const token = this.configuration.accessToken;
             const tokenString = await token("bearerAuth", []);
@@ -648,6 +661,59 @@ export class GroupsApi extends runtime.BaseAPI {
      */
     async updateGroup(requestParameters: UpdateGroupOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Ok> {
         const response = await this.updateGroupRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * F-38: the Roles editor\'s save. Both sides are checked before anything is written (a role to attach outside the group\'s organization is `404 role_not_found`; a role conferring a permission the caller does not hold is `403`), then applied together, so the save lands whole or not at all. One `admin.group.roles_changed` row records the roles actually attached and detached.
+     * Attach and detach a group\'s roles in one transaction
+     */
+    async updateGroupRolesRaw(requestParameters: UpdateGroupRolesRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<GroupRolesResult>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling updateGroupRoles().'
+            );
+        }
+
+        if (requestParameters['groupRolesPatchRequest'] == null) {
+            throw new runtime.RequiredError(
+                'groupRolesPatchRequest',
+                'Required parameter "groupRolesPatchRequest" was null or undefined when calling updateGroupRoles().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+        const response = await this.request({
+            path: `/groups/{id}/roles`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'PATCH',
+            headers: headerParameters,
+            query: queryParameters,
+            body: GroupRolesPatchRequestToJSON(requestParameters['groupRolesPatchRequest']),
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => GroupRolesResultFromJSON(jsonValue));
+    }
+
+    /**
+     * F-38: the Roles editor\'s save. Both sides are checked before anything is written (a role to attach outside the group\'s organization is `404 role_not_found`; a role conferring a permission the caller does not hold is `403`), then applied together, so the save lands whole or not at all. One `admin.group.roles_changed` row records the roles actually attached and detached.
+     * Attach and detach a group\'s roles in one transaction
+     */
+    async updateGroupRoles(requestParameters: UpdateGroupRolesRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<GroupRolesResult> {
+        const response = await this.updateGroupRolesRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

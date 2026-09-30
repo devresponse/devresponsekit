@@ -21,6 +21,7 @@ import type {
   KeyCreated,
   Ok,
   PermissionsList,
+  PermissionsPatchRequest,
   PermissionsResult,
   RateLimitedError,
   RoleDetailEnvelope,
@@ -41,6 +42,8 @@ import {
     OkToJSON,
     PermissionsListFromJSON,
     PermissionsListToJSON,
+    PermissionsPatchRequestFromJSON,
+    PermissionsPatchRequestToJSON,
     PermissionsResultFromJSON,
     PermissionsResultToJSON,
     RateLimitedErrorFromJSON,
@@ -106,6 +109,12 @@ export interface RemoveRolePermissionsRequest {
 export interface UpdateRoleOperationRequest {
     id: string;
     updateRoleRequest: UpdateRoleRequest;
+    ifMatch?: string;
+}
+
+export interface UpdateRolePermissionsRequest {
+    id: string;
+    permissionsPatchRequest: PermissionsPatchRequest;
 }
 
 /**
@@ -566,6 +575,10 @@ export class RolesApi extends runtime.BaseAPI {
 
         headerParameters['Content-Type'] = 'application/json';
 
+        if (requestParameters['ifMatch'] != null) {
+            headerParameters['If-Match'] = String(requestParameters['ifMatch']);
+        }
+
         if (this.configuration && this.configuration.accessToken) {
             const token = this.configuration.accessToken;
             const tokenString = await token("bearerAuth", []);
@@ -590,6 +603,59 @@ export class RolesApi extends runtime.BaseAPI {
      */
     async updateRole(requestParameters: UpdateRoleOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Ok> {
         const response = await this.updateRoleRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * F-38: the permission editor\'s save. Both sides are checked before anything is written (a key the caller does not hold is `403`; detaching `superuser` from the last role carrying it is `409 last_superadmin`), then applied together, so the save lands whole or not at all. One `admin.role.permissions_changed` row records the keys actually attached and detached.
+     * Attach and detach a role\'s permissions in one transaction
+     */
+    async updateRolePermissionsRaw(requestParameters: UpdateRolePermissionsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<PermissionsResult>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling updateRolePermissions().'
+            );
+        }
+
+        if (requestParameters['permissionsPatchRequest'] == null) {
+            throw new runtime.RequiredError(
+                'permissionsPatchRequest',
+                'Required parameter "permissionsPatchRequest" was null or undefined when calling updateRolePermissions().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+        const response = await this.request({
+            path: `/roles/{id}/permissions`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'PATCH',
+            headers: headerParameters,
+            query: queryParameters,
+            body: PermissionsPatchRequestToJSON(requestParameters['permissionsPatchRequest']),
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => PermissionsResultFromJSON(jsonValue));
+    }
+
+    /**
+     * F-38: the permission editor\'s save. Both sides are checked before anything is written (a key the caller does not hold is `403`; detaching `superuser` from the last role carrying it is `409 last_superadmin`), then applied together, so the save lands whole or not at all. One `admin.role.permissions_changed` row records the keys actually attached and detached.
+     * Attach and detach a role\'s permissions in one transaction
+     */
+    async updateRolePermissions(requestParameters: UpdateRolePermissionsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<PermissionsResult> {
+        const response = await this.updateRolePermissionsRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

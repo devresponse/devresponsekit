@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { roleEtag } from "@/lib/admin/record-etag.server";
 import { AdminError, loadRoleOrThrow } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic";
  * already-assigned set on first paint without a client round-trip.
  *
  * Tabs (rendered client-side):
- *   - Permissions — dual-list editor (POST/DELETE /permissions)
+ *   - Permissions — dual-list editor (one PATCH /permissions per save, F-38)
  *   - Members     — paginated grid of users carrying this role
  *   - Settings    — name/description editor (key is read-only)
  */
@@ -83,6 +84,7 @@ export default async function AdministratorRoleDetailPage({
           description: role.description,
           permissionKeys: role.permissionKeys,
           memberCount: role.memberCount,
+          etag: roleEtag(role),
         }}
         canUpdate={canUpdate}
         canReadUsers={canReadUsers}

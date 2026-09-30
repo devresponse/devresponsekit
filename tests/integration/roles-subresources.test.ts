@@ -46,6 +46,8 @@ const state: {
    */
   insertReturning: { permission_id: string }[];
   deleteReturning: { permission_id: string }[];
+  /** The writes a transaction issued, in order (F-38: a refused PATCH issues none). */
+  writes: Array<"insert" | "delete">;
 } = {
   role: undefined,
   whereCols: [],
@@ -53,6 +55,7 @@ const state: {
   superuserGrants: [],
   insertReturning: [],
   deleteReturning: [],
+  writes: [],
 };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
@@ -112,8 +115,14 @@ vi.mock("@/db/database", () => ({
     transaction: () => ({
       execute: async (cb: (trx: unknown) => Promise<unknown>) =>
         cb({
-          insertInto: () => makeChain("trx:insert"),
-          deleteFrom: () => makeChain("trx:delete"),
+          insertInto: () => {
+            state.writes.push("insert");
+            return makeChain("trx:insert");
+          },
+          deleteFrom: () => {
+            state.writes.push("delete");
+            return makeChain("trx:delete");
+          },
           // REVOKE-2 reads the surviving grants on the ENCLOSING transaction.
           selectFrom: (t: unknown) => makeChain(tableKey(t)),
         }),
@@ -173,6 +182,7 @@ function expectConferralDenied(metadata: Record<string, unknown>): void {
 let permsGET: typeof PermsRoute.GET;
 let permsPOST: typeof PermsRoute.POST;
 let permsDELETE: typeof PermsRoute.DELETE;
+let permsPATCH: typeof PermsRoute.PATCH;
 let membersGET: typeof MembersRoute.GET;
 let duplicatePOST: typeof DuplicateRoute.POST;
 
@@ -183,6 +193,7 @@ beforeEach(async () => {
   state.superuserGrants = [];
   state.insertReturning = [];
   state.deleteReturning = [];
+  state.writes = [];
   state.role = {
     id: ROLE,
     organization_id: ORG_A,
@@ -195,6 +206,7 @@ beforeEach(async () => {
     GET: permsGET,
     POST: permsPOST,
     DELETE: permsDELETE,
+    PATCH: permsPATCH,
   } = await import("@/app/api/administrator/roles/[id]/permissions/route"));
   ({ GET: membersGET } = await import("@/app/api/administrator/roles/[id]/members/route"));
   ({ POST: duplicatePOST } = await import("@/app/api/administrator/roles/[id]/duplicate/route"));
@@ -505,6 +517,164 @@ describe("roles/[id]/permissions — audit records the applied delta (F-38)", ()
     );
     expect(del.status).toBe(200);
     expect(changedMetadata()).toMatchObject({ added: [], removed: [] });
+  });
+});
+
+/**
+ * F-38: `PATCH roles/[id]/permissions` is the editor's ONE save. It used to be
+ * a POST then a DELETE, and a DELETE refused after the POST had landed left
+ * the addition live for every holder of the role. Every guard runs on both
+ * sides before the transaction writes anything, so a refusal issues no write
+ * at all, and one row records the delta `RETURNING` reported. (What Postgres
+ * returns, and that a refusal leaves the role as it was, are pinned in
+ * tests/db/dual-list-patch.db.test.ts.)
+ */
+describe("PATCH roles/[id]/permissions — one atomic save (F-38)", () => {
+  const READ = { id: "p1", key: "admin.users.read" };
+  const UPDATE = { id: "p2", key: "admin.users.update" };
+  const DELETE_KEY = { id: "p3", key: "admin.users.delete" };
+  const SUPER = { id: "p-super", key: "superuser" };
+  const patch = (body: unknown) => permsPATCH(req("permissions", { method: "PATCH", body }), ctx);
+
+  it("applies both sides in one transaction, audits the applied delta, and answers the spec's shape", async () => {
+    state.catalogPerms = [READ, UPDATE];
+    state.insertReturning = [{ permission_id: UPDATE.id }];
+    state.deleteReturning = [{ permission_id: READ.id }];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+
+    const res = await patch({ add: [UPDATE.key], remove: [READ.key] });
+
+    expect(res.status).toBe(200);
+    expect(state.writes).toEqual(["insert", "delete"]);
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.role.permissions_changed",
+      "success",
+      expect.objectContaining({
+        organizationId: ORG_A,
+        metadata: {
+          roleId: ROLE,
+          key: "editor",
+          added: [UPDATE.key],
+          removed: [READ.key],
+          resulting: ["admin.users.read"],
+        },
+      }),
+    );
+    await expectResponseMatchesSpec(res, "admin", "patch", "/roles/{id}/permissions");
+  });
+
+  it("an add-only or remove-only save issues only that write", async () => {
+    state.catalogPerms = [READ];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    expect((await patch({ add: [READ.key] })).status).toBe(200);
+    expect(state.writes).toEqual(["insert"]);
+
+    state.writes = [];
+    expect((await patch({ remove: [READ.key] })).status).toBe(200);
+    expect(state.writes).toEqual(["delete"]);
+  });
+
+  it("403 when the removal names a key the org admin does not hold: the addition is not written either", async () => {
+    state.catalogPerms = [READ, DELETE_KEY];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update", READ.key]));
+
+    const res = await patch({ add: [READ.key], remove: [DELETE_KEY.key] });
+
+    expect(res.status).toBe(403);
+    expect(state.writes).toEqual([]);
+    expectConferralDenied({
+      action: "role_permissions_remove",
+      roleId: ROLE,
+      key: "editor",
+      unknownPermissionKeyCount: 0,
+      unheldPermissions: [DELETE_KEY.key],
+    });
+  });
+
+  it("403 when the addition names a key the org admin does not hold (AUTHZ-3)", async () => {
+    state.catalogPerms = [READ, DELETE_KEY];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update", READ.key]));
+
+    const res = await patch({ add: [DELETE_KEY.key], remove: [READ.key] });
+
+    expect(res.status).toBe(403);
+    expect(state.writes).toEqual([]);
+    expectConferralDenied({
+      action: "role_permissions_add",
+      roleId: ROLE,
+      key: "editor",
+      unknownPermissionKeyCount: 0,
+      unheldPermissions: [DELETE_KEY.key],
+    });
+  });
+
+  it("409 last_superadmin when the removal strips the last superuser grant, and nothing is added", async () => {
+    state.catalogPerms = [READ, SUPER];
+    state.superuserGrants = [{ app_user_id: "u-1", organization_id: ORG_A, role_id: ROLE }];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+
+    const res = await patch({ add: [READ.key], remove: [SUPER.key] });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "last_superadmin" });
+    expect(state.writes).toEqual([]);
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.superuser.revocation_denied",
+      "denied",
+      expect.objectContaining({
+        reason: "last_global_superuser",
+        metadata: expect.objectContaining({
+          action: "role_permissions_detach",
+          added: [READ.key],
+          removed: [SUPER.key],
+        }),
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.role.permissions_changed",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ["an empty body", {}],
+    ["two empty sides", { add: [], remove: [] }],
+    ["a key on both sides", { add: [READ.key], remove: [READ.key] }],
+    ["the POST/DELETE body shape", { ids: [READ.key] }],
+  ])("400 invalid_body for %s", async (_label, body) => {
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    const res = await patch(body);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("400 for a body that is not JSON, and for a malformed id", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    const notJson = {
+      ...req("permissions", { method: "PATCH" }),
+      json: async () => {
+        throw new SyntaxError("not json");
+      },
+    } as unknown as NextRequest;
+    expect((await permsPATCH(notJson, ctx)).status).toBe(400);
+    const badId = { params: Promise.resolve({ id: "not-a-uuid" }) };
+    expect(
+      (await permsPATCH(req("permissions", { method: "PATCH", body: {} }), badId)).status,
+    ).toBe(400);
+  });
+
+  it("404 for a foreign-org role, a global role and a missing one", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update", READ.key]));
+    state.role = { ...state.role!, organization_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
+    expect((await patch({ add: [READ.key] })).status).toBe(404);
+    state.role = { ...state.role!, organization_id: null };
+    expect((await patch({ add: [READ.key] })).status).toBe(404);
+    state.role = undefined;
+    expect((await patch({ add: [READ.key] })).status).toBe(404);
+    expect(state.writes).toEqual([]);
   });
 });
 

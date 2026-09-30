@@ -7,6 +7,7 @@ import type * as RolesRoute from "@/app/api/administrator/groups/[id]/roles/rout
 import type * as MembersRoute from "@/app/api/administrator/groups/[id]/members/route";
 import type * as UserGroupsRoute from "@/app/api/administrator/users/[id]/groups/route";
 import type * as UserTargetModule from "@/lib/admin/user-target.server";
+import { groupEtag } from "@/lib/admin/record-etag.server";
 import { expectResponseMatchesSpec } from "../helpers/openapi-response";
 import { pgUniqueViolation } from "../helpers/pg-errors";
 
@@ -133,8 +134,8 @@ function writeChain(kind: "insert" | "delete", t: unknown): unknown {
   const table = tableKey(t);
   return makeChain(table === "app_group_roles" ? `${kind}:${table}` : table);
 }
-vi.mock("@/db/database", () => ({
-  db: {
+vi.mock("@/db/database", () => {
+  const handle = {
     selectFrom: (t: unknown) => makeChain(tableKey(t)),
     insertInto: (t: unknown) => writeChain("insert", t),
     updateTable: (t: unknown) => makeChain(tableKey(t)),
@@ -142,8 +143,18 @@ vi.mock("@/db/database", () => ({
       deletedTables.push(tableKey(t));
       return writeChain("delete", t);
     },
-  },
-}));
+  };
+  return {
+    db: {
+      ...handle,
+      // F-38 (the roles PATCH) and F-39 (the group PATCH) write in one
+      // transaction; its handle answers exactly as `db` does.
+      transaction: () => ({
+        execute: async (cb: (trx: unknown) => Promise<unknown>) => cb(handle),
+      }),
+    },
+  };
+});
 
 const ORG_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ORG_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -169,13 +180,16 @@ function nullScopeAdmin(perms: string[]): AuthStatusModule.UserAccessContext {
   return { ...orgAdmin(perms), organizationId: null };
 }
 
-function req(path: string, init?: { method?: string; body?: unknown }): NextRequest {
+function req(
+  path: string,
+  init?: { method?: string; body?: unknown; headers?: Record<string, string> },
+): NextRequest {
   const url = `http://test.local/api/administrator/${path}`;
   return {
     nextUrl: new URL(url),
     url,
     method: init?.method ?? "GET",
-    headers: new Headers({ "content-type": "application/json" }),
+    headers: new Headers({ "content-type": "application/json", ...init?.headers }),
     json: async () => init?.body,
   } as unknown as NextRequest;
 }
@@ -328,6 +342,159 @@ describe("groups/[id] GET/PATCH/DELETE", () => {
     expect((await byId.DELETE(req(`groups/${GROUP}`, { method: "DELETE" }), groupCtx)).status).toBe(
       404,
     );
+  });
+});
+
+/**
+ * F-39: the group's content ETag. GET answers it; a PATCH naming another tag
+ * in `If-Match` is 412 and writes nothing (the compare-and-swap under the row
+ * lock is pinned against Postgres in tests/db/record-etag.db.test.ts).
+ */
+describe("groups/[id] ETag + If-Match (F-39)", () => {
+  const rename = (headers?: Record<string, string>) =>
+    byId.PATCH(
+      req(`groups/${GROUP}`, { method: "PATCH", body: { name: "Renamed" }, headers }),
+      groupCtx,
+    );
+  const current = () => groupEtag(state.group as Parameters<typeof groupEtag>[0]);
+
+  it("GET answers the group's ETag", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.read"]));
+    const res = await byId.GET(req(`groups/${GROUP}`), groupCtx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("etag")).toBe(current());
+  });
+
+  it("PATCH with the current tag, with `*` or without one is applied and answers the new tag", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.update"]));
+    for (const headers of [{ "if-match": current() }, { "if-match": "*" }, undefined]) {
+      const res = await rename(headers);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("etag")).toBe(current());
+    }
+  });
+
+  it("PATCH with a stale tag is 412 precondition_failed, carrying the current tag, and audits no update", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.update"]));
+    const res = await rename({ "if-match": 'W/"stale"' });
+    expect(res.status).toBe(412);
+    expect(await res.json()).toMatchObject({ error: "precondition_failed" });
+    expect(res.headers.get("etag")).toBe(current());
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-38: `PATCH groups/[id]/roles` is the Roles editor's ONE save: every guard
+ * runs on both sides before its transaction writes anything. (That a refusal
+ * leaves the group as it was, against Postgres: tests/db/dual-list-patch.db.test.ts.)
+ */
+describe("PATCH groups/[id]/roles — one atomic save (F-38)", () => {
+  const ROLE_2 = "44444444-4444-4444-8444-444444444444";
+  const patch = (body: unknown) =>
+    roles.PATCH(req(`groups/${GROUP}/roles`, { method: "PATCH", body }), groupCtx);
+
+  it("applies both sides, audits the applied delta, and answers the spec's shape", async () => {
+    state.roles = [{ id: ROLE_2, organization_id: ORG_A }];
+    state.groupRolesInserted = [{ role_id: ROLE_2 }];
+    state.groupRolesDeleted = [{ role_id: ROLE }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+
+    const res = await patch({ add: [ROLE_2], remove: [ROLE] });
+
+    expect(res.status).toBe(200);
+    expect(state.insertedValues).toHaveLength(1);
+    expect(deletedTables).toEqual(["app_group_roles"]);
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.group.roles_changed",
+      "success",
+      expect.objectContaining({
+        organizationId: ORG_A,
+        metadata: { groupId: GROUP, key: "marketing", added: [ROLE_2], removed: [ROLE] },
+      }),
+    );
+    await expectResponseMatchesSpec(res, "admin", "patch", "/groups/{id}/roles");
+  });
+
+  it("an add-only or remove-only save issues only that write", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    expect((await patch({ add: [ROLE] })).status).toBe(200);
+    expect(state.insertedValues).toHaveLength(1);
+    expect(deletedTables).toEqual([]);
+
+    state.insertedValues = [];
+    expect((await patch({ remove: [ROLE] })).status).toBe(200);
+    expect(state.insertedValues).toEqual([]);
+    expect(deletedTables).toEqual(["app_group_roles"]);
+  });
+
+  it("404 role_not_found when a role to add is another org's, and nothing is removed", async () => {
+    state.roles = [{ id: ROLE_2, organization_id: ORG_B }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+
+    const res = await patch({ add: [ROLE_2], remove: [ROLE] });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "role_not_found" });
+    expect(state.insertedValues).toEqual([]);
+    expect(deletedTables).toEqual([]);
+  });
+
+  it.each([
+    ["add", "group_roles_add"],
+    ["remove", "group_roles_remove"],
+  ] as const)(
+    "403 when the role to %s confers a permission the org admin lacks, and nothing is written",
+    async (side, action) => {
+      state.conferredPermKeys = [{ key: "admin.users.delete" }];
+      accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+
+      const res = await patch({ [side]: [ROLE] });
+
+      expect(res.status).toBe(403);
+      expect(state.insertedValues).toEqual([]);
+      expect(deletedTables).toEqual([]);
+      expectConferralDenied({
+        metadata: expect.objectContaining({ action, unheldPermissions: ["admin.users.delete"] }),
+      });
+    },
+  );
+
+  it("a SUPERADMIN is not gated by the conferral test", async () => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.groups.assign"]));
+    expect((await patch({ add: [ROLE], remove: [ROLE_2] })).status).toBe(200);
+  });
+
+  it.each([
+    ["an empty body", {}],
+    ["a role on both sides", { add: [ROLE], remove: [ROLE] }],
+    ["a non-UUID id", { add: ["not-a-uuid-at-all-but-36-characters!"] }],
+    ["the POST/DELETE body shape", { roleIds: [ROLE] }],
+  ])("400 invalid_body for %s", async (_label, body) => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await patch(body);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
+  });
+
+  it("400 for a body that is not JSON and for a malformed group id; 404 for a foreign group", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const notJson = {
+      ...req(`groups/${GROUP}/roles`, { method: "PATCH" }),
+      json: async () => {
+        throw new SyntaxError("not json");
+      },
+    } as unknown as NextRequest;
+    expect((await roles.PATCH(notJson, groupCtx)).status).toBe(400);
+    const badId = { params: Promise.resolve({ id: "not-a-uuid" }) };
+    expect(
+      (await roles.PATCH(req("groups/x/roles", { method: "PATCH", body: { add: [ROLE] } }), badId))
+        .status,
+    ).toBe(400);
+    state.group = { ...state.group!, organization_id: ORG_B };
+    expect((await patch({ add: [ROLE] })).status).toBe(404);
   });
 });
 

@@ -29,11 +29,18 @@ import {
   LAST_SUPERADMIN_STATUS,
   wouldStripLastGlobalSuperuser,
 } from "@/lib/admin/access-scope.server";
+import {
+  lockedOrganizationEtag,
+  ORGANIZATION_ETAG_COLUMNS,
+  organizationEtag,
+} from "@/lib/admin/record-etag.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { ifMatchPinsVersion, ifMatchSatisfied } from "@/lib/api-auth/etag";
 import {
   clearDefaultOrganizationFlag,
   isDefaultOrganizationLocked,
   lockDefaultOrganizationFlag,
+  lockOtherDefaultOrganizations,
   moveDefaultOrganizationFlag,
 } from "@/lib/default-organization.server";
 import {
@@ -52,7 +59,8 @@ interface RouteContext {
  * GET /api/administrator/organizations/:id
  *
  * Returns detailed view of an organization with associated counts.
- * Caller MUST hold `admin.orgs.read`.
+ * Caller MUST hold `admin.orgs.read`. The `ETag` is the organization's content
+ * tag (F-39), which a PATCH may send back as `If-Match`.
  */
 export const GET = withAdminRoute(async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
@@ -69,7 +77,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
 
   try {
     const org = await loadOrgOrThrow(id);
-    return NextResponse.json(org);
+    return NextResponse.json(org, { headers: { ETag: organizationEtag(org) } });
   } catch (err) {
     if (err instanceof AdminError && err.code === "organization_not_found") {
       return adminErrorResponse(err.code, 404, request);
@@ -104,6 +112,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * it clears that flag (the Settings repair for a database holding two
  * defaults); on any other org it is a no-op. A slug change is harmless to
  * routing, which no longer looks the default org up by slug.
+ *
+ * F-39: an `If-Match` naming a tag other than the organization's current one
+ * is refused with 412 `precondition_failed` (carrying the current `ETag`), and
+ * nothing is written. Without `If-Match` the update is last-write-wins. A 200
+ * carries the updated organization's `ETag`.
  */
 
 export const PATCH = withAdminRoute(async function PATCH(
@@ -181,9 +194,13 @@ export const PATCH = withAdminRoute(async function PATCH(
   // status alone, can only ever ADD a grant and is never gated.
   const leavesActive = input.status !== undefined && input.status !== ACTIVE_ORGANIZATION_STATUS;
 
-  let outcome: "updated" | "last_superadmin" | "default_required" | "vanished";
+  const ifMatch = request.headers.get("if-match");
+
+  let outcome: "updated" | "last_superadmin" | "default_required" | "vanished" | "stale";
   let previousDefaultOrganizationIds: string[] = [];
   let clearedExtraDefaultFlag = false;
+  // F-39: the organization's tag, current (for a 412) or as updated (a 200).
+  let etag = "";
   try {
     outcome = await db.transaction().execute(async (trx) => {
       // F-40 lock order: a save that touches the default flag takes the
@@ -196,6 +213,19 @@ export const PATCH = withAdminRoute(async function PATCH(
       if (leavesActive && (await wouldStripLastGlobalSuperuser({ organizationIds: [id] }, trx))) {
         return "last_superadmin" as const;
       }
+      // F-39: compare `If-Match` under this org's row lock, before anything is
+      // written. The lock comes after the locks above and, on a move, after
+      // the current default's, the order a move takes them in (see
+      // `lockOtherDefaultOrganizations`).
+      if (ifMatchPinsVersion(ifMatch)) {
+        if (input.isDefault === true) await lockOtherDefaultOrganizations(trx, id);
+        const current = await lockedOrganizationEtag(trx, id);
+        if (current === null) return "vanished" as const;
+        if (!ifMatchSatisfied(ifMatch, current)) {
+          etag = current;
+          return "stale" as const;
+        }
+      }
       if (input.isDefault === true) {
         const cleared = await moveDefaultOrganizationFlag(trx, id);
         // Deleted by another superadmin since the existence check above.
@@ -206,7 +236,15 @@ export const PATCH = withAdminRoute(async function PATCH(
         if (cleared === "refused") return "default_required" as const;
         clearedExtraDefaultFlag = cleared === "cleared";
       }
-      await trx.updateTable("app_organizations").set(updates).where("id", "=", id).execute();
+      const updated = await trx
+        .updateTable("app_organizations")
+        .set(updates)
+        .where("id", "=", id)
+        .returning(ORGANIZATION_ETAG_COLUMNS)
+        .executeTakeFirst();
+      // Deleted by another superadmin since the existence check above.
+      if (!updated) return "vanished" as const;
+      etag = organizationEtag(updated);
       return "updated" as const;
     });
   } catch (err) {
@@ -238,6 +276,13 @@ export const PATCH = withAdminRoute(async function PATCH(
 
   if (outcome === "vanished") {
     return adminErrorResponse("organization_not_found", 404, request);
+  }
+
+  if (outcome === "stale") {
+    return adminErrorResponse("precondition_failed", 412, request, {
+      requestId: guard.requestId,
+      headers: { ETag: etag },
+    });
   }
 
   if (outcome === "default_required") {
@@ -272,7 +317,7 @@ export const PATCH = withAdminRoute(async function PATCH(
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true }, { headers: { ETag: etag } });
 });
 
 /**

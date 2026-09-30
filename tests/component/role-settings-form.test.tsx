@@ -23,6 +23,7 @@ const render = () =>
       initialKey="support"
       initialName="Support"
       initialDescription={null}
+      etag={'W/"r1-v1"'}
       canUpdate
     />,
   );
@@ -50,7 +51,12 @@ describe("RoleSettingsForm", () => {
 
   it("PATCHes and shows the saved confirmation", async () => {
     const user = userEvent.setup();
-    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({ ok: true }),
+    });
     render();
     await user.type(screen.getByRole("textbox", { name: "Name" }), " Team");
     await user.click(screen.getByRole("button", { name: "Save changes" }));

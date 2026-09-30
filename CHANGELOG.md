@@ -97,6 +97,16 @@ of 2.0.0's list below. Each entry names what to carry over.
   `0008`: addresses become a pseudonym, sessions and sign-in methods go, and
   the audit trail keeps every row. See operator action 4 and
   [docs/admin-manager.md → Data export and erasure](docs/admin-manager.md#data-export-and-erasure-f-151).
+- **Atomic dual-list saves and edit-conflict detection in the administrator
+  API (F-38, F-39).** `PATCH /roles/[id]/permissions` and
+  `PATCH /groups/[id]/roles` take `{ add, remove }` and apply both sides in
+  one transaction, after running every guard on both. The organization, role
+  and group detail GETs answer an `ETag` (a hash of the fields their PATCH can
+  change, so no migration), and their PATCH takes an optional `If-Match` and
+  answers `412 precondition_failed` for a stale one. The existing POST and
+  DELETE, and a PATCH without `If-Match`, work as before. The admin SDK is
+  regenerated: it gains `updateRolePermissions`, `updateGroupRoles` and an
+  `ifMatch` parameter, and picks up the export and erase operations (F-151).
 
 ### Changed
 
@@ -156,6 +166,18 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Fixed
 
+- **Administrator console.** The role **Permissions** and group **Roles**
+  editors save through the one atomic PATCH. They sent a POST and then a
+  DELETE, so when the removal was refused (a key the admin does not hold, the
+  last superadmin) the addition stayed live for every holder of the role or
+  member of the group; now a refused save changes nothing (F-38). The
+  organization, role and group **Settings** forms send the record's ETag, so
+  a save made over someone else's newer save (another admin, another tab) is
+  refused with a named message and the page reloads, keeping the admin's
+  edits, instead of silently overwriting it (F-39). The admin OpenAPI names
+  the `409` codes the organization PATCH (`last_superadmin`,
+  `organization_is_default`, `slug_taken`) and the invitation create and
+  resend (`organization_not_active`) answer (F-09).
 - **Email.** Invitations and the test email are written in the recipient's
   language when the recipient belongs to the mail's organization, else in
   the sending admin's, and an invitation's link opens in the same language,

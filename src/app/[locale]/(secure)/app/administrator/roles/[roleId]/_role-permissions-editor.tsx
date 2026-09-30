@@ -24,13 +24,11 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  * `Add` / `Remove` buttons move the selected keys between columns.
  *
  * `Save` diffs against the server's known set and goes through the shared
- * dual-list save (`useDualListSave`, F-38): one POST `{ ids: toAdd }`,
- * THEN one DELETE `{ ids: toRemove }` against
- * `/api/administrator/roles/[id]/permissions` (additions first, so a swap on a
- * role the admin's own authority comes through cannot strand it half-done),
- * then a re-read of the role's set that resets both the baseline and the
- * lists — after a failure too, so a half-applied save is shown as it landed
- * and a committed grant can never hide behind a stale baseline.
+ * dual-list save (`useDualListSave`, F-38): one atomic PATCH
+ * `{ add, remove }` against `/api/administrator/roles/[id]/permissions`, which
+ * lands whole or not at all, then a re-read of the role's set that resets both
+ * the baseline and the lists — after a failure too, so the editor always shows
+ * what the server holds.
  *
  * F-39: the editor is seeded from the page's `initialAssigned`, and the
  * Permissions tab panel unmounted when another tab was opened (it stays mounted
@@ -106,7 +104,6 @@ export function RolePermissionsEditor({
   const endpoint = useMemo<DualListEndpoint>(
     () => ({
       url: `/api/administrator/roles/${roleId}/permissions`,
-      bodyKey: "ids",
       readAssigned: (body) => (body as { permissions: string[] }).permissions,
     }),
     [roleId],
@@ -199,9 +196,9 @@ export function RolePermissionsEditor({
       setAvailableSelected([]);
       setAssignedSelected([]);
     }
-    // F-39: after ANY save (a failed one may have landed half-way, F-38), so
-    // the page's `initialAssigned` is what the server now holds and a tab
-    // switch cannot re-seed the editor from the pre-save set.
+    // F-39: after ANY save (a failed response may still have committed,
+    // F-38), so the page's `initialAssigned` is what the server now holds and
+    // a tab switch cannot re-seed the editor from the pre-save set.
     router.refresh();
     if (result.error === null) {
       setInfo(t("saved"));

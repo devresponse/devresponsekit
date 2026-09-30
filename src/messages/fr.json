@@ -702,7 +702,8 @@
       "invitationExists": "Une invitation en attente existe déjà pour cette adresse.",
       "lastSuperadmin": "Il s'agit du dernier super-administrateur de la plateforme ; cette modification ne laisserait personne pour l'administrer.",
       "organizationNotActive": "Cette organisation n'est pas active. Réactivez-la avant d'inviter quiconque.",
-      "saveStateUnknown": "Impossible de recharger l'état enregistré. Rechargez la page avant d'apporter d'autres modifications."
+      "saveStateUnknown": "Impossible de recharger l'état enregistré. Rechargez la page avant d'apporter d'autres modifications.",
+      "editConflict": "Quelqu'un d'autre a enregistré cet élément après que vous l'avez ouvert, donc vos modifications n'ont pas été enregistrées. Le formulaire affiche maintenant ses modifications et conserve les vôtres : vérifiez-les et enregistrez à nouveau."
     },
     "roles": {
       "title": "Rôles",
@@ -1374,6 +1375,7 @@
     "forbidden_while_impersonating": "Cette action n'est pas disponible pendant l'usurpation d'identité d'un autre utilisateur.",
     "last_superadmin": "Il s'agit du dernier super-administrateur de la plateforme ; cette modification ne laisserait personne pour l'administrer.",
     "organization_not_active": "Cette organisation n'est pas active. Réactivez-la d'abord.",
+    "precondition_failed": "Cet enregistrement a été modifié après son chargement. Rechargez-le et réessayez.",
     "internal_error": "Une erreur s’est produite sur le serveur. Indiquez l’identifiant de requête en contactant le support.",
     "invalid_time_zone": "Ce fuseau horaire n'est pas reconnu.",
     "invalid_locale": "Cette langue n'est pas prise en charge.",

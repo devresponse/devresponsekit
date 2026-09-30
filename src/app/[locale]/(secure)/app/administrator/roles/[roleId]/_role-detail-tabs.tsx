@@ -27,6 +27,8 @@ export interface RoleDetailJson {
   description: string | null;
   permissionKeys: string[];
   memberCount: number;
+  /** The role's ETag (F-39), for the Settings form's `If-Match`. */
+  etag: string;
 }
 
 export function RoleDetailTabs({
@@ -68,6 +70,7 @@ export function RoleDetailTabs({
           initialKey={role.key}
           initialName={role.name}
           initialDescription={role.description}
+          etag={role.etag}
           canUpdate={canUpdate}
         />
       </TabsContent>

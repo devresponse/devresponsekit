@@ -161,18 +161,18 @@ i18n: labels + validation messages localize.
 
 ### UAT-ADMIN-RGP-ROLES-DETAIL: Role detail (tabs)
 
-- Route: `/app/administrator/roles/[roleId]`  ·  Example URL: `/en/app/administrator/roles/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/roles/[roleId]/page.tsx:26`
+- Route: `/app/administrator/roles/[roleId]`  ·  Example URL: `/en/app/administrator/roles/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/roles/[roleId]/page.tsx:27`
 - Purpose: View and manage one role — a dual-list **Permissions** editor, a **Members** grid, and a **Settings** form.
-- Guard / who can access: `admin.roles.read` to open (`page.tsx:33`); a non-UUID id or an out-of-scope role returns **404** (`page.tsx:37`, `:53`). Edit affordances require `admin.roles.update` (passed as `canUpdate`).
+- Guard / who can access: `admin.roles.read` to open (`page.tsx:34`); a non-UUID id or an out-of-scope role returns **404** (`page.tsx:38`, `:54`). Edit affordances require `admin.roles.update` (passed as `canUpdate`).
 - Access matrix: Member / Limited Admin → 404; Org Admin → their org's roles editable; Superadmin → any role including Global; a role in another org → 404 for the org admin.
 - Preconditions & test data: know a role UUID (click through from the list).
 
-Tabs: **Permissions** (default), **Members**, **Settings** (`_role-detail-tabs.tsx:46`). The Permissions editor and the Settings form stay mounted while another tab is open, so staged moves and typed edits survive a look at **Members** (F-158): stage a move without saving, open **Members**, come back, and the move is still staged with **Save** enabled.
+Tabs: **Permissions** (default), **Members**, **Settings** (`_role-detail-tabs.tsx:48`). The Permissions editor and the Settings form stay mounted while another tab is open, so staged moves and typed edits survive a look at **Members** (F-158): stage a move without saving, open **Members**, come back, and the move is still staged with **Save** enabled.
 
 User stories
 
 - UAT-ADMIN-RGP-ROLES-DETAIL-S1 — As an Org Admin, I want to add and remove permissions on a role using the dual-list editor, so that I can shape what the role grants.
-  - Acceptance criteria: Given the editor, when I move keys between Available and Assigned and click Save, then the server persists the diff (one POST for additions, **then** one DELETE for removals) and the Saved confirmation appears; the Save button is disabled until there is a change. Add, Remove, Save and both lists are disabled while the save is in flight. After any failed save the lists are reloaded from the server, so they always show what is actually saved (F-38; see [admin-manager §8.4](../admin-manager.md#84-roles)).
+  - Acceptance criteria: Given the editor, when I move keys between Available and Assigned and click Save, then the server persists the diff in one atomic PATCH carrying the additions and the removals, which lands whole or not at all, and the Saved confirmation appears; the Save button is disabled until there is a change. Add, Remove, Save and both lists are disabled while the save is in flight. After any failed save the lists are reloaded from the server, so they always show what is actually saved (F-38; see [admin-manager §8.4](../admin-manager.md#84-roles)).
   - Escalation note: a non-Superadmin may only **add or remove** permission keys they themselves hold; naming an unheld key returns **403** in either direction (AUTHZ-3 / REVOKE-1, `src/app/api/administrator/roles/[id]/permissions/route.ts`). This blocks granting `superuser` (never in a non-superadmin's held set).
   - UAT script:
     | # | Step | Expected result |
@@ -183,7 +183,7 @@ User stories
     | 4 | Select an Assigned key, click **Remove** | It moves back to Available |
     | 5 | Click **Save** | A green "saved" status appears; open **Members**, then **Permissions** again, and the Assigned set is the saved one (F-39); reload the page and it still matches |
     | 6 | (Org Admin only) Try to add a permission you do not hold, then Save | The save is refused with "You can only add or remove permissions you hold yourself." (server 403); the lists snap back to the saved set, and a reload shows the same set |
-    | 7 | (Org Admin only) On a role that carries a permission you do not hold, move a key you hold into Assigned **and** move the unheld key out, then Save | The addition is sent first and lands; the removal is then refused (403) and the same message appears. The lists reload to what is saved: the added key **and** the unheld key are both Assigned, and Save is disabled (nothing pending). Moving the added key back out and saving removes it again (you hold it) |
+    | 7 | (Org Admin only) On a role that carries a permission you do not hold, move a key you hold into Assigned **and** move the unheld key out, then Save | The save is refused (403) and the same message appears, and **nothing** lands: the lists reload to the saved set, with the unheld key still Assigned and the key you added back in Available. A reload shows the same set, and no member of the role gained the key (F-38) |
     | 8 | (Superadmin) On the only role that carries `superuser` for the last superadmin, move `superuser` out and Save | The last-superadmin message appears (409 `last_superadmin`); `superuser` stays in Assigned |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
@@ -207,6 +207,7 @@ User stories
     | 3 | Restore a Name, edit Description, Save | A green "saved" status appears |
     | 4 | Attempt to edit the Key field | It is not editable (read-only) |
     | 5 | Change the Name and Save; open **Members**, return to **Settings**, change only the Description and Save; reload | The Settings tab shows the new Name on return, and after the reload both the new Name and the new Description are kept: a save sends only the fields it changed, so it can never restore the old Name (F-39) |
+    | 6 | Open the same role's **Settings** in a second browser tab, change the Name there and Save. Back in the first tab, change the Description and Save | The first tab's save is refused with "Someone else saved this record after you opened it…"; the page reloads and shows the second tab's Name, with your Description edit still in the field. Save again: it is saved, and a reload shows both the second tab's Name and your Description (F-39) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-ROLES-DETAIL-S4 — As an Org Admin, I want another tenant's role to be invisible, so that cross-tenant existence never leaks.
@@ -226,7 +227,7 @@ Negative & edge cases
 - Read-only viewer without `admin.roles.update`: `TODO: verify` — `page.tsx` guards on `admin.roles.read`; with `canUpdate=false` the editor's move/Save buttons and Settings inputs are disabled, but confirm a plausible persona can reach this state (the seed `admin.platform` holds both read and update, so this needs a custom role to exercise).
 - Members tab empty state / loading skeleton.
 - Settings: Name required; 400 → localized invalid-body message; 403 → localized forbidden message.
-- Concurrency: `TODO: verify` — the PATCH/permissions routes do not use If-Match/ETag, so last-write-wins; no stale-write UI is expected.
+- Concurrency: the Settings form sends the role's ETag as `If-Match`, so a save over a newer save is refused (412) with the "Someone else saved this record" message and the page reloads (F-39; step 6 of S3). The Permissions editor's save is one atomic PATCH (F-38) and is not versioned: two admins' permission saves both apply, each editor re-reading the server's set after its own save.
 
 Accessibility: tabs are keyboard-operable; the dual-list uses a labelled multi-select (`<select multiple>`); status/alert regions announce results; visible focus throughout.
 i18n: tab labels, column headers, editor labels, and status messages localize.
@@ -329,13 +330,13 @@ i18n: labels + messages localize.
 
 ### UAT-ADMIN-RGP-GROUPS-DETAIL: Group detail (tabs)
 
-- Route: `/app/administrator/groups/[groupId]`  ·  Example URL: `/en/app/administrator/groups/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/groups/[groupId]/page.tsx:17`
+- Route: `/app/administrator/groups/[groupId]`  ·  Example URL: `/en/app/administrator/groups/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/groups/[groupId]/page.tsx:18`
 - Purpose: Manage one group across three tabs — **Roles** (the roles it confers), **Members** (users in it), **Settings** (name/description).
-- Guard / who can access: `admin.groups.read` to open; non-UUID or out-of-scope group → **404** (`page.tsx:28`, `:33`). The Roles and Members tabs' add/remove actions require `admin.groups.assign` (`canAssign`); Settings requires `admin.groups.update` (`canUpdate`).
+- Guard / who can access: `admin.groups.read` to open; non-UUID or out-of-scope group → **404** (`page.tsx:29`, `:34`). The Roles and Members tabs' add/remove actions require `admin.groups.assign` (`canAssign`); Settings requires `admin.groups.update` (`canUpdate`).
 - Access matrix: Member / Limited Admin → 404; Org Admin → their group, fully manageable; Superadmin → any group; another org's group → 404 for the org admin.
 - Preconditions & test data: use the ORG A seed groups; Engineering already confers `admin` with members user1/user2.
 
-Tabs default to **Roles** (`_group-detail-tabs.tsx:46`). The Roles editor and the Settings form stay mounted while another tab is open, so unsaved edits survive a tab switch (F-158).
+Tabs default to **Roles** (`_group-detail-tabs.tsx:48`). The Roles editor and the Settings form stay mounted while another tab is open, so unsaved edits survive a tab switch (F-158).
 
 #### UAT-ADMIN-RGP-GROUPS-DETAIL-ROLES: Roles tab (dual-list editor)
 
@@ -346,7 +347,7 @@ Tabs default to **Roles** (`_group-detail-tabs.tsx:46`). The Roles editor and th
 User stories
 
 - UAT-ADMIN-RGP-GROUPS-DETAIL-ROLES-S1 — As an Org Admin, I want to bundle and unbundle roles on a group, so that its members gain or lose those roles.
-  - Acceptance criteria: Given `admin.groups.assign`, when I move roles between columns and Save, then the diff persists (one POST, **then** one DELETE) and a Saved status appears; only roles in the group's own org are offered (a foreign/global role would 404 on save, so the list excludes them). After any failed save the lists are reloaded from the server (F-38).
+  - Acceptance criteria: Given `admin.groups.assign`, when I move roles between columns and Save, then the diff persists in one atomic PATCH (the additions and removals land together or not at all) and a Saved status appears; only roles in the group's own org are offered (a foreign/global role would 404 on save, so the list excludes them). After any failed save the lists are reloaded from the server (F-38).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -354,7 +355,7 @@ User stories
     | 2 | Select a role in Available, click **Add**, then **Save** | A "saved" status appears; the role is now bundled |
     | 3 | Select a bundled role, click **Remove**, **Save** | The role is unbundled; reload confirms the set |
     | 4 | Confirm the Available column shows only ORG A roles | No other org's or Global roles appear |
-    | 5 | (Org Admin whose `admin.groups.*` come **only** from this group's role *R1*; as Superadmin, first create *R2* in ORG A with the same permissions) Move *R2* into Assigned and *R1* out, **Save** | A "saved" status appears and *R2* is bundled in place of *R1*; you keep access to the group. The addition is sent first, so removing *R1* never strips the `admin.groups.assign` the save still needs (F-38) |
+    | 5 | (Org Admin whose `admin.groups.*` come **only** from this group's role *R1*; as Superadmin, first create *R2* in ORG A with the same permissions) Move *R2* into Assigned and *R1* out, **Save** | A "saved" status appears and *R2* is bundled in place of *R1*; you keep access to the group. Both sides are checked against the authority you had when you clicked Save, so removing *R1* cannot refuse the addition of *R2* (F-38) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-GROUPS-DETAIL-ROLES-S2 — As an Org Admin, I must not be able to bundle a role that out-authorizes me, so that I cannot escalate via a group.
@@ -372,7 +373,7 @@ Negative & edge cases
 - An org with more than 200 roles → Available lists all of them (every page is read, F-41); "Showing N of M" appears only if the catalog could not be read in full. A bundled role missing from the loaded catalog stays in Available when moved out.
 - Save with no change: Save button disabled until dirty.
 - A group manager holding `admin.groups.read` + `admin.groups.assign` but not `admin.roles.read` (a custom role) → the tab opens without an error, Available is empty and the note "The organization's role catalog isn't listed: that needs permission to read roles." appears; moving a bundled role out and saving removes it; the audit log shows no `administrator.access.denied` row for the visit (F-67).
-- 403 on either write → the localized "only roles whose permissions you hold" message; other failures → the generic error. Additions are sent before removals, so a refused addition removes nothing, and a refused removal leaves the addition in place, visible in the lists; after any failure the lists are reloaded from the server (F-38).
+- 403 on either side → the localized "only roles whose permissions you hold" message; other failures → the generic error. The save is one transaction, so a refusal of either side changes nothing; after any failure the lists are reloaded from the server (F-38).
 - A failed save whose reload also fails → the error plus "Reload the page before making more changes.", and the editor stays locked until the page is reloaded.
 
 Accessibility: labelled multi-selects, keyboard operable, status/alert regions.
@@ -442,6 +443,7 @@ User stories
     | 3 | Restore Name, edit Description, Save | A green "saved" status appears |
     | 4 | Try to edit Key | Not editable |
     | 5 | Change the Name and Save; open **Members**, return to **Settings**, change only the Description and Save; reload | The Settings tab shows the new Name on return, and after the reload both the new Name and the new Description are kept (F-39) |
+    | 6 | Open the same group's **Settings** in a second tab, rename it there and Save; in the first tab change the Description and Save | The first tab's save is refused with "Someone else saved this record after you opened it…", the page reloads with the second tab's Name, and your Description edit is kept for the next Save (F-39) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -608,5 +610,5 @@ Legend: **view** = can open/read; **act** = can perform the screen's mutations; 
 
 1. **Read-without-update personas.** The seed `admin.platform` role holds both `admin.roles.read`+`admin.roles.update` and both `admin.groups.read`+`admin.groups.update`, so the "viewer sees disabled editor/Settings" branches (`canUpdate=false`) are not exercisable by a stock persona. Confirm by minting a custom role with only the `.read` key, or drop this assertion.
 2. **Permissions catalog: exact 403 copy for a non-Superadmin.** Resolved by F-66: a non-Superadmin is no longer offered Edit or Delete, so no on-screen 403 is reachable. The API refusal is covered by UAT-ADMIN-RGP-PERMISSIONS-LIST-S2.
-3. **Concurrency / stale writes.** No route in this area uses If-Match/ETag; edits are last-write-wins. Confirmed absent in code, but flag if UAT expects an optimistic-concurrency prompt anywhere here.
+3. **Concurrency / stale writes.** Resolved by F-39: the role and group Settings forms send the record's ETag as `If-Match`, and a stale save is refused with a named conflict message (role S3 step 6, group Settings step 6). The dual-list editors save through one atomic PATCH (F-38) and are not versioned.
 4. **Limited Admin fixture.** The seed does not create a standing account with only the `admin` role assigned to a login; the `admin` role is bundled into the Engineering group. To exercise the "Limited Admin → 404" rows directly, assign the `admin` role to a test user (e.g. via the Roles tab on a user) or rely on the Engineering-group members inheriting it.

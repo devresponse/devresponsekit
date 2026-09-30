@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RequiredLegend } from "@/components/ui/required-legend";
+import { useIfMatch } from "@/lib/forms/use-if-match";
 import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 import { roleSettingsSchema, type RoleSettingsInput } from "@/lib/validation/roles";
 
@@ -37,19 +38,25 @@ function toRolePatch(values: RoleSettingsInput) {
  * fields the admin changed (the route answers 400 `no_changes` to an empty
  * one, so a save with nothing changed sends nothing), and a successful save
  * moves the form's baseline and refreshes the page, so a description-only
- * save after a tab switch cannot send back the pre-rename name.
+ * save after a tab switch cannot send back the pre-rename name. The PATCH
+ * carries the role's `etag` as `If-Match` (`useIfMatch`): a role saved
+ * elsewhere since the page loaded answers 412, and the form names the conflict
+ * and reloads instead of overwriting that save.
  */
 export function RoleSettingsForm({
   roleId,
   initialKey,
   initialName,
   initialDescription,
+  etag,
   canUpdate,
 }: {
   roleId: string;
   initialKey: string;
   initialName: string;
   initialDescription: string | null;
+  /** The role's ETag (F-39), sent back as `If-Match`. */
+  etag: string;
   canUpdate: boolean;
 }) {
   const t = useTranslations("administrator.roles.settings");
@@ -61,6 +68,7 @@ export function RoleSettingsForm({
     RoleSettingsInput,
     ReturnType<typeof toRolePatch>
   >(roleSettingsSchema, { name: initialName, description: initialDescription ?? "" }, toRolePatch);
+  const ifMatch = useIfMatch(etag);
 
   const onValid = async (values: RoleSettingsInput) => {
     form.clearErrors("root");
@@ -75,12 +83,21 @@ export function RoleSettingsForm({
       const res = await fetch(`/api/administrator/roles/${roleId}`, {
         method: "PATCH",
         credentials: "same-origin",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...ifMatch.headers() },
         body: JSON.stringify(changes),
       });
       if (res.ok) {
+        ifMatch.adopt(res);
         commitSaved(values);
         setSaved(true);
+        return;
+      }
+      if (res.status === 412) {
+        // F-39: the role was saved elsewhere since this form read it, so
+        // nothing was written. Name the conflict and reload the page: the form
+        // takes the other save and keeps this admin's edits for the next one.
+        form.setError("root", { type: "server", message: tErr("editConflict") });
+        ifMatch.reload();
         return;
       }
       if (res.status === 400) {

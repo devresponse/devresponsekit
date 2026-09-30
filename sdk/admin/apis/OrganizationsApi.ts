@@ -181,6 +181,7 @@ export interface RevokeOrganizationInvitationRequest {
 export interface UpdateOrganizationOperationRequest {
     id: string;
     updateOrganizationRequest: UpdateOrganizationRequest;
+    ifMatch?: string;
 }
 
 export interface UpdateOrganizationAuthSettingsRequest {
@@ -1055,6 +1056,10 @@ export class OrganizationsApi extends runtime.BaseAPI {
         const headerParameters: runtime.HTTPHeaders = {};
 
         headerParameters['Content-Type'] = 'application/json';
+
+        if (requestParameters['ifMatch'] != null) {
+            headerParameters['If-Match'] = String(requestParameters['ifMatch']);
+        }
 
         if (this.configuration && this.configuration.accessToken) {
             const token = this.configuration.accessToken;

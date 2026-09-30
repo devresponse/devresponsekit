@@ -220,10 +220,11 @@ describe("dependency governance: lockfile floors from the 2026-09 sweep", () => 
     ["undici", 8, "8.9.0"], // GHSA-4cwx-7wf7-3272
     ["postcss", undefined, "8.5.23"], // GHSA-r28c-9q8g-f849, GHSA-fxqj-rqcc-2cmp
     ["nanoid", 3, "3.3.18"], // GHSA-28wg-ghj8-5hjv, GHSA-2v37-7h3g-55p8
-    ["fast-uri", undefined, "3.1.6"],
+    ["fast-uri", undefined, "3.1.8"], // GHSA-hrr3-gc8f-f4qj
     ["browserslist", undefined, "4.28.7"], // GHSA-c83g-rgw3-j3cx, GHSA-73wf-gq98-2v4g
-    ["brace-expansion", 1, "1.1.18"], // GHSA-rgw5-rvv9-x895 et al.
-    ["brace-expansion", 5, "5.0.9"],
+    ["brace-expansion", 1, "1.1.21"], // GHSA-rgw5-rvv9-x895 et al.; GHSA-6j4f-fj2g-mc7p, -qhr7-859c-m2p7, -q2hr-2g5m-vwhr
+    ["brace-expansion", 5, "5.0.12"],
+    ["ip-address", undefined, "10.7.1"], // GHSA-j6r3-76f7-8jcv, GHSA-h3mg-xc3c-68pw
     ["js-yaml", 3, "3.15.2"], // GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-h67p-54hq-rp68
     ["js-yaml", 4, "4.3.1"],
     ["dompurify", undefined, "3.4.13"], // GHSA-55q2-fjhq-7xh7

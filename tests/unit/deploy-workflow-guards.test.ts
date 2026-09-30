@@ -81,6 +81,15 @@ const preflightHeader = code(sliceAt(preflightJob, "\n  preflight:\n", "\n    st
 const deployHeader = code(sliceAt(deployJob, "\n  deploy:\n", "\n    steps:\n"));
 /** The presence check itself, as a shell script. */
 const credentialsStep = code(sliceAt(preflightJob, "\n      - id: credentials\n"));
+/** The deploy job's steps, comments removed. */
+const steps = code(deployJob);
+/** One step, from its `- name:` line to the next step. */
+const step = (name: string): string => {
+  const start = steps.indexOf(`- name: ${name}\n`);
+  if (start === -1) throw new Error(`deploy.yml has no step named ${JSON.stringify(name)}`);
+  const next = steps.indexOf("\n      - ", start + 1);
+  return next === -1 ? steps.slice(start) : steps.slice(start, next);
+};
 
 describe("deploy workflow: unconfigured skips green, half-configured fails red (DEPLOY-1)", () => {
   it("gates `deploy` on preflight's verdict, through `needs:`", () => {
@@ -171,15 +180,6 @@ describe("deploy workflow: the fork guard is restated where the credentials are 
 });
 
 describe("deploy workflow: both migrators run before anything is built (F-26)", () => {
-  const steps = code(deployJob);
-  /** One step, from its `- name:` line to the next step. */
-  const step = (name: string): string => {
-    const start = steps.indexOf(`- name: ${name}\n`);
-    if (start === -1) throw new Error(`deploy.yml has no step named ${JSON.stringify(name)}`);
-    const next = steps.indexOf("\n      - ", start + 1);
-    return next === -1 ? steps.slice(start) : steps.slice(start, next);
-  };
-
   it("applies the Better Auth migrations, then the app's, then builds", () => {
     // The step used to run only db:app:migrate, so a release that changed
     // better-auth-schema.sql (#199's `rateLimit`) went live with every auth
@@ -204,5 +204,70 @@ describe("deploy workflow: both migrators run before anything is built (F-26)", 
       "${{ secrets.PRODUCTION_DIRECT_DATABASE_URL",
     ]);
     expect(authStep).toMatch(/BETTER_AUTH_SECRET: ci-only-[a-z0-9-]+-not-for-production\n/);
+  });
+});
+
+describe("deploy workflow: the Vercel CLI comes from vercel-cli's lockfile (I-09)", () => {
+  const INSTALL = "Install Vercel CLI (from vercel-cli's lockfile)";
+  /**
+   * A global install however it is spelled: the flag before or after the
+   * verb, yarn's `global` subcommand, npm's `--location=global`.
+   */
+  const GLOBAL_INSTALL = /\b(?:pnpm|npm|yarn)\b[^\n]*[\s=](?:-g|--global|global)\b/;
+
+  it("recognises a global install in each spelling the guard below must refuse", () => {
+    for (const line of [
+      "run: pnpm add -g vercel@54.14.5",
+      "run: pnpm -g add vercel",
+      "run: npm i --global vercel",
+      "run: npm install --location=global vercel",
+      "run: yarn global add vercel",
+    ]) {
+      expect(line).toMatch(GLOBAL_INSTALL);
+    }
+  });
+
+  it("resolves nothing afresh: no global add, no npx, no version pinned in the workflow", () => {
+    // The regression this pins: `pnpm add -g vercel@54.14.5` ran five majors
+    // behind drk-deploy, and a global add ignores vercel-cli's
+    // pnpm.overrides, so the job holding VERCEL_TOKEN installed the exact
+    // tar/undici/path-to-regexp versions those floors replace, unaudited.
+    expect(steps).not.toMatch(GLOBAL_INSTALL);
+    expect(steps).not.toMatch(/\b(?:npx|pnpx|dlx|bunx)\b[^\n]*\bvercel\b/);
+    expect(steps).not.toMatch(/\bvercel@/);
+    expect(step(INSTALL)).toMatch(/^\s*pnpm --dir vercel-cli install --frozen-lockfile --prod$/m);
+  });
+
+  it("puts that CLI on PATH before the first `vercel` step, which still runs from the repository root", () => {
+    const install = steps.indexOf(`- name: ${INSTALL}\n`);
+    expect(step(INSTALL)).toContain(
+      'echo "$GITHUB_WORKSPACE/vercel-cli/node_modules/.bin" >> "$GITHUB_PATH"',
+    );
+    expect(steps.indexOf("run: vercel pull ")).toBeGreaterThan(install);
+    // `vercel pull` writes .vercel/ where it runs and `vercel build` builds
+    // what it finds there: run from vercel-cli/, they would build drk-deploy.
+    expect(steps).not.toContain("working-directory:");
+    expect(steps).not.toMatch(/--dir vercel-cli exec/);
+  });
+
+  it("never hands VERCEL_TOKEN to the install, which runs the CLI's dependency tree (#113)", () => {
+    expect(deployHeader).not.toContain("secrets.VERCEL_TOKEN");
+    expect(step(INSTALL)).not.toMatch(/\$\{\{\s*secrets\./);
+  });
+
+  it("names the settings no file can set where an operator looks, with how to check and set them", () => {
+    // SHA pinning and the environment's branch policy are repository
+    // settings, so the checklist in SECURITY.md is the whole control.
+    const securityMd = readFileSync(path.join(process.cwd(), "SECURITY.md"), "utf8");
+    const start = securityMd.indexOf("\n## Repository security settings\n");
+    expect(start).toBeGreaterThan(-1);
+    const end = securityMd.indexOf("\n## ", start + 1);
+    const settings = securityMd.slice(start, end === -1 ? undefined : end);
+    expect(settings).toContain("**Require actions to be pinned to a full-length commit SHA**");
+    expect(settings).toContain("gh api repos/devresponse/devresponsekit/actions/permissions");
+    expect(settings).toContain("-F sha_pinning_required=true");
+    expect(settings).toContain("**`production` environment: deployment branches** | `main` only");
+    expect(settings).toContain("environments/production/deployment-branch-policies");
+    expect(settings).toContain("**`production` environment: required reviewers**");
   });
 });

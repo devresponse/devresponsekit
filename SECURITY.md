@@ -251,23 +251,61 @@ the usual cause of a base-OS finding (see [docs/docker.md](docs/docker.md)).
 
 ## Repository security settings
 
-Two supply-chain controls are repository **settings**, not files. The
-`GITHUB_TOKEN` a workflow runs with cannot read either of them: both endpoints
-need administration access, and no workflow `permissions:` key grants that. No
-check in this repository can pin them, so they are an **operator checklist**.
-Confirm both when you adopt the kit, and again after any change to the
-repository's owner or security configuration (review F-28).
+These supply-chain controls are repository **settings**, not files. Only a
+repository administrator can change them and no check in this repository pins
+them, so they are an **operator checklist**. The `GITHUB_TOKEN` a workflow
+runs with cannot even read the Dependabot and Actions-permission settings:
+those endpoints need administration access, and no workflow `permissions:`
+key grants that. Confirm every row when you adopt the kit, and again after any
+change to the repository's owner or security configuration (review F-28,
+I-09).
 
 | Setting | Expected | Verify (read-only) | Turn on | When it is off |
 | --- | --- | --- | --- | --- |
 | **Dependabot alerts** | on | `gh api -i repos/devresponse/devresponsekit/vulnerability-alerts` answers `204` (`404` = off) | Settings → Advanced Security → Dependabot alerts → **Enable** | GitHub stops matching the lockfiles against its advisory database. The weekly `Dependabot alerts` job cannot read the alerts API and fails, so this one is detected after all. |
 | **Dependabot security updates** | on | `gh api repos/devresponse/devresponsekit/automated-security-fixes` returns `"enabled": true` | Settings → Advanced Security → Dependabot security updates → **Enable**, or `gh api -X PUT repos/devresponse/devresponsekit/automated-security-fixes` | An advisory raises an alert and **no PR**. Nothing proposes the fix: the next weekly run fails and opens the tracking issue, and someone bumps or floors the package by hand. Every comment in [`.github/dependabot.yml`](.github/dependabot.yml) that says a security update "still arrives" assumes this setting is on. |
+| **Actions pinned to a full-length commit SHA** | required | `gh api repos/devresponse/devresponsekit/actions/permissions` returns `"sha_pinning_required": true` | Settings → Actions → General → Actions permissions → tick **Require actions to be pinned to a full-length commit SHA** → **Save**, or `gh api -X PUT repos/devresponse/devresponsekit/actions/permissions -F enabled=true -f allowed_actions=all -F sha_pinning_required=true` (the call sets `enabled` and `allowed_actions` too, so pass their current values) | Pinning is a convention only review enforces. Every `uses:` in `.github/workflows/` is pinned today, so turning this on breaks nothing, but a `uses: owner/action@v1` slipped into a later edit would run whatever that movable tag points at, and no check would fail. |
+| **`production` environment: deployment branches** | `main` only | `gh api repos/devresponse/devresponsekit/environments/production --jq .deployment_branch_policy` shows `custom_branch_policies: true`, and `gh api repos/devresponse/devresponsekit/environments/production/deployment-branch-policies --jq '[.branch_policies[].name]'` returns `["main"]` | Settings → Environments → `production` → Deployment branches and tags → **Selected branches and tags** → **Add deployment branch or tag rule** → branch `main`, or the commands below | An environment secret is readable by **any** job that names `environment: production`, in any workflow, pushed on any branch. `deploy.yml`'s fork guard fences that one workflow; a workflow somebody pushes on a feature branch could still read the deploy credentials. |
+| **`production` environment: required reviewers** | set, in the same sitting as the first deploy secret | `gh api repos/devresponse/devresponsekit/environments/production --jq '[.protection_rules[].type]'` includes `"required_reviewers"` | Settings → Environments → `production` → tick **Required reviewers**, add people or teams → **Save protection rules**, or the commands below | Once the secrets are set, anything merged to `main` migrates production and promotes with nobody approving it. Added before the secrets exist, reviewers only cost an approval prompt per merge for a deploy that skips ([docs/deployment.md §3](docs/deployment.md#3-vercel-project--environment)). |
+
+The environment rules by API. The branch policy is two calls, and the call
+that adds reviewers repeats `deployment_branch_policy` so it cannot widen it:
+
+```bash
+# Now: only `main` may deploy to the environment.
+gh api -X PUT repos/devresponse/devresponsekit/environments/production --input - <<'JSON'
+{ "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
+JSON
+gh api -X POST repos/devresponse/devresponsekit/environments/production/deployment-branch-policies \
+  -f name=main -f type=branch
+
+# With the first deploy secret: reviewers (a user's id: gh api users/<login> --jq .id).
+gh api -X PUT repos/devresponse/devresponsekit/environments/production --input - <<'JSON'
+{
+  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true },
+  "reviewers": [{ "type": "User", "id": <user-id> }]
+}
+JSON
+```
+
+`deploy.yml`'s own trigger passes a `main`-only policy, because a
+`workflow_run` job runs on the default branch; a manual dispatch must then be
+started from `main`. Both of its jobs name the environment, so with reviewers
+set a real deploy is approved twice (the DEPLOY-1 comment in `deploy.yml`).
 
 When F-28 was verified on 2026-09-24, Dependabot alerts were on and
 **Dependabot security updates were off**. Turning the setting on is an
 operator action; no code change can do it. Security-update PRs go through the
 same required checks as any other PR, and Dependabot's `cooldown` and
 `open-pull-requests-limit` do not apply to them.
+
+When I-09 was verified on 2026-09-29, SHA pinning was **not** required, and
+the environment (GitHub lists it as `Production`; the API resolves
+`production` to it) had **no** branch policy and **no** protection rules.
+Its deploy secrets are unset
+([docs/deployment.md §1.2](docs/deployment.md#12-the-actions-pipeline-optional-and-not-configured-deploy-1)),
+so SHA pinning and the branch policy can go on now, and reviewers with the
+first secret.
 
 ## Secret scanning
 

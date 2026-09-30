@@ -91,6 +91,7 @@ const TOUCHED_KEYS = [
   "API_JWT_ISSUER",
   "BETTER_AUTH_URL",
   "SESSION_ABSOLUTE_LIFETIME_HOURS",
+  "SSO_SESSION_LIFETIME_HOURS",
   "API_KEY_USAGE_TOUCH_INTERVAL_SECONDS",
   "CLIENT_IP_SOURCE",
   "EMAIL_PROVIDER",
@@ -550,6 +551,43 @@ describe("signing-secret hygiene (audit #12/#22)", () => {
       restore();
     }
   });
+});
+
+/**
+ * F-82: the lifetime of a session an SSO handoff opens is never "off". Unset
+ * is eight hours, the lag the satellite docs promise; a value the schema
+ * refuses fails boot rather than silently lifting the bound.
+ */
+describe("SSO_SESSION_LIFETIME_HOURS (F-82)", () => {
+  it("defaults to 8 when unset", async () => {
+    const { mod, restore } = await loadEnvWith({ SSO_SESSION_LIFETIME_HOURS: undefined });
+    try {
+      expect(mod.getServerEnv().SSO_SESSION_LIFETIME_HOURS).toBe(8);
+    } finally {
+      restore();
+    }
+  });
+
+  it("coerces a configured value to a number", async () => {
+    const { mod, restore } = await loadEnvWith({ SSO_SESSION_LIFETIME_HOURS: "24" });
+    try {
+      expect(mod.getServerEnv().SSO_SESSION_LIFETIME_HOURS).toBe(24);
+    } finally {
+      restore();
+    }
+  });
+
+  it.each(["0", "-1", "1.5", "abc", "9000"])(
+    "rejects an out-of-range value (%s) at boot",
+    async (value) => {
+      const { mod, restore } = await loadEnvWith({ SSO_SESSION_LIFETIME_HOURS: value });
+      try {
+        expect(() => mod.getServerEnv()).toThrow(/SSO_SESSION_LIFETIME_HOURS/);
+      } finally {
+        restore();
+      }
+    },
+  );
 });
 
 /**

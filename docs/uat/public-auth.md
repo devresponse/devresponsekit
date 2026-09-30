@@ -83,7 +83,7 @@ None of the public or auth pages are permission-gated — they render for anyone
 The **authorization boundary is the secure shell** (`/<locale>/app/*`), enforced
 in two layers: a cookie-only early redirect in the proxy
 (`src/proxy.ts:190-201`) and the real server-side check in
-`requireSecureSession` (`src/lib/auth-guard.ts:181-205`), which calls
+`requireSecureSession` (`src/lib/auth-guard.ts:188-212`), which calls
 `decideSecureAccess` (`src/lib/auth-status.ts:80-91`). That function routes a
 signed-in user to `/pending-approval` (pending status or no active membership)
 or `/blocked` (blocked/suspended/deactivated) before any secure page renders.
@@ -326,7 +326,7 @@ to confirm both localize.
   `callbackURL`.
 - Guard / who can access: None. Unauthenticated deep-links into secure routes are
   bounced here by the proxy with a `returnTo` param (`src/proxy.ts:194-200`) and
-  by `requireSecureSession` (`src/lib/auth-guard.ts:184-188`).
+  by `requireSecureSession` (`src/lib/auth-guard.ts:191-195`).
 - Access matrix: Visitor -> see: yes, act: yes · Pending / Blocked / Member /
   admins -> see: yes (no redirect away from the form) but signing in again just
   re-runs the flow.
@@ -453,7 +453,7 @@ Negative & edge cases
   (`src/components/i18n/use-switch-locale.ts`).
 - Blocked/pending user signing in: sign-in itself succeeds, then the secure
   layout's `requireSecureSession` redirects them to `/blocked` or
-  `/pending-approval` (`src/lib/auth-guard.ts:196-202`). Assert they never see a
+  `/pending-approval` (`src/lib/auth-guard.ts:203-209`). Assert they never see a
   secure page.
 - Unexpected transport error: the catch branch surfaces
   "An unexpected error occurred. Please try again." (`auth.unexpectedError`,
@@ -841,7 +841,7 @@ i18n: title, labels, and messages from `auth` / `validation`; run in `uk`.
   session (F-148); for anyone else the banner renders nothing.
 - Guard / who can access: None on the page itself; it is the **destination** of
   `requireSecureSession` when `decideSecureAccess` returns `pending_approval`
-  (`src/lib/auth-guard.ts:196-198`; decision logic
+  (`src/lib/auth-guard.ts:203-205`; decision logic
   `src/lib/auth-status.ts:84-90` — pending status, or a null / pending membership).
 - Access matrix: Pending user -> see: yes, act: yes (sign out). Any other persona
   -> can view the page directly, but only a genuinely pending user is *routed*
@@ -856,7 +856,7 @@ User stories
   account awaits approval, so that I understand why I can't reach the app yet.
   - Acceptance criteria: Given I am signed in but `pending_approval`, when I try
     to open any secure page, then I am redirected to `/<locale>/pending-approval`
-    (`src/lib/auth-guard.ts:197`) showing the pending alert and a "Sign out" button.
+    (`src/lib/auth-guard.ts:204`) showing the pending alert and a "Sign out" button.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -870,7 +870,7 @@ Negative & edge cases
 
 - Pending user cannot bypass into a secure page: every `/en/app/*` request
   re-runs `requireSecureSession` and re-redirects
-  (`src/lib/auth-guard.ts:196-198`). Assert no secure content flashes.
+  (`src/lib/auth-guard.ts:203-205`). Assert no secure content flashes.
 - No membership at all (provisioned user, zero active memberships) also resolves
   to `pending_approval` (`src/lib/auth-status.ts:86-87`), so the same screen is
   shown. `TODO: verify` this specific sub-case with a user that has no membership
@@ -896,8 +896,8 @@ i18n: title/description from `auth`, button label from `common.signOut`
   renders nothing.
 - Guard / who can access: None on the page; it is the destination of
   `requireSecureSession` when `decideSecureAccess` returns `blocked`
-  (`src/lib/auth-guard.ts:200-202`). The shell appends `?reason=<status>` to the
-  redirect URL (`src/lib/auth-guard.ts:201`), though the panel does not display it.
+  (`src/lib/auth-guard.ts:207-209`). The shell appends `?reason=<status>` to the
+  redirect URL (`src/lib/auth-guard.ts:208`), though the panel does not display it.
 - Access matrix: Blocked user -> see: yes, act: yes (sign out). Others -> can view
   directly, but only a blocked/suspended/deactivated user is *routed* here.
 - Preconditions & test data: an account an admin has blocked/suspended (or whose
@@ -910,7 +910,7 @@ User stories
   message, so that I know my account is not usable and can contact an admin.
   - Acceptance criteria: Given my status is `blocked` (or `suspended` /
     `deactivated`), when I try to open a secure page, then I am redirected to
-    `/<locale>/blocked` (`src/lib/auth-guard.ts:201`) showing the restricted alert
+    `/<locale>/blocked` (`src/lib/auth-guard.ts:208`) showing the restricted alert
     and a "Sign out" button.
   - UAT script:
     | # | Step (what to do) | Expected result |
@@ -927,7 +927,7 @@ Negative & edge cases
   who blocked the account or why (`src/components/auth/blocked-account-panel.tsx:14-19`).
   Assert the `?reason=` value is not rendered on screen.
 - Blocked user cannot reach secure pages: every `/en/app/*` request re-redirects
-  to `/blocked` (`src/lib/auth-guard.ts:200-202`).
+  to `/blocked` (`src/lib/auth-guard.ts:207-209`).
 - Unknown/corrupt DB status: fails closed to `deactivated` -> `blocked` decision
   (`src/lib/auth-status.ts:62-66`, `:84`), so a bad row can never grant access.
   `TODO: verify` behavior with a deliberately corrupted status row.

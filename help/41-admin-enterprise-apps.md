@@ -22,6 +22,7 @@ Manages the catalog of companion applications that appear in the shell's **Appli
 
 ## Actions available
 - Open an app to edit it, create a new application, or delete one (`admin.apps.manage`) — *not exercised.*
+- Setting an app to **Disabled**, or deleting it, stops new launches at once. On a satellite that runs a kit version with F-82, it also ends the sessions its launches opened: at once if the satellite shares this deployment's database, and otherwise within the satellite's `SSO_SESSION_LIFETIME_HOURS` (8 hours unless it sets another value) of the launch. A satellite fork that has not ported F-82, such as today's `devresponseapps` forks, keeps those sessions.
 
 ## Navigation
 - Reached from: admin sidebar (Apps → Enterprise applications).

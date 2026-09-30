@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as JwtHandoffModule from "@/lib/jwt-handoff.server";
 import type * as SsoServerModule from "@/lib/sso.server";
+import { ssoSessionTokenPrefix } from "@/lib/session-lifetime";
 
 /**
  * Unit tests for `sso.server.ts > createSsoHandoffRedirect` and
@@ -23,6 +24,18 @@ const nonceUpdateExecute = vi.fn();
 const nonceUpdateWhere = vi.fn();
 const nonceSelectTakeFirst = vi.fn();
 const nonceSelectWhere = vi.fn();
+/** F-82: the in-flight expiry's `set` and plain `execute`, and the session sweep. */
+const nonceUpdateSet = vi.fn();
+const nonceExpireExecute = vi.fn().mockResolvedValue(undefined);
+const sessionDeleteMany = vi.fn();
+
+vi.mock("@/lib/auth", () => ({
+  auth: {
+    $context: Promise.resolve({
+      adapter: { deleteMany: (...args: unknown[]) => sessionDeleteMany(...args) },
+    }),
+  },
+}));
 
 vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
@@ -79,7 +92,8 @@ vi.mock("@/db/database", () => ({
     }),
     deleteFrom: () => ({ where: () => ({ execute: nonceDeleteExecute }) }),
     updateTable: () => ({
-      set: () => {
+      set: (values: unknown) => {
+        nonceUpdateSet(values);
         // Record every `where(lhs, op, rhs)` so the test can pin the burn
         // predicate (jti + target_application_id + consumed_at + expires_at).
         const chain = {
@@ -88,6 +102,7 @@ vi.mock("@/db/database", () => ({
             return chain;
           },
           returning: () => ({ executeTakeFirst: nonceUpdateExecute }),
+          execute: nonceExpireExecute,
         };
         return chain;
       },
@@ -118,6 +133,9 @@ beforeEach(async () => {
   nonceUpdateWhere.mockReset();
   nonceSelectTakeFirst.mockReset();
   nonceSelectWhere.mockReset();
+  nonceUpdateSet.mockReset();
+  nonceExpireExecute.mockClear();
+  sessionDeleteMany.mockReset();
   mod = await import("@/lib/sso.server");
 });
 afterEach(() => vi.resetModules());
@@ -296,5 +314,50 @@ describe("consumeSsoHandoffNonce", () => {
     expect(nonceUpdateWhere).toHaveBeenCalledWith("target_application_id", "=", "portal");
     expect(nonceUpdateWhere).toHaveBeenCalledWith("consumed_at", "is", null);
     expect(nonceUpdateWhere).toHaveBeenCalledWith("expires_at", ">", expect.any(Date));
+  });
+});
+
+/**
+ * F-82 — disabling or deleting an app ends its handoffs: the ones in flight
+ * are expired, then every session a handoff opened for it is deleted by its
+ * token prefix. The Postgres run (tests/db/enterprise-app-handoff-sessions.db.test.ts)
+ * shows the prefix match leaving sibling apps alone.
+ */
+describe("endSsoHandoffsOfApplication (F-82)", () => {
+  it("expires the app's unburned nonces, then deletes its handoff sessions by token prefix", async () => {
+    sessionDeleteMany.mockResolvedValue(4);
+
+    expect(await mod.endSsoHandoffsOfApplication("acme.crm")).toBe(4);
+
+    expect(nonceUpdateSet).toHaveBeenCalledWith({ expires_at: expect.any(Date) });
+    expect(nonceUpdateWhere).toHaveBeenCalledWith("target_application_id", "=", "acme.crm");
+    expect(nonceUpdateWhere).toHaveBeenCalledWith("consumed_at", "is", null);
+    expect(nonceUpdateWhere).toHaveBeenCalledWith("expires_at", ">", expect.any(Date));
+    expect(nonceExpireExecute).toHaveBeenCalledTimes(1);
+    expect(sessionDeleteMany).toHaveBeenCalledWith({
+      model: "session",
+      where: [
+        {
+          field: "token",
+          operator: "starts_with",
+          value: ssoSessionTokenPrefix("acme.crm"),
+        },
+      ],
+    });
+    // The nonces go first, so a handoff in flight cannot open a session after the sweep.
+    expect(nonceExpireExecute.mock.invocationCallOrder[0]!).toBeLessThan(
+      sessionDeleteMany.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("reaches no write for an empty application id", async () => {
+    expect(await mod.endSsoHandoffsOfApplication("")).toBe(0);
+    expect(nonceExpireExecute).not.toHaveBeenCalled();
+    expect(sessionDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("propagates a failed sweep, so the admin route reports it and the operator retries", async () => {
+    sessionDeleteMany.mockRejectedValue(new Error("db down"));
+    await expect(mod.endSsoHandoffsOfApplication("portal")).rejects.toThrow("db down");
   });
 });

@@ -257,8 +257,12 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
     // The burn is bound to THIS deployment's application id (review #15).
     expect(consumeMock).toHaveBeenCalledWith("j1", "portal");
+    // F-82: the session is marked as this application's handoff session.
     expect(createSsoSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ body: { userId: "ba-1" }, returnHeaders: true }),
+      expect.objectContaining({
+        body: { userId: "ba-1", applicationId: "portal" },
+        returnHeaders: true,
+      }),
     );
     expect(res.headers.get("set-cookie")).toContain("better-auth.session_token=tok.sig");
     expect(auditMock).toHaveBeenCalledWith(

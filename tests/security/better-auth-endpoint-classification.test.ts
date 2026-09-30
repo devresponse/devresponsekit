@@ -276,7 +276,7 @@ describe("F-06: every Better Auth endpoint on the real instance is classified", 
     // endpoint signs in whichever user id it is sent.
     seq += 1;
     const userId = await seedUser(`classify-sso-${seq}@example.com`, "user");
-    const body = { userId };
+    const body = { userId, applicationId: "portal" };
     const overHttp = (await auth.api.createSsoSession({
       body,
       request: new Request(`${BASE_URL}/api/auth/sso-session/create`, {

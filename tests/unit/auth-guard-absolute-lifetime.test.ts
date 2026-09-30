@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ssoSessionTokenPrefix } from "@/lib/session-lifetime";
 
 /**
  * Review #200 — `getCurrentSession()` is the single chokepoint every browser
@@ -34,6 +35,7 @@ vi.mock("@/lib/observability/logger.server", () => ({
 
 const HOUR = 60 * 60 * 1000;
 const originalLifetime = process.env.SESSION_ABSOLUTE_LIFETIME_HOURS;
+const originalSsoLifetime = process.env.SSO_SESSION_LIFETIME_HOURS;
 
 function sessionAgedHours(hours: number) {
   return {
@@ -42,9 +44,11 @@ function sessionAgedHours(hours: number) {
   };
 }
 
-async function loadGuard(lifetimeHours: string | undefined) {
+async function loadGuard(lifetimeHours: string | undefined, ssoLifetimeHours?: string) {
   if (lifetimeHours === undefined) delete process.env.SESSION_ABSOLUTE_LIFETIME_HOURS;
   else process.env.SESSION_ABSOLUTE_LIFETIME_HOURS = lifetimeHours;
+  if (ssoLifetimeHours === undefined) delete process.env.SSO_SESSION_LIFETIME_HOURS;
+  else process.env.SSO_SESSION_LIFETIME_HOURS = ssoLifetimeHours;
   vi.resetModules();
   return import("@/lib/auth-guard");
 }
@@ -58,6 +62,8 @@ beforeEach(() => {
 afterEach(() => {
   if (originalLifetime === undefined) delete process.env.SESSION_ABSOLUTE_LIFETIME_HOURS;
   else process.env.SESSION_ABSOLUTE_LIFETIME_HOURS = originalLifetime;
+  if (originalSsoLifetime === undefined) delete process.env.SSO_SESSION_LIFETIME_HOURS;
+  else process.env.SSO_SESSION_LIFETIME_HOURS = originalSsoLifetime;
   vi.resetModules();
 });
 
@@ -172,6 +178,59 @@ describe("getCurrentSession — impersonation cap (F-08)", () => {
   it("does not touch an ORDINARY session of the same age", async () => {
     const mod = await loadGuard(undefined);
     const own = sessionAgedHours(3);
+    getSessionMock.mockResolvedValue(own);
+    await expect(mod.getCurrentSession()).resolves.toBe(own);
+    expect(deleteSessionMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-82 — a session an SSO handoff opened (its token carries the handoff
+ * prefix) ends `SSO_SESSION_LIFETIME_HOURS` (default 8) after the handoff on
+ * the same path, with the operator cap unset. It used to roll forever, so a
+ * user blocked on the primary, or whose app was disabled there, kept it.
+ */
+describe("getCurrentSession — handoff session lifetime (F-82)", () => {
+  const HANDOFF_TOKEN = `${ssoSessionTokenPrefix("portal")}${"0f".repeat(32)}`;
+
+  function handoffSessionAgedHours(hours: number) {
+    return {
+      user: { id: "ba-1" },
+      session: {
+        token: HANDOFF_TOKEN,
+        createdAt: new Date(Date.now() - hours * HOUR),
+        // Refreshed a moment ago, as an active user's session always is.
+        updatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 8 * HOUR),
+      },
+    };
+  }
+
+  it("keeps a handoff session inside eight hours", async () => {
+    const mod = await loadGuard(undefined);
+    const young = handoffSessionAgedHours(7);
+    getSessionMock.mockResolvedValue(young);
+    await expect(mod.getCurrentSession()).resolves.toBe(young);
+    expect(deleteSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a handoff session past eight hours absent and revokes it, the operator cap UNSET", async () => {
+    const mod = await loadGuard(undefined);
+    getSessionMock.mockResolvedValue(handoffSessionAgedHours(9));
+    await expect(mod.getCurrentSession()).resolves.toBeNull();
+    expect(deleteSessionMock).toHaveBeenCalledWith(HANDOFF_TOKEN);
+  });
+
+  it("follows SSO_SESSION_LIFETIME_HOURS", async () => {
+    const mod = await loadGuard(undefined, "24");
+    const nine = handoffSessionAgedHours(9);
+    getSessionMock.mockResolvedValue(nine);
+    await expect(mod.getCurrentSession()).resolves.toBe(nine);
+  });
+
+  it("does not touch an ORDINARY session of the same age", async () => {
+    const mod = await loadGuard(undefined);
+    const own = sessionAgedHours(9);
     getSessionMock.mockResolvedValue(own);
     await expect(mod.getCurrentSession()).resolves.toBe(own);
     expect(deleteSessionMock).not.toHaveBeenCalled();

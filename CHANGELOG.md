@@ -50,6 +50,20 @@ For a deployment running 2.0.0.
      and not (scopes && array['admin.orgs.manage', 'admin.orgs.*', 'admin.*', '*']);
    ```
 
+### Security fixes the satellite forks must port
+
+Kit fixes since 2.0.0 whose files the `devresponseapps` forks carry, on top
+of 2.0.0's list below. Each entry names what to carry over.
+
+- **F-82.** The handoff session's lifetime: the token `createSsoSession`
+  mints (`src/lib/auth-sso-session.ts`, which now takes the `applicationId`
+  the consume route passes), the rule in `src/lib/session-lifetime.ts`, and
+  `SSO_SESSION_LIFETIME_HOURS` in `src/lib/env.ts`; the forks' `auth-guard.ts`
+  and `rejectClosedAuthEndpoints` pass `getServerEnv()` to
+  `isSessionPastLifetime`. Until a fork carries them, its handoff sessions
+  still roll forever, and disabling its app on the kit signs no one out,
+  because the kit finds a handoff session by its token.
+
 ### Changed
 
 - **Organization permissions.** `admin.orgs.manage` gates an organization's
@@ -68,6 +82,18 @@ For a deployment running 2.0.0.
   (`403`, audited). An org admin could claim `crm` before the superadmin
   registering the real satellite, who then got `409` (I-01). Existing apps
   keep their names.
+
+### Security
+
+- A session an SSO handoff opens ends `SSO_SESSION_LIFETIME_HOURS` (default
+  8) after the handoff, however active, so a user blocked on the primary, or
+  whose app was disabled there, goes back through a launch that refuses them.
+  It used to roll forever, and the satellite docs' "8 h revocation lag" did not
+  hold for anyone still using the app. Disabling or deleting an enterprise app
+  now also ends the handoff sessions for it that the primary's database holds
+  (a satellite on that database) and expires its handoffs in flight; the audit
+  row counts them in `metadata.endedSsoSessions` (F-82). A satellite fork gets
+  both only once it ports the change (the fork-port list above).
 
 ### Fixed
 

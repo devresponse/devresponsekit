@@ -3,6 +3,22 @@ import { setSessionCookie } from "better-auth/cookies";
 import type { BetterAuthPlugin } from "better-auth";
 import { z } from "zod";
 import { isBanActive } from "@/lib/ban-status";
+import { ssoSessionTokenPrefix } from "@/lib/session-lifetime";
+
+/**
+ * A fresh session token for a handoff into `applicationId` (F-82): the
+ * application's prefix (`sso.<hex id>.`, see `ssoSessionTokenPrefix`) and 32
+ * random bytes in hex, more entropy than Better Auth's own 32 letters and
+ * digits. Only letters, digits and dots: the token is a signed cookie's value,
+ * where `.` precedes the signature (the parser splits on the LAST one), and the
+ * admin plugin joins it with `:` to remember an impersonator's own session.
+ */
+export function ssoSessionToken(applicationId: string): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let random = "";
+  for (const byte of bytes) random += byte.toString(16).padStart(2, "0");
+  return `${ssoSessionTokenPrefix(applicationId)}${random}`;
+}
 
 /**
  * Server-only Better Auth plugin that lets the SSO consume route
@@ -36,6 +52,14 @@ import { isBanActive } from "@/lib/ban-status";
  *   - The session cookie is signed and set through Better Auth's own
  *     `setSessionCookie`, so attributes (httpOnly, secure, sameSite,
  *     maxAge) stay consistent with every other sign-in path.
+ *   - The session's token is {@link ssoSessionToken}'s, not the vendor's
+ *     random one (F-82): it names the application the handoff was for. That
+ *     mark is how `isSessionPastLifetime` ends the session
+ *     `SSO_SESSION_LIFETIME_HOURS` after the handoff, however active (it used
+ *     to roll forever like any other), and how disabling or deleting the app
+ *     on the primary finds the sessions it opened wherever the primary shares
+ *     the session store (`endSsoHandoffsOfApplication`). The satellite forks
+ *     copy this file: port the token with `session-lifetime.ts`.
  */
 export const ssoSession = () => {
   return {
@@ -47,6 +71,10 @@ export const ssoSession = () => {
           method: "POST",
           body: z.object({
             userId: z.string().min(1),
+            // F-82: the application the verified handoff was FOR (the consume
+            // route's own `SSO_HANDOFF_APPLICATION_ID`, which the token's
+            // `targetApplicationId` was checked against).
+            applicationId: z.string().min(1),
           }),
           metadata: {
             SERVER_ONLY: true,
@@ -65,7 +93,14 @@ export const ssoSession = () => {
             throw new APIError("FORBIDDEN", { message: "user is banned" });
           }
 
-          const session = await ctx.context.internalAdapter.createSession(user.id);
+          // F-82: `overrideAll` is what lets the token through. Without it
+          // Better Auth spreads the override BEFORE its own random token.
+          const session = await ctx.context.internalAdapter.createSession(
+            user.id,
+            false,
+            { token: ssoSessionToken(ctx.body.applicationId) },
+            true,
+          );
           if (!session) {
             throw new APIError("INTERNAL_SERVER_ERROR", { message: "failed to create session" });
           }

@@ -55,7 +55,7 @@ These decisions are final.
 | GitHub | Do not restrict by GitHub organization/team membership. |
 | New user status | New non-seed users start as `pending_approval` under the platform-default sign-up policy; each organization's runtime policy can instead auto-activate, require invitations, or auto-approve verified email domains. |
 | Admin approval | Required before secure app access under the default policy; invitations and policy-driven activation bypass the queue (docs/auth-signup-policy.md). |
-| Session duration | 8-hour rolling session, 15-minute update interval, no remember-me option. |
+| Session duration | 8-hour rolling session, 15-minute update interval, no remember-me option. A session opened by an SSO handoff ends 8 hours after the handoff however active (`SSO_SESSION_LIFETIME_HOURS`, F-82). |
 | Route protection | Use both `proxy.ts` and `[locale]/(secure)/layout.tsx`. |
 | Post-login redirect | Use safe localized `returnTo` captured before sign-in. |
 | Post-logout redirect | Redirect to localized branded logged-out page. |

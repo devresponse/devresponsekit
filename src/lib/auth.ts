@@ -619,11 +619,12 @@ export const auth = betterAuth({
   // (`/api/auth/admin/*`) is closed. The app only ever reaches the plugin via
   // server-side `auth.api.*` calls (headers, never `request`), which this
   // hook lets through; real HTTP requests to `/admin/*` get 404. The same hook
-  // ends a session past `SESSION_ABSOLUTE_LIFETIME_HOURS` or the one-hour
-  // impersonation cap with a 401 before any endpoint can honour or refresh it
-  // (F-54), and confines an IMPERSONATED session to `/get-session` and
-  // `/sign-out` (IMP-3, deny-by-default since F-06). Policy and rationale live
-  // in `auth-admin-surface.ts`.
+  // ends a session past `SESSION_ABSOLUTE_LIFETIME_HOURS`, the one-hour
+  // impersonation cap or, for a session an SSO handoff opened,
+  // `SSO_SESSION_LIFETIME_HOURS` (F-82) with a 401 before any endpoint can
+  // honour or refresh it (F-54), and confines an IMPERSONATED session to
+  // `/get-session` and `/sign-out` (IMP-3, deny-by-default since F-06). Policy
+  // and rationale live in `auth-admin-surface.ts`.
   //
   // F-10: after a successful "sign out my other sessions" (the password form's
   // `revokeOtherSessions`, `/revoke-other-sessions`), the single `after` hook

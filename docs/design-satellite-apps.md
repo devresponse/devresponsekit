@@ -158,12 +158,25 @@ main app's *own* session instead of minting its own. Two facets:
 | Shared secret | **none** — verifies EdDSA tokens (≤60s) against the primary's public JWKS | same | **full `BETTER_AUTH_SECRET`** (long-lived sessions) |
 | Blast radius if a satellite is compromised | contained to that app **only** under its own DB role and on a host outside the primary's `COOKIE_DOMAIN` (§3.2); otherwise **platform-wide**, as C | same as A | **platform-wide** (cookie + secret + sessions) |
 | Coupling to the main app | stable JWT claim contract | JWT contract | **tight** — `auth` schema shape + Better Auth version |
-| Revocation | ≤8h lag (or instant via local `status`) | ≤8h lag | **instant, central** |
+| Revocation | ≤8h lag: a handoff session ends 8h after its handoff, however active (`SSO_SESSION_LIFETIME_HOURS`); instant via local `status` | ≤8h lag, as A | **instant, central** |
 | Multi-tenant exposure | only the token's claims | token's claims | **whole `auth` user/role graph** (must self-scope) |
 | Failure/resource domain | isolated (separate DB) | same as A | **shared instance** (pool/blast contention) |
 | Local kill-switch | yes (`status`) | no | central (revoke in primary) |
 | UX | one-time handoff bounce | one-time bounce | **seamless, zero redirect** |
 | Best when | mixed-trust deployable app, under its own DB role and domain (§3.2) | ultra-thin viewer, same conditions | **first-party, co-trusted fleet, same team** |
+
+**Revocation lag (F-82).** The handoff session carries its application in its
+token and ends `SSO_SESSION_LIFETIME_HOURS` (default 8) after the handoff
+whatever its activity, so the ≤8h above is a bound: the next launch re-checks
+the user and the app on the primary. It used to roll like any other session,
+refreshed every 15 minutes of use, which made the lag unbounded for an active
+user. Disabling or deleting the enterprise app on the primary ends those
+sessions at once only where the primary can see them, that is, on a satellite
+that keeps its sessions in the primary's database and schema; a satellite with
+its own session store keeps them until the bound. A fork has the bound and the
+sweep only once it ports F-82 (the CHANGELOG's fork-port list): until then, as
+for the `devresponseapps` forks today, its handoff sessions roll, the ≤8h does
+not hold, and disabling its app signs no one out.
 
 **A vs B nuance.** B isn't free of app fields — it just relocates them. The moment
 you want persisted locale or a local `status`, B forces either Better Auth
@@ -303,6 +316,7 @@ and keeps any app-only tables in its own schema.
 | Enterprise-app row | registers the satellite: `origin`, `sso_audience = devresponse-app:apps` | — (issuer-only) |
 | `SSO_ALLOWED_ORIGIN_SUFFIXES` | must cover the subdomain | — |
 | `BETTER_AUTH_SECRET` / `DATABASE_URL` | its own | its own (separate) |
+| `SSO_SESSION_LIFETIME_HOURS` | — | optional; a handoff session ends this many hours after its handoff (default 8, F-82) |
 
 Session cookies are **per-subdomain** (not shared on a parent domain) — the
 handoff is the bridge, so the model needs no shared cookie domain. That holds
@@ -372,7 +386,8 @@ The full step-by-step is in [Appendix A](#appendix-a--fork-playbook).
 
 ### Source references (in DevResponseKit)
 
-- `src/lib/auth-sso-session.ts` — the `ssoSession` plugin (requires the user to exist)
+- `src/lib/auth-sso-session.ts` — the `ssoSession` plugin (requires the user to exist; marks the session with the application, F-82)
+- `src/lib/session-lifetime.ts` — the session bounds, among them the handoff session's `SSO_SESSION_LIFETIME_HOURS`
 - `src/app/api/sso/consume/route.ts` — GET verify → confirm → POST burn + session
 - `src/lib/sso.server.ts` — launch-side nonce insert + `consumeSsoHandoffNonce`
 - `src/lib/jwt-handoff.server.ts` — `signSsoHandoff` / `verifySsoHandoff`
@@ -469,6 +484,11 @@ P1 — Strip (delete)
 P2 — Rewire auth (the core work)
 - src/lib/auth.ts: reduce to betterAuth({ database, secret, baseURL, trustedOrigins,
   session:{expiresIn:8h,updateAge:15m}, plugins:[ssoSession(), nextCookies()] }).
+  Keep src/lib/session-lifetime.ts and its check in getCurrentSession and the
+  Better Auth hooks.before (rejectClosedAuthEndpoints): the session ssoSession
+  opens carries its application in its token and ends SSO_SESSION_LIFETIME_HOURS
+  (default 8) after the handoff however active (F-82), which is what bounds
+  revocation lag.
   Remove emailAndPassword, socialProviders, emailVerification, account linking,
   databaseHooks (provisioning), admin plugin.
 - src/lib/auth-status.ts + auth-guard.ts: collapse getUserAccessContext to a minimal
@@ -506,10 +526,12 @@ P4 — DB, env, deps, deploy, CI
   preferred_locale/status as Better Auth additionalFields only if you actually need them —
   that couples them to the vendor table). Pick one BEFORE writing the migration; A is
   recommended unless the app will persist zero per-user state and the IdP is the sole
-  authority (accepting up-to-8h session lag on revocation).
+  authority (accepting up to SSO_SESSION_LIFETIME_HOURS, default 8h, of session
+  lag on revocation).
 - src/lib/env.ts + .env.example: reduce to NEXT_PUBLIC_APP_NAME, NEXT_PUBLIC_APP_URL,
   NEXT_PUBLIC_PRODUCTION_HOST, BETTER_AUTH_SECRET, BETTER_AUTH_URL, DATABASE_URL, DB_SCHEMA,
   SSO_HANDOFF_ISSUER, SSO_HANDOFF_AUDIENCE_PREFIX, SSO_HANDOFF_APPLICATION_ID, SSO_HANDOFF_TTL_SECONDS,
+  SSO_SESSION_LIFETIME_HOURS (optional, default 8),
   ADMIN_TRUSTED_ORIGINS (= main app origin) — NO SSO_HANDOFF_PRIVATE_KEY (a satellite
   verifies against the main app's /api/sso/jwks.json and holds no key). Drop all
   API_*/MCP_*/EMAIL_*/social/SENTRY_*/METRICS_*/retention vars.

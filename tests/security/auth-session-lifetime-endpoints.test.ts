@@ -3,6 +3,7 @@ import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin } from "better-auth/plugins";
 import { ADMIN_PLUGIN_OPTIONS, rejectClosedAuthEndpoints } from "@/lib/auth-admin-surface";
+import { ssoSession } from "@/lib/auth-sso-session";
 import type * as EnvModule from "@/lib/env";
 
 /**
@@ -18,17 +19,24 @@ import type * as EnvModule from "@/lib/env";
  * but `/sign-out` and answers 401, except where the endpoint serves a
  * signed-out caller (`SESSIONLESS_PATHS`: a sign-in, an emailed link), which
  * then proceeds signed out. The one-hour impersonation cap (F-08) is the same
- * kind of bound on the same endpoints and goes through the same rule.
+ * kind of bound on the same endpoints and goes through the same rule, and so
+ * (F-82) is the lifetime of a session an SSO handoff opened.
  *
  * BEHAVIORAL: a real `betterAuth` instance on the memory adapter with the app's
  * hook and admin options, driven through `auth.handler` (the function the Next
  * catch-all mounts). The cap is read from `getServerEnv()`, stubbed per test.
  */
 
-const lifetime = vi.hoisted(() => ({ hours: undefined as number | undefined }));
+const lifetime = vi.hoisted(() => ({
+  hours: undefined as number | undefined,
+  ssoHours: undefined as number | undefined,
+}));
 vi.mock("@/lib/env", async (importOriginal) => ({
   ...(await importOriginal<typeof EnvModule>()),
-  getServerEnv: () => ({ SESSION_ABSOLUTE_LIFETIME_HOURS: lifetime.hours }),
+  getServerEnv: () => ({
+    SESSION_ABSOLUTE_LIFETIME_HOURS: lifetime.hours,
+    SSO_SESSION_LIFETIME_HOURS: lifetime.ssoHours,
+  }),
 }));
 const logServerError = vi.fn();
 vi.mock("@/lib/observability/logger.server", () => ({
@@ -61,7 +69,7 @@ function makeAuth(store: Store) {
     // fresh cookie: the "rolled forward" half of the finding is observable.
     session: { updateAge: 0 },
     hooks: { before: rejectClosedAuthEndpoints },
-    plugins: [admin(ADMIN_PLUGIN_OPTIONS)],
+    plugins: [admin(ADMIN_PLUGIN_OPTIONS), ssoSession()],
   });
 }
 
@@ -140,6 +148,7 @@ async function setup() {
 
 beforeEach(() => {
   lifetime.hours = undefined;
+  lifetime.ssoHours = undefined;
   logServerError.mockReset();
   auditMock.mockReset();
 });
@@ -360,5 +369,73 @@ describe("F-54 family: the one-hour impersonation cap (F-08) holds on /get-sessi
 
     expect(res.status).toBe(200);
     expect(((await res.json()) as { user: { id: string } }).user.id).toBe(memberId);
+  });
+});
+
+/**
+ * F-82: a session an SSO handoff opened used to roll forever like any other,
+ * so a user blocked on the primary, or whose app was disabled there, kept it
+ * for as long as they kept using it. It now ends `SSO_SESSION_LIFETIME_HOURS`
+ * (default 8) after the handoff, with the operator cap unset, on Better Auth's
+ * own endpoints as in the app's guards. The session is opened here exactly as
+ * the consume route opens it: `auth.api.createSsoSession`, headers, no request.
+ */
+describe("F-82: a handoff session ends a fixed time after the handoff on /api/auth/*", () => {
+  async function handoffCookie(auth: TestAuth, userId: string) {
+    const opened = await auth.api.createSsoSession({
+      body: { userId, applicationId: "portal" },
+      headers: new Headers(),
+      returnHeaders: true,
+    });
+    return cookieHeaderFrom(opened.headers);
+  }
+
+  it("/get-session: a handoff session past eight hours gets 401 and is deleted, the operator cap unset", async () => {
+    const { store, auth, memberId } = await setup();
+    const cookie = await handoffCookie(auth, memberId);
+    expect(sessionsOf(store, memberId)[0]!.token.startsWith("sso.")).toBe(true);
+    age(store, memberId, 9);
+
+    const res = await httpGet(auth, "/get-session", cookie);
+
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { code?: string }).code).toBe("SESSION_EXPIRED");
+    expect(sessionsOf(store, memberId)).toHaveLength(0);
+  });
+
+  it("a handoff session inside the lifetime is served and still rolls forward", async () => {
+    const { store, auth, memberId } = await setup();
+    const cookie = await handoffCookie(auth, memberId);
+    age(store, memberId, 7);
+
+    const res = await httpGet(auth, "/get-session", cookie);
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { user: { id: string } }).user.id).toBe(memberId);
+    expect(cookieHeaderFrom(res.headers)).toContain("session_token=");
+    expect(sessionsOf(store, memberId)).toHaveLength(1);
+  });
+
+  it("SSO_SESSION_LIFETIME_HOURS moves the bound", async () => {
+    lifetime.ssoHours = 12;
+    const { store, auth, memberId } = await setup();
+    const cookie = await handoffCookie(auth, memberId);
+    age(store, memberId, 9);
+    expect((await httpGet(auth, "/get-session", cookie)).status).toBe(200);
+
+    age(store, memberId, 12.5);
+    expect((await httpGet(auth, "/get-session", cookie)).status).toBe(401);
+    expect(sessionsOf(store, memberId)).toHaveLength(0);
+  });
+
+  it("does not touch a password sign-in session of the same age", async () => {
+    const { store, auth, memberId } = await setup();
+    const cookie = await signInCookie(auth, "member@example.com");
+    age(store, memberId, 9);
+
+    const res = await httpGet(auth, "/get-session", cookie);
+
+    expect(res.status).toBe(200);
+    expect(sessionsOf(store, memberId)).toHaveLength(1);
   });
 });

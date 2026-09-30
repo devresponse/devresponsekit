@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ssoSessionToken } from "@/lib/auth-sso-session";
+import { isSsoHandoffSession, ssoSessionTokenPrefix } from "@/lib/session-lifetime";
 
 /**
  * Review #126 — the server-only SSO session plugin must reject a user who is
@@ -18,9 +20,9 @@ vi.mock("better-auth/cookies", () => ({
 const findUserById = vi.fn();
 const createSession = vi.fn();
 
-function makeCtx(userId: string, request?: Request) {
+function makeCtx(userId: string, request?: Request, applicationId = "portal") {
   return {
-    body: { userId },
+    body: { userId, applicationId },
     context: { internalAdapter: { findUserById, createSession } },
     json: (value: unknown) => value,
     // better-call's router sets this from the incoming Request; a server-side
@@ -29,12 +31,12 @@ function makeCtx(userId: string, request?: Request) {
   };
 }
 
-async function callCreateSsoSession(userId: string, request?: Request) {
+async function callCreateSsoSession(userId: string, request?: Request, applicationId?: string) {
   const { ssoSession } = await import("@/lib/auth-sso-session");
   const endpoint = ssoSession().endpoints.createSsoSession as unknown as (
     ctx: ReturnType<typeof makeCtx>,
   ) => Promise<unknown>;
-  return endpoint(makeCtx(userId, request));
+  return endpoint(makeCtx(userId, request, applicationId));
 }
 
 beforeEach(() => {
@@ -68,7 +70,12 @@ describe("ssoSession().createSsoSession — ban handling", () => {
       banExpires: new Date(Date.now() - 60 * 60 * 1000),
     });
     await expect(callCreateSsoSession("u-1")).resolves.toEqual({ ok: true });
-    expect(createSession).toHaveBeenCalledWith("u-1");
+    expect(createSession).toHaveBeenCalledWith(
+      "u-1",
+      false,
+      { token: expect.stringMatching(/^sso\./) },
+      true,
+    );
     expect(setSessionCookie).toHaveBeenCalledTimes(1);
   });
 
@@ -115,5 +122,48 @@ describe("ssoSession().createSsoSession — server-only in the handler too (F-81
     expect(createSession).not.toHaveBeenCalled();
     expect(setSessionCookie).not.toHaveBeenCalled();
     // The server-side call shape (no Request) is served: "admits an unbanned user" above.
+  });
+});
+
+/**
+ * F-82 — the session a handoff opens names its application in its token, the
+ * one field of the vendor's row the app can set, so `isSessionPastLifetime`
+ * can end it a fixed time after the handoff (it used to roll forever), and the
+ * primary can find it when the app is disabled or deleted.
+ */
+describe("ssoSession().createSsoSession — the handoff session's token (F-82)", () => {
+  it("replaces the vendor's token with the application's prefix and 32 random bytes", async () => {
+    findUserById.mockResolvedValue({ id: "u-1", banned: false });
+    await callCreateSsoSession("u-1", undefined, "acme.crm");
+
+    const [userId, dontRememberMe, override, overrideAll] = createSession.mock.calls[0]!;
+    expect(userId).toBe("u-1");
+    expect(dontRememberMe).toBe(false);
+    // Without `overrideAll` Better Auth spreads the override before its own
+    // random token, and the mark would be lost.
+    expect(overrideAll).toBe(true);
+    const { token } = override as { token: string };
+    expect(token.startsWith(ssoSessionTokenPrefix("acme.crm"))).toBe(true);
+    expect(token.slice(ssoSessionTokenPrefix("acme.crm").length)).toMatch(/^[0-9a-f]{64}$/);
+    expect(isSsoHandoffSession({ token })).toBe(true);
+  });
+
+  it("mints a different token every time", () => {
+    const tokens = new Set(Array.from({ length: 50 }, () => ssoSessionToken("portal")));
+    expect(tokens.size).toBe(50);
+  });
+
+  it("refuses a call that names no application before touching the session store", async () => {
+    findUserById.mockResolvedValue({ id: "u-1", banned: false });
+    const { ssoSession } = await import("@/lib/auth-sso-session");
+    const endpoint = ssoSession().endpoints.createSsoSession as unknown as (
+      ctx: unknown,
+    ) => Promise<unknown>;
+    const { body: _body, ...rest } = makeCtx("u-1");
+    await expect(endpoint({ ...rest, body: { userId: "u-1" } })).rejects.toMatchObject({
+      statusCode: 400,
+    });
+    expect(findUserById).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
   });
 });

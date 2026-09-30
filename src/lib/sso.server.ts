@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "@/db/database";
 import { getServerEnv } from "@/lib/env";
 import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
+import { ssoSessionTokenPrefix } from "@/lib/session-lifetime";
 import {
   signSsoHandoff,
   clampSsoHandoffTtl,
@@ -186,4 +187,59 @@ export async function consumeSsoHandoffNonce(
     .executeTakeFirst();
   if (!row) return "unknown";
   return row.consumed_at === null ? "expired" : "replayed";
+}
+
+/**
+ * Ends the SSO handoffs of an application being disabled or deleted, as far
+ * as this deployment can see them (F-82). Disabling an app used to end
+ * nothing: a new launch was refused, but every session a handoff had already
+ * opened on the satellite kept rolling.
+ *
+ *   1. A handoff still in flight (a nonce not yet burned, ≤60 s old) is expired
+ *      first, so its consume answers `token_expired` rather than opening a
+ *      session after the sessions below are gone.
+ *   2. Every session a handoff opened for the app is deleted, found by its
+ *      token prefix (`ssoSessionTokenPrefix`, minted by `createSsoSession`).
+ *      A consumer on this deployment's database and schema keeps its sessions
+ *      in this `session` table, so its users are signed out on their next
+ *      request. A consumer with a session store of its own is out of reach:
+ *      its sessions end `SSO_SESSION_LIFETIME_HOURS` after their handoff, and
+ *      the next launch is refused. Both hold only for a consumer that mints
+ *      this token and enforces that lifetime, as the kit does: a satellite
+ *      fork gets them by porting F-82 (the CHANGELOG's fork-port list), and
+ *      until then its sessions carry Better Auth's plain token, which this
+ *      sweep never matches.
+ *
+ * The delete goes through Better Auth's adapter, as in
+ * `impersonation-sessions.server.ts`. Its `starts_with` is a `LIKE` with no
+ * escaping, which the hex prefix makes safe: it holds no `%` or `_`. Throws on
+ * failure, after the caller's change has committed. The enterprise-app route
+ * audits that change either way; a disabling save then answers 500, and
+ * saving again runs this again (every step is idempotent), while a delete,
+ * which cannot be retried, stands and leaves what this missed to the lifetime.
+ *
+ * @returns the number of sessions deleted.
+ */
+export async function endSsoHandoffsOfApplication(applicationId: string): Promise<number> {
+  // An empty id would still yield a narrow prefix (`sso..`), but a bug
+  // upstream must not reach a delete at all.
+  if (!applicationId) return 0;
+
+  await db
+    .updateTable("app_sso_handoff_nonces")
+    .set({ expires_at: new Date() })
+    .where("target_application_id", "=", applicationId)
+    .where("consumed_at", "is", null)
+    .where("expires_at", ">", new Date())
+    .execute();
+
+  // Lazy, like `revokeSessionsImpersonatedBy`: keeps the Better Auth instance
+  // (and its pool) out of the admin route's static import graph.
+  const ctx = await (await import("@/lib/auth")).auth.$context;
+  return ctx.adapter.deleteMany({
+    model: "session",
+    where: [
+      { field: "token", operator: "starts_with", value: ssoSessionTokenPrefix(applicationId) },
+    ],
+  });
 }

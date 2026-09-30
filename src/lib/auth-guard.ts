@@ -47,7 +47,8 @@ import { REQUEST_TARGET_HEADER } from "@/lib/request-id";
  *   - Absolute lifetime (review #200). The cap lives INSIDE the memoized
  *     value: `readSession` applies it, so a session past the operator cap is
  *     reported as absent (and revoked once) no matter which guard asks first.
- *     The one-hour impersonation cap (F-08) rides the same path.
+ *     The one-hour impersonation cap (F-08) and the lifetime of a handoff
+ *     session (F-82) ride the same path.
  */
 const sessionByRequestHeaders = new WeakMap<object, ReturnType<typeof readSession>>();
 
@@ -62,8 +63,9 @@ async function readSession(requestHeaders: Headers) {
   // `/get-session` rolls the row forward 8 h at a time, indefinitely.
   // Everything the borrowed shell can DO goes through this function, so this
   // is where the bound holds for the app; F-54 applies the same rule to
-  // Better Auth's own endpoints in `rejectClosedAuthEndpoints`.
-  const pastCap = isSessionPastLifetime(session, getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS);
+  // Better Auth's own endpoints in `rejectClosedAuthEndpoints`. F-82: so does
+  // the lifetime of a session an SSO handoff opened (`SSO_SESSION_LIFETIME_HOURS`).
+  const pastCap = isSessionPastLifetime(session, getServerEnv());
 
   if (!pastCap) {
     // F-07: an impersonated session is recorded against the ambient headers —
@@ -116,6 +118,11 @@ async function readSession(requestHeaders: Headers) {
  * IMPERSONATION CAP (F-08): a session carrying `impersonatedBy` is refused
  * and revoked the same way once it is an hour old
  * (`IMPERSONATION_SESSION_MAX_AGE_SECONDS`), independent of that variable.
+ *
+ * HANDOFF SESSIONS (F-82): a session an SSO handoff opened here (its token
+ * carries `SSO_SESSION_TOKEN_PREFIX`) is refused and revoked the same way once
+ * it is `SSO_SESSION_LIFETIME_HOURS` old (default 8), so the user goes back
+ * through a launch, which re-checks their access and the app on the primary.
  *
  * Memoized per request — see {@link sessionByRequestHeaders} (review #75).
  * The memo holds the CAPPED answer, so the absolute-lifetime check and its

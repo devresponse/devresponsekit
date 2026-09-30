@@ -1503,7 +1503,7 @@ The SSO-enabled application catalog (`app_enterprise_applications`).
 | --- | --- | --- |
 | `GET /enterprise-apps` | `admin.apps.read` | List the catalog |
 | `POST /enterprise-apps` | `admin.apps.manage` | `admin.app.created` |
-| `GET/PATCH/DELETE /enterprise-apps/[id]` | `.read` / `admin.apps.manage` | `admin.app.updated` / `.deleted`; a delete also removes the SSO handoff nonces the app's launches left (F-84), and may emit `.delete_blocked` |
+| `GET/PATCH/DELETE /enterprise-apps/[id]` | `.read` / `admin.apps.manage` | `admin.app.updated` / `.deleted`; a delete also removes the SSO handoff nonces the app's launches left (F-84), and may emit `.delete_blocked`; a delete, or a `PATCH` setting `status: "disabled"`, ends the app's handoff sessions (F-82, below) |
 
 `sso_audience` is what a satellite's consume route trusts, so it must be
 **unique across the catalog**: `POST` and `PATCH` refuse a value another
@@ -1528,6 +1528,31 @@ own audience. The two `409`s are what a caller with cross-org reach sees: for an
 org admin the deployment's own id and audience lie outside its org's namespace
 (unless the deployment's id is itself `<org-slug>.<name>`), so it gets the
 namespace `403` below first.
+
+**Disabling or deleting an app ends its handoff sessions (F-82).** A launch
+is refused as soon as the app is not `available`, but the sessions earlier
+handoffs opened on the satellite used to roll on. Now every `PATCH` that sets
+`status: "disabled"` (every one, not only a change, so a retry after a failure
+runs again) and every successful `DELETE` expire the app's handoffs still in
+flight and delete every session a handoff opened for it that this deployment's
+`session` table holds, found by the token prefix `createSsoSession` gives them
+(`sso.<id in hex>.`). That reaches a satellite running on this database and
+schema; a satellite with a session store of its own is out of reach, and its
+sessions end `SSO_SESSION_LIFETIME_HOURS` (default 8) after their handoff.
+Both hold only for a satellite whose consumer carries F-82: one built from
+this kit version, or a fork once it ports the change ([CHANGELOG, forks must
+port](../CHANGELOG.md#security-fixes-the-satellite-forks-must-port)). A fork
+without it, such as the `devresponseapps` forks behind the demo fleet and the
+local rig today, mints plain tokens: its handoff sessions still roll, and
+disabling or deleting its app signs no one out. The audit row's
+`metadata.endedSsoSessions` counts the sessions ended, and is `null` when the
+sweep failed. A failed sweep on a save still writes and audits the status,
+then answers `500`: save again, which sweeps again. A delete cannot be
+retried (the app is gone), so a failed sweep there does not fail it: the
+delete answers `200`, the failure is logged
+(`admin.app.sso_session_sweep_failed`), and the sessions it missed end at
+their lifetime. Disable an app before deleting it, so that the sweep that
+matters is one a save can retry.
 
 App ids and audiences are **global names** (a primary key and a UNIQUE index),
 so an org admin names its apps under its organization's slug (I-01). A caller

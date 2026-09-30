@@ -16,8 +16,16 @@
  * and since F-54 Better Auth's own `/api/auth/*` endpoints, through the
  * `hooks.before` in `auth-admin-surface.ts` ({@link isSessionPastLifetime}).
  *
+ * The bound on a session an SSO handoff opened on a consumer is NOT opt-in
+ * (F-82): such a session ends `SSO_SESSION_LIFETIME_HOURS` (default 8) after
+ * the handoff whatever its activity, so a user blocked on the primary, or whose
+ * app was disabled there, goes back through a launch that re-checks both
+ * ({@link isSsoSessionPastLifetime}).
+ *
  * Pure (its one import is the equally pure impersonation-marker reader) so the
  * rule can be unit-tested at the boundaries without standing up Better Auth.
+ * The satellite forks copy this file with `auth-sso-session.ts`, which mints
+ * the tokens {@link isSsoHandoffSession} recognises.
  */
 import { readImpersonatorId } from "@/lib/impersonation";
 
@@ -101,25 +109,120 @@ export function isImpersonationSessionPastMaxAge(
 }
 
 /**
+ * How long a session opened by an SSO handoff may live, in hours from the
+ * handoff (F-82). The env schema defaults `SSO_SESSION_LIFETIME_HOURS` to it,
+ * and {@link isSsoSessionPastLifetime} falls back to it, so a fork that ports
+ * this file without the variable still gets the bound.
+ *
+ * Eight hours is the revocation lag the satellite docs always promised for
+ * Options A and B. It did not hold: the handoff opened an ordinary rolling
+ * session, refreshed every 15 minutes of use, so a user blocked on the primary,
+ * or whose app the operator disabled, kept a separate-store satellite session
+ * for as long as they kept using it. The bound makes the next launch, which
+ * re-checks the app and the user on the primary, happen at least this often.
+ */
+export const DEFAULT_SSO_SESSION_LIFETIME_HOURS = 8;
+
+/**
+ * The first characters of every session token `createSsoSession` mints
+ * (`auth-sso-session.ts`), and of no other: Better Auth's own tokens are 32
+ * letters and digits, so none carries a dot, let alone this prefix (F-82). The
+ * token is the one field of the vendor's `session` row the app can set without
+ * a schema change, and it never changes after creation (a refresh moves only
+ * `expiresAt`), so use cannot shed the mark.
+ */
+export const SSO_SESSION_TOKEN_PREFIX = "sso.";
+
+/**
+ * The token prefix of the sessions a handoff for `applicationId` opens:
+ * `sso.<application id in lowercase hex>.` (F-82). Hex, because an application
+ * id may carry `.` and `_` (`acme.crm`, `a_b`): written plainly, `sso.acme.`
+ * would also be a prefix of `acme.crm`'s tokens, and `_` is a `LIKE` wildcard
+ * in the `starts_with` match that ends an application's sessions
+ * (`endSsoHandoffsOfApplication`). Hex digits are neither, and the closing dot
+ * ends the id.
+ */
+export function ssoSessionTokenPrefix(applicationId: string): string {
+  let hex = "";
+  for (const byte of new TextEncoder().encode(applicationId)) {
+    hex += byte.toString(16).padStart(2, "0");
+  }
+  return `${SSO_SESSION_TOKEN_PREFIX}${hex}.`;
+}
+
+/** True when the session row was opened by an SSO handoff ({@link SSO_SESSION_TOKEN_PREFIX}). */
+export function isSsoHandoffSession(session: { token?: unknown } | null | undefined): boolean {
+  return typeof session?.token === "string" && session.token.startsWith(SSO_SESSION_TOKEN_PREFIX);
+}
+
+/**
+ * True when a session opened by an SSO handoff is `lifetimeHours` old or older
+ * (F-82). A missing or non-positive `lifetimeHours` means
+ * {@link DEFAULT_SSO_SESSION_LIFETIME_HOURS}, never "no cap". Like the
+ * impersonation cap, and unlike the opt-in operator cap, it FAILS CLOSED on a
+ * creation time it cannot read: the bound exists so that such a session
+ * cannot live forever.
+ */
+export function isSsoSessionPastLifetime(
+  session: SessionAgeInput | null | undefined,
+  lifetimeHours: number | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  const hours =
+    typeof lifetimeHours === "number" && Number.isFinite(lifetimeHours) && lifetimeHours > 0
+      ? lifetimeHours
+      : DEFAULT_SSO_SESSION_LIFETIME_HOURS;
+
+  const createdAt = session?.createdAt;
+  if (createdAt === null || createdAt === undefined) return true;
+
+  const createdMs = (createdAt instanceof Date ? createdAt : new Date(createdAt)).getTime();
+  if (Number.isNaN(createdMs)) return true;
+
+  return nowMs - createdMs >= hours * 60 * 60 * 1000;
+}
+
+/** The operator settings {@link isSessionPastLifetime} reads, as `getServerEnv()` names them. */
+export interface SessionLifetimeSettings {
+  SESSION_ABSOLUTE_LIFETIME_HOURS?: number | null;
+  SSO_SESSION_LIFETIME_HOURS?: number | null;
+}
+
+/**
  * True when a resolved session (`{ session, user }`, as Better Auth returns
- * it) has outlived either bound above: the operator's absolute lifetime, or
- * the one-hour cap on an impersonation session.
+ * it) has outlived any bound above: the operator's absolute lifetime, the
+ * one-hour cap on an impersonation session, or the lifetime of a session an
+ * SSO handoff opened (F-82).
  *
  * The ONE rule both enforcement points apply (F-54): `getCurrentSession` for
  * everything the app itself serves, and the Better Auth `hooks.before`
  * (`rejectClosedAuthEndpoints`) for the vendor's own `/api/auth/*` endpoints,
  * which never pass through the app's guards and would otherwise keep honouring
- * and refreshing a session the app has already declared over.
+ * and refreshing a session the app has already declared over. Both pass
+ * `getServerEnv()` as `settings`.
  */
 export function isSessionPastLifetime(
   // `impersonatedBy` (either casing) is the admin plugin's marker; see `readImpersonatorId`.
-  session: { session: SessionAgeInput & { impersonatedBy?: unknown; impersonated_by?: unknown } },
-  absoluteLifetimeHours: number | null | undefined,
+  // `token` carries the handoff mark; see `isSsoHandoffSession`.
+  session: {
+    session: SessionAgeInput & {
+      token?: unknown;
+      impersonatedBy?: unknown;
+      impersonated_by?: unknown;
+    };
+  },
+  settings: SessionLifetimeSettings,
   nowMs: number = Date.now(),
 ): boolean {
   return (
-    isSessionPastAbsoluteLifetime(session.session, absoluteLifetimeHours, nowMs) ||
+    isSessionPastAbsoluteLifetime(
+      session.session,
+      settings.SESSION_ABSOLUTE_LIFETIME_HOURS,
+      nowMs,
+    ) ||
     (readImpersonatorId(session) !== null &&
-      isImpersonationSessionPastMaxAge(session.session, nowMs))
+      isImpersonationSessionPastMaxAge(session.session, nowMs)) ||
+    (isSsoHandoffSession(session.session) &&
+      isSsoSessionPastLifetime(session.session, settings.SSO_SESSION_LIFETIME_HOURS, nowMs))
   );
 }

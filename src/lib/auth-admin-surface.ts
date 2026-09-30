@@ -213,8 +213,9 @@ export const SESSIONLESS_PATHS: readonly string[] = [
  *   1. Admin plugin (review 2026-09-04 #3): 404, so the surface is
  *      indistinguishable from an unmounted route.
  *   2. A session past its lifetime (F-54): the operator's
- *      `SESSION_ABSOLUTE_LIFETIME_HOURS`, or the one-hour cap on an
- *      impersonation session (`isSessionPastLifetime`). The app's guards
+ *      `SESSION_ABSOLUTE_LIFETIME_HOURS`, the one-hour cap on an
+ *      impersonation session, or `SSO_SESSION_LIFETIME_HOURS` on a session an
+ *      SSO handoff opened (F-82) (`isSessionPastLifetime`). The app's guards
  *      refused such a session, but Better Auth's endpoints never pass through
  *      them, so a 30-hour-old cookie under a 24-hour cap was still served by
  *      `/get-session` (which also rolled its expiry forward), `/change-password`,
@@ -257,7 +258,7 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
     disableRefresh: true,
   });
 
-  if (session && isSessionPastLifetime(session, getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS)) {
+  if (session && isSessionPastLifetime(session, getServerEnv())) {
     // Best-effort, as in `getCurrentSession`: the 401 holds even if the delete
     // fails, and a deleted row cannot be replayed or refreshed back to life.
     let deleted = false;

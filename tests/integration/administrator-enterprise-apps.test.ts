@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as LoggerModule from "@/lib/observability/logger.server";
 import type * as AppsRouteModule from "@/app/api/administrator/enterprise-apps/route";
 import type * as AppByIdRouteModule from "@/app/api/administrator/enterprise-apps/[id]/route";
 import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
@@ -22,6 +23,9 @@ const updateExecute = vi.fn();
 const deleteExecute = vi.fn();
 /** F-84: the DELETE's statements on its transaction handle, by table. */
 const trxDeletes = vi.fn();
+/** F-82: the sweep of an app's handoff sessions (DB-backed in tests/db). */
+const endHandoffs = vi.fn();
+const logErrMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -36,6 +40,13 @@ vi.mock("@/lib/auth-status", async () => {
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
+vi.mock("@/lib/sso.server", () => ({
+  endSsoHandoffsOfApplication: (...args: unknown[]) => endHandoffs(...args),
+}));
+vi.mock("@/lib/observability/logger.server", async () => {
+  const actual = await vi.importActual<typeof LoggerModule>("@/lib/observability/logger.server");
+  return { ...actual, logServerError: (...args: unknown[]) => logErrMock(...args) };
+});
 
 vi.mock("@/db/database", () => {
   function makeChain() {
@@ -180,9 +191,12 @@ beforeEach(async () => {
     updateExecute,
     deleteExecute,
     trxDeletes,
+    endHandoffs,
+    logErrMock,
   ])
     m.mockReset();
   itemsExecute.mockResolvedValue([]);
+  endHandoffs.mockResolvedValue(0);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET, POST } = await import("@/app/api/administrator/enterprise-apps/route"));
   ({
@@ -535,6 +549,71 @@ describe("PATCH /api/administrator/enterprise-apps/:id", () => {
     expect(res.status).toBe(200);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.app.updated", outcome: "success" }),
+    );
+  });
+
+  /**
+   * F-82: disabling an app used to end nothing on the satellites; its handoff
+   * sessions kept rolling. Every save that sets `disabled` now sweeps them
+   * (idempotent, so a retry after a failed sweep sweeps again).
+   */
+  it("F-82: disabling ends the app's handoff sessions and audits how many", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue({ id: "docs", organization_id: null });
+    updateExecute.mockResolvedValue(undefined);
+    endHandoffs.mockResolvedValue(3);
+    const res = await PATCH(idReq("docs", { status: "disabled" }), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(200);
+    expect(endHandoffs).toHaveBeenCalledWith("docs");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.app.updated",
+        metadata: { id: "docs", changes: { status: "disabled" }, endedSsoSessions: 3 },
+      }),
+    );
+  });
+
+  it("F-82: a save that does not disable the app ends nothing", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue({ id: "docs", organization_id: null });
+    updateExecute.mockResolvedValue(undefined);
+    for (const body of [{ label: "Renamed" }, { status: "available" }]) {
+      const res = await PATCH(idReq("docs", body), { params: Promise.resolve({ id: "docs" }) });
+      expect(res.status).toBe(200);
+    }
+    expect(endHandoffs).not.toHaveBeenCalled();
+    for (const [row] of auditMock.mock.calls as Array<[{ metadata: object }]>) {
+      expect(row.metadata).not.toHaveProperty("endedSsoSessions");
+    }
+  });
+
+  /**
+   * F-82: the status is written before the sweep, so a failed sweep must not
+   * leave that committed change unaudited. It is audited with a null count,
+   * and the 500 tells the operator to save again, which sweeps again.
+   */
+  it("F-82: a failed sweep still audits the written status, then answers 500 so the operator retries", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue({ id: "docs", organization_id: null });
+    updateExecute.mockResolvedValue(undefined);
+    endHandoffs.mockRejectedValue(new Error("db down"));
+    const res = await PATCH(idReq("docs", { status: "disabled" }), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "internal_error" });
+    expect(updateExecute).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.app.updated",
+        outcome: "success",
+        metadata: { id: "docs", changes: { status: "disabled" }, endedSsoSessions: null },
+      }),
     );
   });
 
@@ -897,6 +976,60 @@ describe("DELETE /api/administrator/enterprise-apps/:id", () => {
     ]);
   });
 
+  it("F-82: ends the app's handoff sessions after the delete commits, and audits how many", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue({ id: "docs", label: "Docs", organization_id: null });
+    deleteExecute.mockResolvedValue(undefined);
+    endHandoffs.mockImplementation(async () => {
+      // The app and its nonces are gone first: no handoff can open a new one.
+      expect(trxDeletes).toHaveBeenCalledWith("app_enterprise_applications");
+      return 2;
+    });
+    const res = await DELETE(idReq("docs"), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(200);
+    expect(endHandoffs).toHaveBeenCalledWith("docs");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.app.deleted",
+        metadata: { id: "docs", label: "Docs", endedSsoSessions: 2 },
+      }),
+    );
+  });
+
+  /**
+   * F-82: a DELETE cannot be retried once it commits (the next one answers
+   * 404), so a failed sweep used to leave the deletion unaudited for good and
+   * its sessions unswept. The delete now stands, audited with a null count,
+   * and the failure is logged; the missed sessions end at their lifetime bound.
+   */
+  it("F-82: a failed sweep after the delete commits is logged and audited, and the delete answers 200", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue({ id: "docs", label: "Docs", organization_id: null });
+    deleteExecute.mockResolvedValue(undefined);
+    const failure = new Error("session delete timed out");
+    endHandoffs.mockRejectedValue(failure);
+    const res = await DELETE(idReq("docs"), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(200);
+    expect(trxDeletes).toHaveBeenCalledWith("app_enterprise_applications");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.app.deleted",
+        outcome: "success",
+        metadata: { id: "docs", label: "Docs", endedSsoSessions: null },
+      }),
+    );
+    expect(logErrMock).toHaveBeenCalledWith(
+      "admin.app.sso_session_sweep_failed",
+      expect.objectContaining({ err: failure, applicationId: "docs" }),
+    );
+  });
+
   it("F-84: answers 404 and audits nothing when the app is gone by the time the transaction locks it", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
@@ -911,5 +1044,6 @@ describe("DELETE /api/administrator/enterprise-apps/:id", () => {
     expect(await res.json()).toMatchObject({ error: "application_not_found" });
     expect(trxDeletes).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalled();
+    expect(endHandoffs).not.toHaveBeenCalled();
   });
 });

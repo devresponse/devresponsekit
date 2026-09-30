@@ -93,7 +93,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-LIST-S3 — As an Org Admin, I want to delete an application I no longer use, so that stale SSO targets are removed.
-  - Acceptance criteria: Given an app, launched or not, when I confirm Delete, then the row disappears, and the SSO handoff nonces its launches left are deleted with it (F-84). Only a row in some other table still referencing the app (none does today) would refuse it: then I see an inline "application in use" message and the row stays (`_enterprise-apps-grid.tsx:74`; API `DELETE` returns 409 `application_in_use`, `src/app/api/administrator/enterprise-apps/[id]/route.ts`).
+  - Acceptance criteria: Given an app, launched or not, when I confirm Delete, then the row disappears, and the SSO handoff nonces its launches left are deleted with it (F-84), and so are the sessions its launches opened on a satellite that shares this deployment's database and carries F-82 (a kit-built satellite, or a fork that has ported it; not today's `devresponseapps` forks). Only a row in some other table still referencing the app (none does today) would refuse it: then I see an inline "application in use" message and the row stays (`_enterprise-apps-grid.tsx:74`; API `DELETE` returns 409 `application_in_use`, `src/app/api/administrator/enterprise-apps/[id]/route.ts`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -169,17 +169,17 @@ i18n: labels, help text, and the required legend localize in `en` and `uk`.
 
 - Route: `/app/administrator/enterprise-apps/[appId]` · Example URL: `/en/app/administrator/enterprise-apps/acme-hub` · Code: `src/app/[locale]/(secure)/app/administrator/enterprise-apps/[appId]/page.tsx:22`
 - Purpose: View and edit a single application. The `id` is immutable (referenced by SSO handoff nonces); all other fields are inline-editable by managers.
-- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:38`,`:87`). Read-only callers see the same form disabled.
+- Guard / who can access: `admin.apps.read` to view; `admin.apps.manage` to edit (page `[appId]/page.tsx:29`,`:64`; API `GET`/`PATCH` at `src/app/api/administrator/enterprise-apps/[id]/route.ts:40`,`:90`). Read-only callers see the same form disabled.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can view/edit apps their org owns; a foreign or global app returns Not Found (404, not 403) to preserve existence indistinguishability (`[appId]/page.tsx:60`; `[id]/route.ts:71`).
-  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:147`).
+  - Org Admin -> can view/edit apps their org owns; a foreign or global app returns Not Found (404, not 403) to preserve existence indistinguishability (`[appId]/page.tsx:60`; `[id]/route.ts:73`).
+  - Superadmin -> can view/edit any app; re-homing an app to another org/global is superadmin-only (`[id]/route.ts:150`).
 - Preconditions and test data: know a valid `appId` your persona can access. For the 404 case, obtain an app id owned by a different org (as Org Admin).
 
 User stories
 
 - UAT-ADMIN-AEK-APPS-DETAIL-S1 — As an Org Admin, I want to change an app's status and label, so that I can disable or rename it without recreating it.
-  - Acceptance criteria: Given valid edits, when I Save, then a success message appears and the values persist after refresh (`_enterprise-app-settings-form.tsx:92`,`:280`).
+  - Acceptance criteria: Given valid edits, when I Save, then a success message appears and the values persist after refresh (`_enterprise-app-settings-form.tsx:92`,`:280`). Saving it as Disabled also signs out every user who reached the app through a launch, on a satellite that shares this deployment's database and carries F-82 (a kit-built satellite, or a fork that has ported it; not today's `devresponseapps` forks), and the audit row counts them in `metadata.endedSsoSessions` (F-82).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -188,6 +188,7 @@ User stories
     | 3 | Click **Save** | A success ("saved") message appears |
     | 4 | Reload the page | The new label and status are shown; the status badge reflects Disabled |
     | 5 | Confirm the **Id** cannot be edited | The id is displayed as read-only text with no input |
+    | 6 | (Needs a satellite with the F-82 consumer port on this deployment's database. The §6.6 rig of the integration guide runs the `devresponseapps` forks, which do not have it yet: mark this step N/A there.) Before step 2, launch the app from the dashboard and stay signed in on the satellite; after step 3, reload the satellite page | The satellite no longer has a session and sends you back through a launch, which is refused while the app is Disabled (F-82) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APPS-DETAIL-S2 — As a read-only admin, I want to inspect an app without being able to change it, so that least privilege holds.
@@ -212,7 +213,7 @@ User stories
 Negative and edge cases
 - Out-of-scope -> Not Found (404) for both foreign and global apps to an Org Admin.
 - Validation: editing keeps `Label`, `Origin`, `Subdomain`, `SSO audience` required (`src/lib/validation/enterprise-apps.ts:74`); bad origin surfaces `invalid_origin`/`origin_not_allowed` on the field.
-- Namespace (I-01): as Org Admin, changing **SSO audience** to one whose last `:` segment is not `<org-slug>.<name>` -> `forbidden` 403 as a root error (`[id]/route.ts:158`); saving other fields of an app named before the rule (its stored audience is re-sent unchanged) still succeeds.
+- Namespace (I-01): as Org Admin, changing **SSO audience** to one whose last `:` segment is not `<org-slug>.<name>` -> `forbidden` 403 as a root error (`[id]/route.ts:161`); saving other fields of an app named before the rule (its stored audience is re-sent unchanged) still succeeds.
 - Invalid id in URL: an id failing `APP_ID_RE` returns Not Found before any DB read (`[appId]/page.tsx:33`).
 - Concurrency: last write wins on PATCH; there is no If-Match on this form. `TODO: verify` whether stale-edit protection is expected here.
 

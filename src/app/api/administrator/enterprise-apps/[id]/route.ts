@@ -22,6 +22,8 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { canAccessOrg, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
+import { endSsoHandoffsOfApplication } from "@/lib/sso.server";
+import { logServerError } from "@/lib/observability/logger.server";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +84,8 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * stable primary key referenced by SSO handoff nonces and is therefore
  * not editable here. Caller MUST hold `admin.apps.manage`. A caller without
  * cross-org reach may change `sso_audience` only to one under its org's slug
- * (403 `forbidden`, I-01).
+ * (403 `forbidden`, I-01). Setting `status` to `disabled` also ends the app's
+ * SSO handoffs this deployment can see (F-82, `endSsoHandoffsOfApplication`).
  */
 export const PATCH = withAdminRoute(async function PATCH(
   request: NextRequest,
@@ -206,6 +209,14 @@ export const PATCH = withAdminRoute(async function PATCH(
     throw err;
   }
 
+  // F-82: disabling the app also ends the handoff sessions it opened, where
+  // this deployment's session table holds them. On every save that sets
+  // `disabled`, not only a change to it, so saving again after a failed sweep
+  // sweeps again. A failure still audits the update, which has committed
+  // (`endedSsoSessions: null`), and then answers 500 so the operator saves
+  // again.
+  const sweep = updates.status === "disabled" ? await sweepSsoHandoffs(id) : undefined;
+
   await auditEvent({
     eventType: "admin.app.updated",
     outcome: "success",
@@ -218,8 +229,13 @@ export const PATCH = withAdminRoute(async function PATCH(
     organizationId: input.organization_id ?? existing.organization_id,
     targetApplicationId: id,
     request,
-    metadata: { id, changes: input },
+    metadata: {
+      id,
+      changes: input,
+      ...(sweep === undefined ? {} : { endedSsoSessions: sweep.ended }),
+    },
   });
+  if (sweep && sweep.ended === null) throw sweep.failure;
 
   return NextResponse.json({ ok: true });
 });
@@ -228,7 +244,8 @@ export const PATCH = withAdminRoute(async function PATCH(
  * DELETE /api/administrator/enterprise-apps/:id
  *
  * Deletes an enterprise application, together with the SSO handoff nonces
- * its launches left behind (F-84). Refuses with `application_in_use` (409)
+ * its launches left behind (F-84) and the handoff sessions it opened that
+ * this deployment can see (F-82). Refuses with `application_in_use` (409)
  * only if some other row still references it; none does today.
  *
  * Caller MUST hold `admin.apps.manage`.
@@ -325,6 +342,22 @@ export const DELETE = withAdminRoute(async function DELETE(
     return adminErrorResponse("application_not_found", 404, request);
   }
 
+  // F-82: the handoff sessions the app opened go with it, like a disable
+  // (PATCH above). After the commit: the adapter has its own connection, and
+  // with the app and its nonces gone no new session can be opened for it.
+  // Unlike a save, a failed sweep cannot be retried (the app is gone, so a
+  // second DELETE answers 404), so it does not fail the delete: it is logged
+  // and audited as `endedSsoSessions: null`, and the sessions it missed end at
+  // their lifetime bound on the satellite (`SSO_SESSION_LIFETIME_HOURS`).
+  const sweep = await sweepSsoHandoffs(id);
+  if (sweep.ended === null) {
+    logServerError("admin.app.sso_session_sweep_failed", {
+      requestId: guard.requestId,
+      err: sweep.failure,
+      applicationId: id,
+    });
+  }
+
   await auditEvent({
     eventType: "admin.app.deleted",
     outcome: "success",
@@ -332,8 +365,24 @@ export const DELETE = withAdminRoute(async function DELETE(
     organizationId: existing.organization_id,
     targetApplicationId: id,
     request,
-    metadata: { id, label: existing.label },
+    metadata: { id, label: existing.label, endedSsoSessions: sweep.ended },
   });
 
   return NextResponse.json({ ok: true });
 });
+
+/**
+ * F-82: ends an app's SSO handoffs once its disable or delete has committed.
+ * A failure comes back as `ended: null` rather than a throw, so the caller
+ * still audits the change it has already made; each caller decides what the
+ * failure answers.
+ */
+async function sweepSsoHandoffs(
+  id: string,
+): Promise<{ ended: number } | { ended: null; failure: unknown }> {
+  try {
+    return { ended: await endSsoHandoffsOfApplication(id) };
+  } catch (failure) {
+    return { ended: null, failure };
+  }
+}

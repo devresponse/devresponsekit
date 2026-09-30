@@ -424,10 +424,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     // client replaying the handoff (e.g. curl) could otherwise inject it, and
     // the audit row below (which uses the same `getClientIp` model) would
     // disagree with the session (review #35 / #190).
+    //
+    // F-82: the application id marks the session as this app's handoff
+    // session, which bounds its life (`SSO_SESSION_LIFETIME_HOURS`) and lets
+    // the primary end it when the app is disabled or deleted there.
     let sessionHeaders: Headers;
     try {
       const result = await auth.api.createSsoSession({
-        body: { userId: verified.payload.sub },
+        body: { userId: verified.payload.sub, applicationId: aud.applicationId },
         headers: withTrustedClientIp(request.headers),
         returnHeaders: true,
       });

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { invalidOriginSuffixes, splitOriginSuffixList } from "@/lib/admin/origin-suffixes";
 import { isSameIdentifier } from "@/lib/api-auth/resources";
 import { parseClientIpSource } from "@/lib/client-ip-source";
+import { DEFAULT_SSO_SESSION_LIFETIME_HOURS } from "@/lib/session-lifetime";
 import {
   cookieDomainProblem,
   ed25519PrivateJwkProblem,
@@ -303,6 +304,22 @@ const serverEnvSchema = z
      * out. Typical values: 168 (7 days) to 336 (14).
      */
     SESSION_ABSOLUTE_LIFETIME_HOURS: z.coerce.number().int().positive().max(8760).optional(),
+    /**
+     * Lifetime in HOURS of a session an SSO handoff opens on this deployment
+     * as a consumer, measured from the handoff, however active (F-82). Unlike
+     * SESSION_ABSOLUTE_LIFETIME_HOURS it always applies: 8 by default, the lag
+     * the satellite docs promise between a block or an app being disabled on
+     * the primary and the satellite noticing (the next launch re-checks both).
+     * The handoff session used to roll forever. Enforced with the other bounds
+     * by `isSessionPastLifetime` (`src/lib/session-lifetime.ts`); sessions
+     * that did not come from a handoff are not affected.
+     */
+    SSO_SESSION_LIFETIME_HOURS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(8760)
+      .default(DEFAULT_SSO_SESSION_LIFETIME_HOURS),
     /**
      * Outbound email delivery provider. Unset = no delivery: every email
      * is still rendered and recorded in `app_outbox` with status `logged`

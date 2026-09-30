@@ -2,11 +2,11 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { activateMcpAgent, getMcpAgent } from "@/lib/mcp/agents.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 import { isUuid } from "@/lib/uuid";
 
 export const dynamic = "force-dynamic";

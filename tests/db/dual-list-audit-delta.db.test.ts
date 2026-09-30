@@ -34,7 +34,7 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
 });
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/http/rate-limit.server", () => ({
   DEFAULT_ADMIN_MUTATION_LIMIT: { capacity: 1000, refillMs: 1000 },
   enforceRateLimit: () => undefined,
 }));

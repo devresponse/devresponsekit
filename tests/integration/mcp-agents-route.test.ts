@@ -37,7 +37,7 @@ vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
   revokeOauthClient: (...a: unknown[]) => revokeOauthClient(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/http/rate-limit.server", () => ({
   enforceRateLimit: () => null,
   DEFAULT_ADMIN_MUTATION_LIMIT: {},
 }));
@@ -46,7 +46,7 @@ vi.mock("@/lib/admin/access-scope.server", () => ({
   canAccessOrg: () => true,
   resolveOrgScope: (...a: unknown[]) => resolveOrgScope(...a),
 }));
-vi.mock("@/lib/admin/errors.server", () => ({
+vi.mock("@/lib/http/errors.server", () => ({
   adminErrorResponse: (code: string, status: number) =>
     new Response(JSON.stringify({ error: code }), { status }),
 }));

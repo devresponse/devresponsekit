@@ -3,14 +3,14 @@ import { NextResponse } from "next/server";
 import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { getOrgAuthSettingsRow, upsertOrgAuthSettings } from "@/lib/admin/auth-settings.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { FAIL_CLOSED_AUTH_POLICY } from "@/lib/auth-policy.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { authPolicySettingsSchema } from "@/lib/validation/auth-policy";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

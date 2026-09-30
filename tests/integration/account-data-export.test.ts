@@ -77,7 +77,7 @@ beforeEach(async () => {
   for (const m of [requireAccountUser, auditMock, buildUserDataExport]) m.mockReset();
   requireAccountUser.mockResolvedValue({ ok: true, actor: ACTOR });
   buildUserDataExport.mockResolvedValue(DOC);
-  const { __resetRateLimitForTests } = await import("@/lib/admin/rate-limit.server");
+  const { __resetRateLimitForTests } = await import("@/lib/http/rate-limit.server");
   __resetRateLimitForTests();
   ({ GET } = await import("@/app/api/account/export/route"));
 });

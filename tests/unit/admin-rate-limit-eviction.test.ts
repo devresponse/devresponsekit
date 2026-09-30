@@ -7,7 +7,7 @@ import {
   consumeToken,
   normalizeBucketKey,
   rateLimitKey,
-} from "@/lib/admin/rate-limit.server";
+} from "@/lib/http/rate-limit.server";
 
 /**
  * Review #223 — the in-memory bucket store's eviction policy.

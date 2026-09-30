@@ -3,10 +3,10 @@ import { NextResponse } from "next/server";
 import { requireAccountUser } from "@/lib/account/guard.server";
 import { auditEvent } from "@/lib/audit.server";
 // Shared first-party JSON error envelope (P3-12).
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 import { exportCounts, exportFilename } from "@/lib/user-data/export-shape";
 import { buildUserDataExport } from "@/lib/user-data/export.server";
 

@@ -1,7 +1,7 @@
 import "server-only";
 import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
-import { DEFAULT_DOCS_ASSET_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_DOCS_ASSET_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { decideSecureAccess } from "@/lib/auth-status";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";

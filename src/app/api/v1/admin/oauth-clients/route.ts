@@ -15,9 +15,9 @@ import {
 } from "@/lib/admin/access-scope.server";
 import { offsetFor, parseListQueryStrict } from "@/lib/admin/list-query.server";
 import { isUuid } from "@/lib/admin/user-target.server";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
 import { parseCredentialStatusParam, V1_CREDENTIAL_LIST } from "@/lib/api-auth/v1-list-contract";
-import { withV1Route } from "@/lib/route-handler.server";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

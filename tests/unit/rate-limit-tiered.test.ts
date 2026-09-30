@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fc from "fast-check";
-import type * as InMemoryModule from "@/lib/admin/rate-limit.server";
-import type * as TieredModule from "@/lib/admin/rate-limit-tiered.server";
+import type * as InMemoryModule from "@/lib/http/rate-limit.server";
+import type * as TieredModule from "@/lib/http/rate-limit-tiered.server";
 
 /**
  * `consumeSourceThenGlobal` (F-18): the per-source bucket is consulted FIRST,
@@ -19,7 +19,7 @@ import type * as TieredModule from "@/lib/admin/rate-limit-tiered.server";
  * and tests/db/rate-limit-shared.db.test.ts.
  */
 const sharedConsume = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   consumeSharedToken: (...a: unknown[]) => sharedConsume(...a),
 }));
 
@@ -42,7 +42,7 @@ function globalConsumes(): number {
 }
 
 beforeEach(async () => {
-  inMemory = await import("@/lib/admin/rate-limit.server");
+  inMemory = await import("@/lib/http/rate-limit.server");
   inMemory.__resetRateLimitForTests();
   sharedConsume
     .mockReset()
@@ -50,7 +50,7 @@ beforeEach(async () => {
       async (key: string, options: InMemoryModule.RateLimitOptions, now?: number) =>
         inMemory.consumeToken(key, options, now),
     );
-  ({ consumeSourceThenGlobal } = await import("@/lib/admin/rate-limit-tiered.server"));
+  ({ consumeSourceThenGlobal } = await import("@/lib/http/rate-limit-tiered.server"));
 });
 
 describe("consumeSourceThenGlobal (F-18)", () => {

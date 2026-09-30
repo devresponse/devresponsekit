@@ -13,7 +13,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

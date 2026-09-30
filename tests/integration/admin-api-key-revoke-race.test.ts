@@ -44,7 +44,7 @@ vi.mock("@/lib/api-auth/api-keys.server", () => ({
   revokeApiKey: (...a: unknown[]) => revokeApiKey(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/http/rate-limit.server", () => ({
   enforceRateLimit: () => null,
   DEFAULT_ADMIN_MUTATION_LIMIT: {},
 }));

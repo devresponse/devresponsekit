@@ -4,7 +4,7 @@ import { sql } from "kysely";
 import type { NextRequest } from "next/server";
 import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 import type * as PermissionsServerModule from "@/lib/admin/permissions.server";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 
 /**
@@ -90,7 +90,7 @@ vi.mock("@/lib/admin/permissions.server", async (importOriginal) => ({
   ...(await importOriginal<typeof PermissionsServerModule>()),
   requireAdminPermission: () => requireAdminMock(),
 }));
-vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
+vi.mock("@/lib/http/rate-limit.server", async (importOriginal) => ({
   ...(await importOriginal<typeof RateLimitModule>()),
   enforceRateLimit: () => undefined,
 }));

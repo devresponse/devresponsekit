@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_DOCS_ASSET_LIMIT, __resetRateLimitForTests } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_DOCS_ASSET_LIMIT, __resetRateLimitForTests } from "@/lib/http/rate-limit.server";
 import { serveSpaceAsset } from "@/lib/docs/asset-route.server";
 
 /**

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as GuardModule from "@/lib/api-auth/v1-guard.server";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 
 /**
  * Unit tests for the `/api/v1` authorization guard
@@ -28,7 +28,7 @@ vi.mock("@/lib/api-auth/resolve-caller.server", () => ({
   },
   hasBearerCredential: (...a: unknown[]) => hasBearerCredential(...a),
 }));
-vi.mock("@/lib/admin/origin-guard.server", () => ({
+vi.mock("@/lib/http/origin-guard.server", () => ({
   checkTrustedOrigin: (...a: unknown[]) => checkTrustedOrigin(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
@@ -36,7 +36,7 @@ const preAuthLog = vi.fn();
 vi.mock("@/lib/observability/pre-auth-refusal.server", () => ({
   logPreAuthRefusal: (...a: unknown[]) => preAuthLog(...a),
 }));
-vi.mock("@/lib/admin/request-id.server", () => ({
+vi.mock("@/lib/http/request-id.server", () => ({
   getOrCreateRequestId: () => "req-1",
   REQUEST_ID_HEADER: "x-request-id",
 }));
@@ -47,7 +47,7 @@ vi.mock("@/lib/observability/metrics.server", () => ({
 }));
 // The bucket is replaced; the 429 renderer (`rateLimitedProblemResponse`,
 // which counts the denial, F-130) is the real one.
-vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
+vi.mock("@/lib/http/rate-limit.server", async (importOriginal) => ({
   ...(await importOriginal<typeof RateLimitModule>()),
   consumeToken: (...a: unknown[]) => consumeToken(...a),
   rateLimitKey: (scope: string, id: string) => `${scope}:${id}`,

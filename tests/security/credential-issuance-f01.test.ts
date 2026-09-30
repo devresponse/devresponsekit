@@ -146,7 +146,7 @@ beforeEach(async () => {
     plaintext: "drk_live_y.SECRET",
   });
   revokeApiKey.mockResolvedValue(true);
-  const rl = await import("@/lib/admin/rate-limit.server");
+  const rl = await import("@/lib/http/rate-limit.server");
   rl.__resetRateLimitForTests();
 });
 afterEach(() => vi.resetModules());

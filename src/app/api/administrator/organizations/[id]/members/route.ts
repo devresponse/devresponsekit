@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { isUniqueViolation } from "@/db/pg-errors";
 import { auditOrgAction, auditUserAction } from "@/lib/admin/audit-helpers.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import {
   likeContains,
   applySortAndPagination,
@@ -18,7 +18,7 @@ import {
 import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
 import { loadScopedOrg } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import {
   isSuperadmin,
   wouldStripLastGlobalSuperuser,
@@ -43,7 +43,7 @@ import {
   unheldOnMembershipRemoval,
 } from "@/lib/admin/membership-grants.server";
 import { refuseOutrankingTarget } from "@/lib/admin/user-target.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 import { MEMBERSHIP_STATUS_VALUES } from "@/lib/status-values";
 
 export const dynamic = "force-dynamic";

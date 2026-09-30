@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import {
   likeContains,
   applySortAndPagination,
@@ -14,7 +14,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

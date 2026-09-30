@@ -41,11 +41,11 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return { ...actual, getUserAccessContext: (id: string) => getUserAccessContext(id) };
 });
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+vi.mock("@/lib/http/rate-limit.server", () => ({
   consumeToken: () => ({ ok: true }),
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
 }));
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   consumeSharedToken: async () => ({ ok: true }),
 }));
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({

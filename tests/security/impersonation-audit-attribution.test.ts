@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
-import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
+import type * as InMemoryLimiter from "@/lib/http/rate-limit.server";
 import type * as UserTargetModule from "@/lib/admin/user-target.server";
 
 /**
@@ -135,9 +135,9 @@ vi.mock("@/lib/api-auth/api-keys.server", () => ({
 // Resolved per call rather than captured by the factory: `vi.resetModules`
 // keeps mocked modules cached, so a captured limiter would be an earlier
 // test's instance and its buckets invisible to `bucketKeys()`.
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   enforceSharedRateLimit: async (...a: Parameters<typeof InMemoryLimiter.enforceRateLimit>) =>
-    (await import("@/lib/admin/rate-limit.server")).enforceRateLimit(...a),
+    (await import("@/lib/http/rate-limit.server")).enforceRateLimit(...a),
 }));
 
 /** A chainable query stub that records `values()` / `set()` and answers reads from `reads`. */
@@ -233,7 +233,7 @@ const insertsInto = (table: string) =>
   writes.inserts.filter((i) => i.table === table).map((i) => i.values);
 
 async function bucketKeys(): Promise<string[]> {
-  const { __rateLimitBucketKeysForTests } = await import("@/lib/admin/rate-limit.server");
+  const { __rateLimitBucketKeysForTests } = await import("@/lib/http/rate-limit.server");
   return __rateLimitBucketKeysForTests();
 }
 

@@ -5,11 +5,11 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { likeContains } from "@/lib/admin/list-query.server";
-import { DEFAULT_ADMIN_BULK_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_BULK_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { mayActivateAgents } from "@/lib/admin/service-account";
 import { isUuid } from "@/lib/admin/user-target.server";
 import {
@@ -19,7 +19,7 @@ import {
   type BulkUserOutcome,
   type BulkUserTarget,
 } from "@/lib/admin/user-actions.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 import { APP_USER_STATUS_VALUES } from "@/lib/status-values";
 
 export const dynamic = "force-dynamic";

@@ -24,7 +24,7 @@ const originCheck = vi.fn();
 
 // The CSRF origin guard short-circuits under NODE_ENV=test, so it is mocked
 // here to drive the deny path (its matching logic has its own unit suite).
-vi.mock("@/lib/admin/origin-guard.server", () => ({
+vi.mock("@/lib/http/origin-guard.server", () => ({
   checkTrustedOrigin: (...a: unknown[]) => originCheck(...a),
 }));
 

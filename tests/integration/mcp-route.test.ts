@@ -48,8 +48,8 @@ vi.mock("@/lib/api-auth/jwt.server", () => ({
 // the rest of the limiter), every key it takes is recorded, and `shared.deny`
 // makes it refuse outright.
 const shared = vi.hoisted(() => ({ keys: [] as string[], deny: false }));
-vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
-  const { consumeToken } = await import("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit-shared.server", async () => {
+  const { consumeToken } = await import("@/lib/http/rate-limit.server");
   return {
     consumeSharedToken: async (key: string, options: never, nowMs?: number) => {
       shared.keys.push(key);
@@ -59,7 +59,7 @@ vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
   };
 });
 
-import { __resetRateLimitForTests } from "@/lib/admin/rate-limit.server";
+import { __resetRateLimitForTests } from "@/lib/http/rate-limit.server";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { GET, POST } from "@/app/api/mcp/route";
 

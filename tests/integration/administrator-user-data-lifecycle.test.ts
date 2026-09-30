@@ -135,7 +135,7 @@ beforeEach(async () => {
   requiresSuperadminMock.mockResolvedValue(false);
   superuserGrantMock.mockResolvedValue(false);
   revokeCredentialsMock.mockResolvedValue({ apiKeyIds: [], oauthClientIds: [] });
-  const { __resetRateLimitForTests } = await import("@/lib/admin/rate-limit.server");
+  const { __resetRateLimitForTests } = await import("@/lib/http/rate-limit.server");
   __resetRateLimitForTests();
 });
 afterEach(() => vi.resetModules());

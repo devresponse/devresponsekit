@@ -5,7 +5,7 @@ import type * as InvitationsRoute from "@/app/api/administrator/organizations/[i
 import type * as InvitationByIdRoute from "@/app/api/administrator/organizations/[id]/invitations/[invitationId]/route";
 import type * as ResendRoute from "@/app/api/administrator/organizations/[id]/invitations/[invitationId]/resend/route";
 import type * as MailBudgetModule from "@/lib/admin/admin-mail-budget.server";
-import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
+import type * as InMemoryLimiter from "@/lib/http/rate-limit.server";
 import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
@@ -61,10 +61,10 @@ vi.mock("@/lib/email/send.server", () => ({
 }));
 // No database here: the shared bucket is answered by the in-memory limiter
 // (the same 429 envelope), after recording the call.
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   enforceSharedRateLimit: async (...a: Parameters<typeof InMemoryLimiter.enforceRateLimit>) => {
     sharedLimitMock(...a);
-    return (await import("@/lib/admin/rate-limit.server")).enforceRateLimit(...a);
+    return (await import("@/lib/http/rate-limit.server")).enforceRateLimit(...a);
   },
 }));
 vi.mock("@/lib/admin/admin-mail-budget.server", async () => {

@@ -7,8 +7,8 @@ import {
   rateLimitKey,
   rateLimitedProblemResponse,
   type RateLimitResult,
-} from "@/lib/admin/rate-limit.server";
-import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
+} from "@/lib/http/rate-limit.server";
+import { consumeSourceThenGlobal } from "@/lib/http/rate-limit-tiered.server";
 import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
@@ -17,8 +17,8 @@ import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 import { mintAccessToken, type TokenCredentialRef } from "@/lib/api-auth/jwt.server";
 import { audienceForResource, resolveRequestedResource } from "@/lib/api-auth/resources";
 import { normalizeScopes, scopesAuthorize } from "@/lib/api-auth/scopes";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
-import { withV1Route } from "@/lib/route-handler.server";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

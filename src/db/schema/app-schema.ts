@@ -378,7 +378,7 @@ export interface AppRevokedTokensTable {
 /**
  * Shared token buckets for the pre-auth rate-limit floors (migration 0006,
  * review #98). Written ONLY by the single refill-and-consume statement in
- * `lib/admin/rate-limit-shared.server.ts` (raw SQL: the bucket math must run
+ * `lib/http/rate-limit-shared.server.ts` (raw SQL: the bucket math must run
  * inside `ON CONFLICT DO UPDATE`); typed here so the opportunistic prune and
  * the DB tests can read/delete through Kysely. `tokens` is `numeric` and
  * arrives as a string from pg.

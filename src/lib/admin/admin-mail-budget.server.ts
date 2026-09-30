@@ -7,8 +7,8 @@ import {
   rateLimitDeniedResponse,
   rateLimitKey,
   type RateLimitOptions,
-} from "@/lib/admin/rate-limit.server";
-import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
+} from "@/lib/http/rate-limit.server";
+import { consumeSharedToken } from "@/lib/http/rate-limit-shared.server";
 import { humanActorFor } from "@/lib/impersonation-attribution.server";
 
 /**

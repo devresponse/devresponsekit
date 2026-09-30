@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as RequestIdModule from "@/lib/request-id";
-import type * as AdminRequestIdModule from "@/lib/admin/request-id.server";
+import type * as AdminRequestIdModule from "@/lib/http/request-id.server";
 
 /**
  * Request-id provenance (review #99, #224).
@@ -44,7 +44,7 @@ beforeEach(async () => {
   delete process.env.TRUSTED_PROXY_COUNT;
   delete process.env.CLIENT_IP_SOURCE;
   mod = await import("@/lib/request-id");
-  adminMod = await import("@/lib/admin/request-id.server");
+  adminMod = await import("@/lib/http/request-id.server");
 });
 afterEach(() => {
   delete process.env.TRUSTED_PROXY_COUNT;

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as GrantableModule from "@/lib/admin/grantable-permissions.server";
 
@@ -117,8 +117,8 @@ vi.mock("@/db/database", () => ({
   },
 }));
 
-vi.mock("@/lib/admin/rate-limit.server", async () => {
-  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit.server", async () => {
+  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/http/rate-limit.server");
   return actual;
 });
 
@@ -171,7 +171,7 @@ beforeEach(async () => {
   // bound never refuses unless a test builds the shape.
   heldByOrg.mockResolvedValue(new Map<string, Set<string>>());
   dbExecuteResult = [];
-  const rl = await import("@/lib/admin/rate-limit.server");
+  const rl = await import("@/lib/http/rate-limit.server");
   rl.__resetRateLimitForTests();
 });
 afterEach(() => vi.resetModules());

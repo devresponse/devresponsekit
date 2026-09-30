@@ -9,7 +9,7 @@ import {
   rateLimitKey,
   type RateLimitOptions,
   type RateLimitResult,
-} from "@/lib/admin/rate-limit.server";
+} from "@/lib/http/rate-limit.server";
 import { humanActorFor } from "@/lib/impersonation-attribution.server";
 import { logger } from "@/lib/observability/logger.server";
 import { rateLimitSharedFallbacksTotal } from "@/lib/observability/metrics.server";

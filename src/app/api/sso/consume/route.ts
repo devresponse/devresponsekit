@@ -7,15 +7,15 @@ import { clientIpKey, withTrustedClientIp } from "@/lib/client-ip";
 import { consumeSsoHandoffNonce, type SsoNonceConsumeResult } from "@/lib/sso.server";
 import { verifySsoHandoff, type VerifiedSsoHandoff } from "@/lib/jwt-handoff.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import { DEFAULT_SSO_CONSUME_LIMIT } from "@/lib/admin/rate-limit.server";
-import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/http/request-id.server";
+import { checkTrustedOrigin } from "@/lib/http/origin-guard.server";
+import { DEFAULT_SSO_CONSUME_LIMIT } from "@/lib/http/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/http/rate-limit-shared.server";
 import { logServerError } from "@/lib/observability/logger.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { captureServerError } from "@/lib/observability/server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

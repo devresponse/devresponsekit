@@ -9,8 +9,8 @@ import {
 } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
-import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
-import { withV1Route } from "@/lib/route-handler.server";
+import { problemResponse, v1JsonResponse } from "@/lib/http/problem";
+import { withV1Route } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

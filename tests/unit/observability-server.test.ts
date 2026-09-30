@@ -13,8 +13,8 @@ const isEnabled = vi.hoisted(() => vi.fn(() => true));
 vi.mock("@sentry/nextjs", () => ({ captureException, isEnabled }));
 
 import { captureServerError } from "@/lib/observability/server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { problemResponse } from "@/lib/api-auth/problem";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { problemResponse } from "@/lib/http/problem";
 
 beforeEach(() => {
   captureException.mockReset();

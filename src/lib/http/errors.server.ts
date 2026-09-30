@@ -1,6 +1,6 @@
 import "server-only";
 import { NextResponse } from "next/server";
-import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { captureServerError } from "@/lib/observability/server";
 import { logServerError } from "@/lib/observability/logger.server";
 

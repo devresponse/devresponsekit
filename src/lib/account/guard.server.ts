@@ -1,8 +1,8 @@
 import "server-only";
 import { type NextRequest, type NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { checkTrustedOrigin } from "@/lib/http/origin-guard.server";
 import { type UserAccessContext } from "@/lib/auth-status";
 import { decideSecureAccess } from "@/lib/auth-status";
 import {
@@ -11,7 +11,7 @@ import {
   type CallerKind,
 } from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
-import { problemResponse } from "@/lib/api-auth/problem";
+import { problemResponse } from "@/lib/http/problem";
 import type { ApiKeyOrgConfinement } from "@/lib/api-auth/api-keys.server";
 import type { CallerSource } from "@/lib/api-auth/issuance-fence.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";

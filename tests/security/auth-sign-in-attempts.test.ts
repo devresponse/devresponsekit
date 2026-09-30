@@ -10,8 +10,8 @@ import {
   signInAttempts,
   signInEmailDigest,
 } from "@/lib/auth-sign-in-attempts";
-import { __resetRateLimitForTests } from "@/lib/admin/rate-limit.server";
-import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
+import { __resetRateLimitForTests } from "@/lib/http/rate-limit.server";
+import type * as InMemoryLimiter from "@/lib/http/rate-limit.server";
 import { __resetMetricsForTests, rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 
 /**
@@ -35,8 +35,8 @@ import { __resetMetricsForTests, rateLimitDenialsTotal } from "@/lib/observabili
 
 const clock = vi.hoisted(() => ({ now: Date.UTC(2026, 8, 26, 12, 0, 0) }));
 const sharedMock = vi.hoisted(() => ({ fail: false }));
-vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
-  const memory = await vi.importActual<typeof InMemoryLimiter>("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit-shared.server", async () => {
+  const memory = await vi.importActual<typeof InMemoryLimiter>("@/lib/http/rate-limit.server");
   return {
     consumeSharedToken: vi.fn(async (key: string, options: InMemoryLimiter.RateLimitOptions) => {
       if (sharedMock.fail) throw new RangeError("limiter fault");

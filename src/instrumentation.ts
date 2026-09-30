@@ -80,7 +80,7 @@ export async function register() {
  *
  * F-29: this hook no longer sees a throw from an admin, first-party or v1
  * route handler. Those are exported through `withAdminRoute` / `withV1Route`
- * (`lib/route-handler.server.ts`), which catch the throw and answer a
+ * (`lib/http/route-handler.server.ts`), which catch the throw and answer a
  * `500 internal_error` envelope logged as `admin.internal_error` /
  * `v1.internal_error` under the id the response header and the audit rows
  * carry. What still arrives here (a page or server-component render, a

@@ -36,7 +36,7 @@ vi.mock("@/lib/observability/pre-auth-refusal.server", () => ({
 // branch inside requireAdminPermission is only reachable through a mock
 // (review #122 — the untrusted-origin denial path had no coverage).
 const originCheck = vi.fn();
-vi.mock("@/lib/admin/origin-guard.server", () => ({
+vi.mock("@/lib/http/origin-guard.server", () => ({
   checkTrustedOrigin: (...a: unknown[]) => originCheck(...a),
 }));
 

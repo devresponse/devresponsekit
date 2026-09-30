@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as TrustedOriginsModule from "@/lib/trusted-origins";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
+import { checkTrustedOrigin } from "@/lib/http/origin-guard.server";
 
 /**
  * Full-branch coverage for the admin CSRF origin guard (§4). The default test

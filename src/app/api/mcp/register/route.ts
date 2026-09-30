@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
-import { recordRateLimitDenial } from "@/lib/admin/rate-limit.server";
-import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
+import { recordRateLimitDenial } from "@/lib/http/rate-limit.server";
+import { consumeSourceThenGlobal } from "@/lib/http/rate-limit-tiered.server";
 import { auditEvent } from "@/lib/audit.server";
 import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
@@ -15,7 +15,7 @@ import {
 } from "@/lib/mcp/registration";
 import { registerMcpAgent } from "@/lib/mcp/registration.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
-import { withClientRegistrationRoute } from "@/lib/route-handler.server";
+import { withClientRegistrationRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

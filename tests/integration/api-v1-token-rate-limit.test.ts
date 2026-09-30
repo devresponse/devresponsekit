@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
-import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as RateLimitModule from "@/lib/http/rate-limit.server";
 import type * as MetricsModule from "@/lib/observability/metrics.server";
 import { meteredBody } from "../helpers/request-body";
 
@@ -68,15 +68,15 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return { ...actual, getUserAccessContext: (id: string) => getUserAccessContext(id) };
 });
-vi.mock("@/lib/admin/rate-limit.server", async () => {
-  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+vi.mock("@/lib/http/rate-limit.server", async () => {
+  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/http/rate-limit.server");
   limiterMetrics.counter = (
     await vi.importActual<typeof MetricsModule>("@/lib/observability/metrics.server")
   ).rateLimitDenialsTotal;
   consumeToken.mockImplementation(actual.consumeToken);
   return { ...actual, consumeToken: (...a: unknown[]) => consumeToken(...a) };
 });
-vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+vi.mock("@/lib/http/rate-limit-shared.server", () => ({
   consumeSharedToken: async (...a: unknown[]) => consumeToken(...a),
 }));
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
@@ -142,7 +142,7 @@ beforeEach(async () => {
     getUserAccessContext,
   ])
     m.mockReset();
-  const rl = await import("@/lib/admin/rate-limit.server");
+  const rl = await import("@/lib/http/rate-limit.server");
   rl.__resetRateLimitForTests();
   consumeToken.mockClear();
   const metrics = await import("@/lib/observability/metrics.server");

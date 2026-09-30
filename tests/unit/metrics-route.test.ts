@@ -12,7 +12,7 @@ vi.mock("@/lib/env", () => ({
 }));
 
 import { GET } from "@/app/api/metrics/route";
-import { __resetRateLimitForTests, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { __resetRateLimitForTests, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { __resetMetricsForTests, registry } from "@/lib/observability/metrics.server";
 
 /**

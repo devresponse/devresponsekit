@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

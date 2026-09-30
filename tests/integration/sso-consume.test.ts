@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ConsumeRouteModule from "@/app/api/sso/consume/route";
-import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
+import type * as InMemoryLimiter from "@/lib/http/rate-limit.server";
 import { NextRequest } from "next/server";
 import { errors as joseErrors } from "jose";
 import type { BetterAuthOptions } from "better-auth";
@@ -65,8 +65,8 @@ const shared = vi.hoisted(() => ({
   keys: [] as string[],
   limiter: undefined as undefined | typeof InMemoryLimiter,
 }));
-vi.mock("@/lib/admin/rate-limit-shared.server", () => {
-  const limiter = async () => (shared.limiter ??= await import("@/lib/admin/rate-limit.server"));
+vi.mock("@/lib/http/rate-limit-shared.server", () => {
+  const limiter = async () => (shared.limiter ??= await import("@/lib/http/rate-limit.server"));
   return {
     consumeSharedToken: async (
       key: string,
@@ -88,7 +88,7 @@ vi.mock("@/lib/admin/rate-limit-shared.server", () => {
 // POST's origin-denied branch (403 + `denied` audit) was dead under the whole
 // suite. Mock it (default: allow) so the deny path can be driven explicitly.
 const originCheck = vi.fn();
-vi.mock("@/lib/admin/origin-guard.server", () => ({
+vi.mock("@/lib/http/origin-guard.server", () => ({
   checkTrustedOrigin: (...args: unknown[]) => originCheck(...args),
 }));
 

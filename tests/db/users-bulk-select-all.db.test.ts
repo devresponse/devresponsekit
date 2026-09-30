@@ -37,7 +37,7 @@ vi.mock("@/lib/auth-status", async () => {
 
 const { db, pgPool } = await import("@/db/database");
 const { MAX_BULK_IDS } = await import("@/lib/admin/bulk-limits");
-const { __resetRateLimitForTests } = await import("@/lib/admin/rate-limit.server");
+const { __resetRateLimitForTests } = await import("@/lib/http/rate-limit.server");
 const bulkUsers = await import("@/app/api/administrator/users/bulk/route");
 
 const PREFIX = "__dbtest_s11_";

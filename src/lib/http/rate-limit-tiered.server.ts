@@ -3,8 +3,8 @@ import {
   rateLimitKey,
   type RateLimitOptions,
   type RateLimitResult,
-} from "@/lib/admin/rate-limit.server";
-import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
+} from "@/lib/http/rate-limit.server";
+import { consumeSharedToken } from "@/lib/http/rate-limit-shared.server";
 
 /**
  * Two-tier PRE-AUTH floor (F-18): a per-source bucket (the trusted client IP)

@@ -3,10 +3,10 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { userHasActiveMembership } from "@/lib/active-org.server";
 import { setActiveOrgCookie } from "@/lib/active-org-cookie";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
-import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
+import { checkTrustedOrigin } from "@/lib/http/origin-guard.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/http/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/http/rate-limit-shared.server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { readImpersonatorId } from "@/lib/impersonation";
@@ -14,7 +14,7 @@ import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server
 import { consumeInvitation, findValidInvitationByToken } from "@/lib/invitations.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { acceptInvitationSchema } from "@/lib/validation/invitations";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 
 export const dynamic = "force-dynamic";
 

@@ -6,7 +6,7 @@ import type { AppEnterpriseApplicationsTable } from "@/db/schema/app-schema";
 import { isForeignKeyViolation } from "@/db/pg-errors";
 import { updateEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
 import { auditEvent } from "@/lib/audit.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { adminErrorResponse } from "@/lib/http/errors.server";
 import {
   APP_ID_RE,
   isAllowedEnterpriseOrigin,
@@ -18,10 +18,10 @@ import {
 } from "@/lib/admin/enterprise-apps-audience.server";
 import { appNamesOutsideOrgNamespace } from "@/lib/admin/enterprise-apps-namespace.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/http/rate-limit.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { canAccessOrg, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
-import { withAdminRoute } from "@/lib/route-handler.server";
+import { withAdminRoute } from "@/lib/http/route-handler.server";
 import { endSsoHandoffsOfApplication } from "@/lib/sso.server";
 import { logServerError } from "@/lib/observability/logger.server";
 

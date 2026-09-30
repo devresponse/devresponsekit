@@ -5,7 +5,7 @@ import {
   consumeToken,
   enforceRateLimit,
   rateLimitKey,
-} from "@/lib/admin/rate-limit.server";
+} from "@/lib/http/rate-limit.server";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 
 // `enforceRateLimit` lazy-imports `auditEvent` on the deny path; intercept it.

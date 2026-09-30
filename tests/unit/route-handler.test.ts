@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { notFound } from "next/navigation";
 
 /**
- * F-29: the request-id chokepoint (`src/lib/route-handler.server.ts`).
+ * F-29: the request-id chokepoint (`src/lib/http/route-handler.server.ts`).
  *
  * The wrapper must (1) mint the id before the handler runs, so the handler's
  * own `getOrCreateRequestId(request)` calls (guard grant, audit rows, error
@@ -22,8 +22,8 @@ import {
   withClientRegistrationRoute,
   withMcpRoute,
   withV1Route,
-} from "@/lib/route-handler.server";
-import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+} from "@/lib/http/route-handler.server";
+import { getOrCreateRequestId } from "@/lib/http/request-id.server";
 import { InvalidListQueryError, parseListQuery } from "@/lib/admin/list-query.server";
 import { logServerError } from "@/lib/observability/logger.server";
 import { captureServerError } from "@/lib/observability/server";

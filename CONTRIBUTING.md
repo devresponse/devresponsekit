@@ -114,7 +114,29 @@ changes as new numbered, append-only, idempotent forward migrations
 (`NNNN-*.sql`, numbered after the highest file in `src/db/migrations/`, so
 `0003-…` next); the runner applies and ledgers them.
 Production applies a migration by hand **before** the PR that needs it merges
-(see [README → Deployment](README.md#deployment)).
+(see [README → Deployment](README.md#deployment)); a production build whose
+migration is missing fails at the schema gate and is not promoted.
+
+Old code runs on the new schema (the live build while the migration runs, any
+deployment an Instant Rollback restores, every satellite on the shared
+database), so a migration **expands first and contracts later**: in the same
+release as the code, only add (tables, nullable or defaulted columns,
+non-unique indexes, functions, grants); drop or rename only in a later
+release, once nothing reads the old object; add `NOT NULL` with a default or a
+fill trigger; add a check or foreign key `NOT VALID` and validate it later.
+`tests/unit/migration-compat-guard.test.ts` enforces this on every core file
+from `0003` on. A statement that drops, renames, revokes or tightens needs a
+marker on the line directly above it, with a reason of at least 20 characters:
+
+```sql
+-- compat: contract — <why the live build, rolled-back builds and satellites are unaffected; the release that removed the last reader>
+-- compat: expand — <why no older writer can trip this NOT NULL / unique index / backfill>
+```
+
+`CONCURRENTLY`, `VACUUM`, transaction control, a `create table`,
+`create index`, `create schema` or `add column` without `if not exists`, and a
+`create function` without `or replace` are refused with or without one. The full rule is
+[docs/deployment.md → Compatibility: expand, then contract](docs/deployment.md#compatibility-expand-then-contract).
 
 ## Security
 

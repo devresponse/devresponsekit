@@ -87,6 +87,17 @@ For a deployment running 2.0.0.
    The satellites are unaffected on any database, a brand-new one included:
    their readiness probe checks only that the database answers and Better
    Auth's schema, not `app_schema_migrations`, and they ship no migrations.
+6. **None for the schema gate (DEP1), but know what it does.** A production
+   build now FAILS, and is not promoted, while the database lacks a
+   migration the commit needs; apply it and redeploy. The gate reads only
+   what production already sets (`DATABASE_URL`, `DB_SCHEMA`,
+   `DB_SEARCH_PATH_VIA_OPTIONS`), polls for ten minutes, and the previous
+   deployment keeps serving meanwhile
+   ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
+   After the merge, the production build log shows `[deploy-gate] verify`,
+   `[deploy-gate] target … runtime=owner` and `[deploy-gate] PASS`. Never
+   set `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE` in Vercel. Break-glass is
+   reverting the commit that added the gate.
 
 ### Security fixes the satellite forks must port
 
@@ -104,6 +115,33 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Added
 
+- **A schema gate in every Vercel production build (DEP1).** `vercel.json`
+  makes `pnpm run vercel-build` the build: `next build`, then
+  `scripts/deploy-gate.ts`, which connects with the build's own
+  `DATABASE_URL` and exits non-zero unless the ledger holds every id in
+  `REQUIRED_CORE_MIGRATIONS` at this commit's checksums and Better Auth's
+  migrator has nothing to add. It never writes. It polls every 10 s for
+  `DEPLOY_GATE_WAIT_MS` (default ten minutes), fails at once on a checksum
+  mismatch, skips preview builds without connecting, and prints the
+  database it checked (`[deploy-gate] target host=… database=… schema=…
+  user=… runtime=owner|non-owner`, never a password). Vercel does not
+  promote a failed build, so code can no longer go live ahead of its
+  schema. `pnpm build` is unchanged, so CI and the Docker image do not run
+  it. See [docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations).
+- **The expand/contract rule, and a guard on new core migrations (DEP1).**
+  [docs/deployment.md → Compatibility: expand, then contract](docs/deployment.md#compatibility-expand-then-contract)
+  states what a migration must leave working (the live build, any build an
+  Instant Rollback restores, every satellite).
+  `tests/unit/migration-compat-guard.test.ts` reads every core file from
+  `0003` on and refuses statements that cannot run in the runner's
+  transaction or are not idempotent, and drops, renames, revokes, `NOT NULL`,
+  unique indexes, constraints without `NOT VALID` and data changes that
+  carry no `-- compat: contract|expand — <reason>` marker.
+- **Better Auth's required columns are pinned (DEP1).**
+  `tests/unit/better-auth-required-columns.test.ts` fails when a
+  better-auth upgrade adds a `NOT NULL` column with no default, whose
+  23502 window would break older builds, and says to add it with a
+  default one release earlier.
 - **Data-subject export and erasure (F-151).** A user downloads their own
   data as JSON from Account → Overview (`GET /api/account/export`); an
   administrator holding the new `admin.users.export` permission downloads a
@@ -126,6 +164,17 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Changed
 
+- **drk-deploy treats a gated git integration as safe, and tells its own
+  build what it migrated (DEP1).** `deploy` and `up` no longer refuse a kit
+  project that Vercel deploys on every push when the checkout's build runs
+  the schema gate (`DEPLOYS PRODUCTION, gated`, with a warning); a
+  satellite keeps the F-49 refusal. After migrating, they pass the commit
+  they migrated from to `vercel build --prod` as
+  `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE`, and `deploy.yml` does the same, so
+  the gate skips a build it cannot check from there. With
+  `--skip-migrations` nothing is passed and the gate refuses; the failure's
+  hint says to drop the flag if the gate's line ends the build log. See
+  [vercel-cli/README.md → DEP1](vercel-cli/README.md#dep1-the-kits-build-runs-a-schema-gate).
 - **Two core migrations (MIG).** `src/db/migrations/` holds two core files:
   the unchanged baseline `0001-initial-schema.sql`, and `0002-release.sql`,
   the seven files `0002`…`0008` concatenated verbatim in order, each between

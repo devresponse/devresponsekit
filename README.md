@@ -60,13 +60,16 @@ build, and deploying a fully functional instance — see the canonical docs in
 ## Deployment
 
 Production ships through **Vercel's Git integration**: every push to `main` is
-built and promoted automatically. Vercel does not run migrations, so the
-ordering is a standing **operator gate** — a pull request that adds a database
-migration is applied to production **first** (`pnpm db:app:migrate` against the
-production direct/unpooled `DATABASE_URL`, and `pnpm db:auth:migrate` when
-`better-auth-schema.sql` changed), and merged **second**. Merging first
-promotes a build that expects a schema the database does not have; the tell is
-`GET /api/health/ready` answering **503 `schema_behind`**.
+built automatically, and promoted only if the build's last step, the schema
+gate (`scripts/deploy-gate.ts`), finds the production database holding every
+migration that commit needs. Vercel does not run migrations, so the ordering is
+a standing **operator gate** — a pull request that adds a database migration is
+applied to production **first** (`pnpm db:app:migrate` against the production
+direct/unpooled `DATABASE_URL`, and `pnpm db:auth:migrate` when
+`better-auth-schema.sql` changed), and merged **second**. Merging first now
+fails that build (after polling ten minutes for the migration) and leaves the
+previous deployment serving, instead of promoting a build that expects a
+schema the database does not have.
 
 Two tools automate that order instead. [`vercel-cli/`](vercel-cli/README.md)
 (`drk-deploy`) does migrate → build → promote → verify from your machine and

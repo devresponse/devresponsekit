@@ -140,9 +140,24 @@ export function vercelEnvFor(
  * every dependency included, which inherits whatever the Vercel CLI was
  * given. The token is account-wide, so a compromised build dependency holding
  * it could decrypt and deploy every project the account reaches.
+ *
+ * `migratedCommit` is the commit this run has just migrated production from,
+ * after the target was checked against production (F-47, F-49). The kit's
+ * build runs its schema gate (DEP1, `scripts/deploy-gate.ts`), which cannot
+ * check production's database from here: `vercel pull` returns a sensitive
+ * DATABASE_URL as `[SENSITIVE]`. So the build is told, as
+ * DEPLOY_GATE_PREBUILT_AFTER_MIGRATE, and the gate honours it only off
+ * Vercel's build machines and only when it equals the commit being built.
+ * A run that migrated nothing (`--skip-migrations`) removes the variable
+ * rather than inheriting one, and the gate then refuses unless it can check
+ * the database itself.
  */
-export function buildEnv(env: VercelEnv["env"]): VercelEnv["env"] {
-  return { ...env, VERCEL_TOKEN: undefined };
+export function buildEnv(env: VercelEnv["env"], options: { migratedCommit?: string } = {}): VercelEnv["env"] {
+  return {
+    ...env,
+    VERCEL_TOKEN: undefined,
+    DEPLOY_GATE_PREBUILT_AFTER_MIGRATE: options.migratedCommit || undefined,
+  };
 }
 
 /** Where `vercel link` records the project a checkout is linked to. */

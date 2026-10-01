@@ -135,10 +135,14 @@ warrant a comms channel and an owner before deep debugging.
   auth, and keeps answering `schema_behind`, after the database is fixed. New
   instances start clean. Re-curl `/api/health/ready` for `200`.
 - Root cause is the deploy path: see [deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)
-  — Vercel's git integration promotes every push to `main` and cannot migrate,
-  so a migration must be applied to production **before** its branch merges.
-  That includes a change to `src/db/migrations/better-auth-schema.sql`. That
-  is the operator gate, and skipping it is how this 503 happens.
+  — Vercel's git integration builds every push to `main` and cannot migrate,
+  so a migration must be applied to production before its build goes live.
+  That includes a change to `src/db/migrations/better-auth-schema.sql`. Since
+  DEP1 every production build runs a schema gate that holds such a build back
+  instead ([Production build failed at `[deploy-gate]`](#production-build-failed-at-deploy-gate)),
+  so this 503 means a deployment reached production without a passing gate:
+  a preview deployment promoted to production, a build from before the gate,
+  or a host with no gate (the Docker image).
 
 ### Config invalid (`/api/health/ready` → 503 `config_invalid`, or 500 everywhere)
 - F-26: the environment is validated when the server starts. On `next start`
@@ -684,6 +688,61 @@ outbox drain used up the tick's budget before retention started: check its
 `kind: "outbox-drain"` line and the email provider. On any other host, schedule
 **`pnpm db:prune`** (`scripts/prune-retention.ts`). See
 [Deployment](./deployment.md).
+
+### Production build failed at `[deploy-gate]`
+
+Every Vercel production build ends with the schema gate (DEP1,
+[deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
+A failed one was **not promoted**: the previous deployment is still serving, so
+this is never an outage. The build log's last `[deploy-gate]` line says why;
+the `target …` line above it names the database, schema and login it checked.
+Once fixed, **Redeploy** the failed deployment from Vercel's Deployments page,
+or push again.
+
+- **`FAIL behind: the ledger lacks <ids>`** — the commit needs a migration
+  production has not applied. Apply it against the **direct** endpoint:
+  `pnpm db:app:migrate` (and `pnpm db:auth:migrate` for a Better Auth change),
+  or `drk-deploy migrate`, then redeploy. Within the gate's wait
+  (`DEPLOY_GATE_WAIT_MS`, default 10 minutes) the build would have passed by
+  itself. `Better Auth table(s)/column(s)/index(es) missing` is the same with
+  `pnpm db:auth:migrate`. `search_path resolves to X, not DB_SCHEMA Y` means
+  the schema does not exist yet (run both migrators), or, on a pooled
+  endpoint with `DB_SEARCH_PATH_VIA_OPTIONS=0`, the login's role-level
+  `search_path` default is missing or wrong
+  ([deployment.md §5](./deployment.md#5-operations--gotchas)). `no migration
+  ledger` is a database never migrated; `the runtime role cannot read the
+  ledger` means the login lacks `SELECT` on `app_schema_migrations`.
+- **`FAIL fatal: the database holds a different version of <id> than this
+  build`** — an applied migration file was changed in what it does (the same
+  check as `[migrate] checksum mismatch`, above). Waiting cannot fix it, so the
+  gate stops at once. Restore the file: applied migrations are frozen, and the
+  change belongs in a new numbered file. `FAIL fatal: Better Auth: …` is a
+  better-auth upgrade whose schema change Better Auth itself calls unsafe (a
+  required column with no default on a populated table) or a column the
+  database requires that Better Auth does not know: review the upgrade against
+  [Compatibility: expand, then contract](./deployment.md#compatibility-expand-then-contract).
+  `FAIL fatal: the server environment is invalid (<keys>)` names production
+  variables the app refuses at boot: fix them in Vercel (Configuration). Any
+  other `fatal` carries the database's own error, such as a failed password.
+- **`FAIL unreachable: <error>`** — no check reached the database before the
+  deadline (a cold start or a blip is retried every 10 seconds). Check the
+  provider's status, and that production's `DATABASE_URL` is right, then
+  redeploy.
+- **`FAIL timeout`** — a check hung past every connection and query timeout,
+  and the gate cut it off a minute after its wait. Treat it as `unreachable`.
+- **`REFUSE …`** — the gate would not check at all: `DATABASE_URL is not set`
+  (or not a postgres URL) for the production environment;
+  `VERCEL_ENV is missing on a Vercel build` (enable **Automatically expose
+  System Environment Variables** under Project → Settings → Environment
+  Variables); `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE is not honoured on Vercel
+  build infrastructure` (delete that variable from the project: only
+  `drk-deploy` and `deploy.yml` set it, for their own local builds); or a
+  malformed `DEPLOY_GATE_WAIT_MS`. A **local** `vercel build --prod` refused
+  with `DATABASE_URL is [SENSITIVE]` was run without migrating first: drop
+  `--skip-migrations` from `drk-deploy`.
+
+There is no switch to turn the gate off. If the gate itself is wrong, revert
+the commit that added it; that revert's build runs no gate.
 
 ## Known risks & missing information
 

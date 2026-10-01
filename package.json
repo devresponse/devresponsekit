@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "next build && tsx scripts/deploy-gate.ts",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -24,6 +25,7 @@
     "db:reset": "tsx src/db/reset-database.ts",
     "db:reset:reload": "tsx src/db/reset-database.ts --yes --reload",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
+    "deploy:gate": "tsx scripts/deploy-gate.ts",
     "db:prune": "tsx --conditions=react-server scripts/prune-retention.ts",
     "outbox:drain": "tsx --conditions=react-server scripts/drain-outbox.ts",
     "mcp:reap": "tsx --conditions=react-server scripts/reap-mcp-registrations.ts",

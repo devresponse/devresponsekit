@@ -393,15 +393,44 @@ export function describeCommit(state: TreeState): string {
 /*  The other deployer: Vercel's git integration                       */
 /* ------------------------------------------------------------------ */
 
-/** A checkout's `vercel.json`, or null when it has none or it is not JSON. */
-export function readVercelJson(root: string): unknown {
-  const file = join(root, "vercel.json");
+/** A JSON file at the checkout's root, or null when it is missing or not JSON. */
+function readRootJson(root: string, name: string): unknown {
+  const file = join(root, name);
   if (!existsSync(file)) return null;
   try {
     return JSON.parse(readFileSync(file, "utf8")) as unknown;
   } catch {
     return null;
   }
+}
+
+/** A checkout's `vercel.json`, or null when it has none or it is not JSON. */
+export function readVercelJson(root: string): unknown {
+  return readRootJson(root, "vercel.json");
+}
+
+/** A checkout's `package.json`, or null when it has none or it is not JSON. */
+export function readPackageJson(root: string): unknown {
+  return readRootJson(root, "package.json");
+}
+
+/** The build command the kit's `vercel.json` names, which runs its schema gate (DEP1). */
+export const GATED_BUILD_COMMAND = "pnpm run vercel-build";
+/** What the kit's `vercel-build` script runs after `next build`. */
+export const SCHEMA_GATE_SCRIPT = "scripts/deploy-gate.ts";
+
+/**
+ * Does every Vercel build of this checkout run the kit's schema gate (DEP1)?
+ * Yes when `vercel.json` makes `pnpm run vercel-build` the build command (which
+ * wins over the dashboard's and over any package script) and the checkout's
+ * `vercel-build` script runs `scripts/deploy-gate.ts`. That gate fails a
+ * production build whose database lacks a migration the commit needs, and
+ * Vercel does not promote a failed build. Satellite checkouts have no gate.
+ */
+export function hasSchemaGate(vercelJson: unknown, packageJson: unknown): boolean {
+  const command = (vercelJson as { buildCommand?: unknown } | null)?.buildCommand;
+  const script = (packageJson as { scripts?: Record<string, unknown> } | null)?.scripts?.["vercel-build"];
+  return command === GATED_BUILD_COMMAND && typeof script === "string" && script.includes(SCHEMA_GATE_SCRIPT);
 }
 
 /**
@@ -416,8 +445,17 @@ export function readVercelJson(root: string): unknown {
  * name), or an Ignored Build Step of `exit 0`, which skips every build. Any
  * other Ignored Build Step is a program this cannot evaluate, so it counts as
  * on, and is named so the operator can judge it.
+ *
+ * On, but `gated`, when the checkout's every build runs the kit's schema gate
+ * (DEP1, {@link hasSchemaGate}): Vercel then promotes a push only once the
+ * database holds that commit's migrations, so the push no longer wins the
+ * race. `packageJson` is the checkout's, read beside `vercelJson`.
  */
-export function productionAutoDeploy(git: ProjectGit, vercelJson: unknown): { on: boolean; why: string } {
+export function productionAutoDeploy(
+  git: ProjectGit,
+  vercelJson: unknown,
+  packageJson: unknown = null,
+): { on: boolean; gated?: boolean; why: string } {
   if (!git.repository) return { on: false, why: "no git repository is connected to the project" };
   const branch = git.productionBranch ?? "main";
   const enabled = (vercelJson as { git?: { deploymentEnabled?: unknown } } | null)?.git?.deploymentEnabled;
@@ -444,10 +482,18 @@ export function productionAutoDeploy(git: ProjectGit, vercelJson: unknown): { on
       why: `${git.repository} is connected, but its Ignored Build Step (\`exit 0\`) skips every build`,
     };
   }
+  const skipped = ignore
+    ? `, unless its Ignored Build Step (\`${ignore}\`), which this cannot evaluate, skips it`
+    : "";
+  if (hasSchemaGate(vercelJson, packageJson)) {
+    return {
+      on: true,
+      gated: true,
+      why: `${git.repository}: every push to ${branch} is built by Vercel and promoted only once its schema gate (${SCHEMA_GATE_SCRIPT}) finds the commit's migrations applied${skipped}`,
+    };
+  }
   return {
     on: true,
-    why: `${git.repository}: every push to ${branch} is built and promoted by Vercel${
-      ignore ? `, unless its Ignored Build Step (\`${ignore}\`), which this cannot evaluate, skips it` : ""
-    }`,
+    why: `${git.repository}: every push to ${branch} is built and promoted by Vercel${skipped}`,
   };
 }

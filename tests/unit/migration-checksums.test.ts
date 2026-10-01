@@ -2,10 +2,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CONSOLIDATED_CORE_MIGRATIONS,
   migrationChecksum,
   normalizeMigrationSql,
   reconcileLedgerChecksum,
 } from "@/db/migrations/migration-plan";
+import { foldedSections } from "../helpers/core-migrations";
 
 /**
  * Review #86 — applied migrations are frozen, and the runner now proves it
@@ -22,40 +24,20 @@ import {
  * bug, never a bookkeeping update. Regenerate a pin with
  * `node -e` over `migrationChecksum` only for a file that has not been
  * applied anywhere yet.
+ *
+ * MIG: `0002-release.sql` folds the seven files 0002…0008 that production
+ * ledgered one by one. Their pins live with the consolidation map in
+ * migration-plan.ts (`CONSOLIDATED_CORE_MIGRATIONS`), because the runner checks
+ * a legacy ledger against them; here each banner-delimited section of the file
+ * is hashed and must equal its pin, which proves every folded section does
+ * exactly what its file did where it was applied.
  */
 const MIGRATIONS_DIR = path.resolve(__dirname, "../../src/db/migrations");
 
 /** id → sha256 of the normalised file content. */
 const FROZEN: ReadonlyArray<[id: string, sha256: string]> = [
   ["0001-initial-schema.sql", "ced296b180c9b94e0e62e00929c3d43147ac8e7e8e20b2642c586ed0b112111b"],
-  [
-    "0002-admin-groups-permissions.sql",
-    "783862abb174ea42909c0df3a81e714bf5ead7a846867ae73f56784b3a1ee2cf",
-  ],
-  [
-    "0003-outbox-delivery-payload.sql",
-    "fdd26f801f88bc4be710d37de33b96021c14089062736848279803d427db4957",
-  ],
-  [
-    "0004-oauth-client-secret-rotated-at.sql",
-    "73f26c633f21ed2e1062002f47746aeaa45be49cb34f8989812c90442b968e30",
-  ],
-  [
-    "0005-integrity-constraints.sql",
-    "ac34b3d715be75c70ed4629a69ad84e127851e0a24c44dbedf721c3bac2ff8f4",
-  ],
-  [
-    "0006-rate-limit-buckets.sql",
-    "9b8eb96e149bf1fa4f3ae632c33237786775ede08da864910fc0b2641b237f40",
-  ],
-  [
-    "0007-uniqueness-search-indexes-token-scrub.sql",
-    "83cfadc52081321bbf06cf05d74480a482824e5d3e733e81956d6c5b70a16e19",
-  ],
-  [
-    "0008-user-data-export-erasure.sql",
-    "a30fde495d3062758e59d84ee613d7c11a08535ac3414ce85d1d0a010a0aae50",
-  ],
+  ["0002-release.sql", "0bf69a18f0c06e2ce3135e2cbab9819b08a58c72be53b8a1c0b60f9dd65ad05b"],
 ];
 
 describe("normalizeMigrationSql", () => {
@@ -116,6 +98,81 @@ describe("frozen core migrations keep their pinned sha256 (review #86)", () => {
       migrationChecksum(sql),
       `${id} changed after being applied — and not just a comment, the hash ignores those. Frozen files are never edited; put the change in a new migration.`,
     ).toBe(expected);
+  });
+});
+
+describe("0002-release.sql folds 0002…0008 verbatim (MIG)", () => {
+  const RELEASE = "0002-release.sql";
+  const sql = readFileSync(path.join(MIGRATIONS_DIR, RELEASE), "utf8");
+  const { folds } = CONSOLIDATED_CORE_MIGRATIONS[RELEASE]!;
+  const sections = foldedSections(sql);
+
+  it("has exactly one section per folded id, in the order they were applied", () => {
+    expect(sections.map((section) => section.id)).toEqual(folds.map((fold) => fold.id));
+    expect(folds.map((fold) => fold.id)).toEqual([
+      "0002-admin-groups-permissions.sql",
+      "0003-outbox-delivery-payload.sql",
+      "0004-oauth-client-secret-rotated-at.sql",
+      "0005-integrity-constraints.sql",
+      "0006-rate-limit-buckets.sql",
+      "0007-uniqueness-search-indexes-token-scrub.sql",
+      "0008-user-data-export-erasure.sql",
+    ]);
+  });
+
+  it.each(folds.map((fold) => [fold.id, fold.checksum] as const))(
+    "the %s section hashes to the checksum production ledgered for that file",
+    (id, pinned) => {
+      const section = sections.find((candidate) => candidate.id === id)!;
+      // Each folded file opened with a comment naming itself.
+      expect(section.sql.startsWith(`-- ${id}\n`)).toBe(true);
+      expect(
+        migrationChecksum(section.sql),
+        `the ${id} section of ${RELEASE} no longer does what ${id} did. Every database migrated before the consolidation has it under this checksum; restore the section.`,
+      ).toBe(pinned);
+    },
+  );
+
+  it("carries nothing executable outside its sections, so the section pins cover the whole file", () => {
+    let outside = sql;
+    for (const section of sections) outside = outside.replace(section.sql, "");
+    expect(normalizeMigrationSql(outside)).toBe("");
+    // So the file's own pin is its sections' normalised SQL, in order.
+    expect(migrationChecksum(sql)).toBe(
+      migrationChecksum(sections.map((section) => section.sql).join("\n")),
+    );
+  });
+});
+
+describe("foldedSections", () => {
+  const folded = (id: string, body: string) =>
+    `-- ===== BEGIN folded ${id} =====\n${body}-- ===== END folded ${id} =====\n`;
+
+  it("returns each section's text between its banners, byte for byte", () => {
+    const sql = `-- header\n\n${folded("0002-a.sql", "select 1;\n")}\n${folded("0003-b.sql", "-- b\nselect 2;\n")}`;
+    expect(foldedSections(sql)).toEqual([
+      { id: "0002-a.sql", sql: "select 1;\n" },
+      { id: "0003-b.sql", sql: "-- b\nselect 2;\n" },
+    ]);
+  });
+
+  it("ignores a banner that does not start its line (the file's header quotes the format)", () => {
+    expect(foldedSections("--   -- ===== BEGIN folded 0002-a.sql =====\n")).toEqual([]);
+  });
+
+  it.each([
+    ["an unclosed section", "-- ===== BEGIN folded 0002-a.sql =====\nselect 1;\n"],
+    ["an END without its BEGIN", "select 1;\n-- ===== END folded 0002-a.sql =====\n"],
+    [
+      "a mismatched END",
+      "-- ===== BEGIN folded 0002-a.sql =====\nselect 1;\n-- ===== END folded 0003-b.sql =====\n",
+    ],
+    [
+      "a nested BEGIN",
+      "-- ===== BEGIN folded 0002-a.sql =====\n-- ===== BEGIN folded 0003-b.sql =====\n",
+    ],
+  ])("throws on %s", (_label, sql) => {
+    expect(() => foldedSections(sql)).toThrow(/folded/);
   });
 });
 

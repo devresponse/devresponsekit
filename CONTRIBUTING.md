@@ -20,7 +20,7 @@ cp .env.example .env          # then edit secrets
 
 pnpm db:up                    # start PostgreSQL (docker compose)
 pnpm db:auth:migrate          # Better Auth (vendor) identity tables
-pnpm db:app:migrate           # application schema (0001 + forward migrations)
+pnpm db:app:migrate           # application schema (0001 + 0002-release + locales)
 pnpm db:seed                  # default org, baseline roles, local admin
 
 pnpm dev                      # http://localhost:3000
@@ -109,9 +109,10 @@ checks it).
 
 ## Database changes
 
-`0001-initial-schema.sql` is **frozen**. Add schema changes as new numbered,
-append-only, idempotent forward migrations (`NNNN-*.sql`, numbered after the
-highest file in `src/db/migrations/`); the runner applies and ledgers them.
+`0001-initial-schema.sql` and `0002-release.sql` are **frozen**. Add schema
+changes as new numbered, append-only, idempotent forward migrations
+(`NNNN-*.sql`, numbered after the highest file in `src/db/migrations/`, so
+`0003-…` next); the runner applies and ledgers them.
 Production applies a migration by hand **before** the PR that needs it merges
 (see [README → Deployment](README.md#deployment)).
 

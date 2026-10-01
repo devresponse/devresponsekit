@@ -63,14 +63,30 @@ For a deployment running 2.0.0.
    the old files stay in the public repository's history (added in #346,
    retaken in #347). Revoke that key on the demo if it is still active, and
    decide whether to purge the old `help/screenshots/*.png` from history.
-4. **Apply migration `0008` before the deploy.** Follow
-   [docs/deployment.md → Migration 0008](docs/deployment.md#migration-0008)
+4. **Apply migration `0008` before the deploy, from commit `79b4803`.**
+   A database on 2.0.0 is at `0007`. Since 0002…0008 became one file (item
+   5), this build's runner refuses a database that has only some of them, so
+   apply `0008` from `79b4803`, the last commit with the individual files,
+   following its runbook there (`git show 79b4803:docs/deployment.md`,
+   "Migration 0008"; the notes that remain are in
+   [docs/deployment.md → Migration 0008](docs/deployment.md#migration-0008))
    (F-151): a read-only preflight that the migrating role can write Better
-   Auth's tables and owns the audit table, the apply, and the checks. `0008`
-   is a required core migration, so until it is in the ledger
-   `GET /api/health/ready` answers `503 schema_behind`. Vercel runs no
-   migrations: apply it by hand, before the merge that needs it
+   Auth's tables and owns the audit table, the apply, and the checks. Until
+   `0008` is in the ledger this build's `GET /api/health/ready` answers
+   `503 schema_behind`. Vercel runs no migrations: apply it by hand, before
+   the merge that needs it
    ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
+5. **Core migrations consolidated: nothing to do on a database at `0008`.**
+   Production's ledger holds `0001`…`0008`, so the build is ready there as
+   it stands, and the next `pnpm db:app:migrate` only records
+   `0002-release.sql` (`[migrate] record 0002-release.sql (already applied
+   as 0002…0008)`), running none of it; the old rows stay. A database at
+   `0002`…`0007` first migrates from `79b4803` (item 4); the runner refuses
+   it until then and names what is missing
+   ([docs/deployment.md → Upgrading a database from before the consolidation](docs/deployment.md#upgrading-a-database-from-before-the-consolidation)).
+   The satellites are unaffected on any database, a brand-new one included:
+   their readiness probe checks only that the database answers and Better
+   Auth's schema, not `app_schema_migrations`, and they ship no migrations.
 
 ### Security fixes the satellite forks must port
 
@@ -110,6 +126,22 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Changed
 
+- **Two core migrations (MIG).** `src/db/migrations/` holds two core files:
+  the unchanged baseline `0001-initial-schema.sql`, and `0002-release.sql`,
+  the seven files `0002`…`0008` concatenated verbatim in order, each between
+  `-- ===== BEGIN folded <file> =====` and `-- ===== END folded <file> =====`
+  lines (the last commit with the individual files is `79b4803`). A fresh
+  install applies two core files and then the locale files, and a schema dump
+  of it is identical to one built from the seven files. Each folded section
+  still hashes to the checksum its file was ledgered under, and a test proves
+  it. A database migrated before the consolidation is recognised by its
+  seven ledger ids, whose pins moved to `CONSOLIDATED_CORE_MIGRATIONS`: the
+  runner records `0002-release.sql` there without running it (refusing a
+  database that has only some of the seven, or one under another checksum),
+  and readiness counts the seven as `0002-release.sql`. See operator
+  action 5. The "Migration 0007" and "Migration 0008" runbooks in
+  docs/deployment.md are now notes for that upgrade path; the full versions
+  are in `79b4803`.
 - **Organization permissions.** `admin.orgs.manage` gates an organization's
   members, invitations and provider bindings, as the catalog always said,
   and `admin.orgs.update` only its settings: the record and its sign-up

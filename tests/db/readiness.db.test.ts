@@ -2,7 +2,10 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type * as ReadinessRoute from "@/app/api/health/ready/route";
 import type { auth as AuthInstance } from "@/lib/auth";
-import { REQUIRED_CORE_MIGRATIONS } from "@/db/migrations/migration-plan";
+import {
+  CONSOLIDATED_CORE_MIGRATIONS,
+  REQUIRED_CORE_MIGRATIONS,
+} from "@/db/migrations/migration-plan";
 import { resolveDatabaseUrl } from "@/db/schema-config";
 
 /**
@@ -34,6 +37,10 @@ import { resolveDatabaseUrl } from "@/db/schema-config";
  *      is ready. This is why the runbook says to restart after migrating, and
  *      it fails if better-auth ever starts re-checking, which would make that
  *      step unnecessary.
+ *   5. MIG: a ledger written before 0002…0008 were consolidated into
+ *      `0002-release.sql` (the legacy ids, not the new one) is ready, through
+ *      the route's real ledger query; one holding only some of them is
+ *      `schema_behind`, with `0002-release.sql` logged as missing.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts).
  */
@@ -164,5 +171,37 @@ describe("readiness against a live Better Auth schema (F-26)", () => {
       await q(`alter table "${SCHEMA}"."session" add column "impersonatedBy" text`);
     }
     expect((await probe(await freshInstance())).status).toBe(200);
+  });
+
+  it("is ready on a pre-consolidation ledger (0001…0008, no 0002-release.sql), behind on part of it (MIG)", async () => {
+    // Production's ledger when the consolidation shipped: main auto-deploys
+    // there, so the new build must be ready on it before anyone migrates.
+    const folded = CONSOLIDATED_CORE_MIGRATIONS["0002-release.sql"]!.folds.map((f) => f.id);
+    const ledger = async (ids: string[]) => {
+      await q(`delete from "${SCHEMA}".app_schema_migrations`);
+      await admin.query(
+        `insert into "${SCHEMA}".app_schema_migrations (id) select unnest($1::text[])`,
+        [ids],
+      );
+    };
+    try {
+      await ledger(["0001-initial-schema.sql", ...folded, "locales/0000-email-templates-en.sql"]);
+      logServerError.mockClear();
+      expect(await probe(await freshInstance())).toEqual({
+        status: 200,
+        body: { status: "ready" },
+      });
+      expect(logServerError).not.toHaveBeenCalled();
+
+      await ledger(["0001-initial-schema.sql", ...folded.slice(0, 5)]);
+      logServerError.mockClear();
+      expect((await probe(await freshInstance())).status).toBe(503);
+      const call = logServerError.mock.calls.find(
+        (args) => (args[1] as { kind?: string } | undefined)?.kind === "schema-behind",
+      );
+      expect((call?.[1] as { missing: string[] }).missing).toEqual(["0002-release.sql"]);
+    } finally {
+      await ledger([...REQUIRED_CORE_MIGRATIONS]);
+    }
   });
 });

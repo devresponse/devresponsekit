@@ -1,16 +1,21 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pgPool } from "@/db/database";
+import {
+  coreMigrationSql,
+  coreMigrationsBefore,
+  readMigrationFile,
+} from "../helpers/core-migrations";
 
 /**
  * DB-BACKED proof of migration 0007-uniqueness-search-indexes-token-scrub.sql
  * (F-97, M-02, F-93, F-150), built in a SCRATCH SCHEMA on a dedicated
- * connection the way migration-0005-preflight.db.test.ts does: every core file
- * that sorts before 0007 is applied there first, plus Better Auth's generated
- * `user` and `account` tables, then 0007 runs in a transaction exactly as the
- * runner applies it.
+ * connection the way migration-0005-preflight.db.test.ts does: every core
+ * migration that came before 0007 is applied there first, plus Better Auth's
+ * generated `user` and `account` tables, then 0007 runs in a transaction
+ * exactly as the runner applied it. MIG: 0007 and its predecessors after 0001
+ * are sections of 0002-release.sql, read out of it by
+ * tests/helpers/core-migrations.ts, byte for byte the SQL production ledgered.
  *
  *   1. PREFLIGHT: with a duplicated global role key and a second default
  *      organization it refuses, names both, and changes nothing (no index, the
@@ -30,12 +35,10 @@ import { pgPool } from "@/db/database";
  */
 const SCHEMA = "__dbtest_m0007";
 const RUNTIME_ROLE = `${SCHEMA}_runtime`;
-const MIGRATIONS_DIR = path.resolve(__dirname, "../../src/db/migrations");
-const read = (file: string) => readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
 const MIGRATION = "0007-uniqueness-search-indexes-token-scrub.sql";
-const BASELINE = readdirSync(MIGRATIONS_DIR)
-  .filter((file) => /^\d{4}-.*\.sql$/.test(file) && file < MIGRATION)
-  .sort();
+const MIGRATION_SQL = coreMigrationSql(MIGRATION);
+/** The core migrations the scratch schema needs first: 0001, then 0002…0006. */
+const BASELINE = coreMigrationsBefore(MIGRATION);
 const NEW_INDEXES = [
   "idx_app_roles_global_key",
   "idx_app_organizations_single_default",
@@ -122,13 +125,13 @@ beforeAll(async () => {
   await client.query(`drop schema if exists "${SCHEMA}" cascade`);
   await client.query(`create schema "${SCHEMA}"`);
   await client.query(`set search_path to "${SCHEMA}", public`);
-  expect(BASELINE[0]).toBe("0001-initial-schema.sql");
-  expect(BASELINE).toContain("0006-rate-limit-buckets.sql");
-  for (const file of BASELINE) {
-    await applyInTransaction(read(file));
+  expect(BASELINE[0]!.id).toBe("0001-initial-schema.sql");
+  expect(BASELINE.map((m) => m.id)).toContain("0006-rate-limit-buckets.sql");
+  for (const migration of BASELINE) {
+    await applyInTransaction(migration.sql);
   }
   // Better Auth's own tables, from the generated snapshot `db:auth:migrate` applies.
-  const authSchema = read("better-auth-schema.sql");
+  const authSchema = readMigrationFile("better-auth-schema.sql");
   for (const table of ["user", "account"]) {
     const ddl = authSchema.match(new RegExp(`^create table "${table}" .*;$`, "m"));
     expect(ddl, `better-auth-schema.sql has no "${table}" table`).toBeTruthy();
@@ -181,7 +184,7 @@ describe("0007 (scratch schema)", () => {
 
     let message = "";
     try {
-      await applyInTransaction(read(MIGRATION));
+      await applyInTransaction(MIGRATION_SQL);
     } catch (err) {
       message = (err as Error).message;
     }
@@ -208,14 +211,14 @@ describe("0007 (scratch schema)", () => {
     // Without Better Auth's table the scrub is skipped with a notice, not an error.
     await client.query(`alter table "account" rename to account_parked`);
     notices.length = 0;
-    await applyInTransaction(read(MIGRATION));
+    await applyInTransaction(MIGRATION_SQL);
     expect(notices.join("\n")).toContain('Better Auth "account" table not found');
     expect(await indexesPresent()).toEqual([...NEW_INDEXES].sort());
 
     // With it, a re-run clears every stored provider token (and only those).
     await client.query(`alter table account_parked rename to "account"`);
     notices.length = 0;
-    await applyInTransaction(read(MIGRATION));
+    await applyInTransaction(MIGRATION_SQL);
     expect(notices.join("\n")).toContain("cleared stored provider tokens on 2 account row(s)");
     for (const id of ["gh", "ms"]) {
       expect(await tokensOf(id)).toMatchObject({
@@ -257,7 +260,7 @@ describe("0007 (scratch schema)", () => {
 
     // Idempotent: a third run changes nothing and raises nothing.
     notices.length = 0;
-    await applyInTransaction(read(MIGRATION));
+    await applyInTransaction(MIGRATION_SQL);
     expect(notices.join("\n")).toContain("cleared stored provider tokens on 0 account row(s)");
   });
 

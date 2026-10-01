@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as LivenessRoute from "@/app/api/health/route";
 import type * as ReadinessRoute from "@/app/api/health/ready/route";
-import { REQUIRED_CORE_MIGRATIONS } from "@/db/migrations/migration-plan";
+import {
+  CONSOLIDATED_CORE_MIGRATIONS,
+  CORE_MIGRATION_LEDGER_IDS,
+  REQUIRED_CORE_MIGRATIONS,
+} from "@/db/migrations/migration-plan";
 
 /**
  * Health probes (OPS-1):
@@ -97,21 +101,47 @@ describe("GET /api/health/ready (readiness)", () => {
     expect(query).toHaveBeenCalledTimes(1);
     const [text, params] = query.mock.calls[0] as [string, unknown[]];
     expect(text).toContain("app_schema_migrations");
-    expect(params).toEqual([REQUIRED_CORE_MIGRATIONS]);
+    // The required ids AND the ids 0002-release.sql folds (MIG): asked for
+    // the required ids alone, a database migrated before the consolidation
+    // would come back without 0002-release.sql and read as behind.
+    expect(params).toEqual([CORE_MIGRATION_LEDGER_IDS]);
+    expect(CORE_MIGRATION_LEDGER_IDS).toEqual(
+      expect.arrayContaining([...REQUIRED_CORE_MIGRATIONS]),
+    );
     // The gate is only as good as the list: 0004 (the migration production
-    // ran ahead of) MUST be in it.
-    expect(REQUIRED_CORE_MIGRATIONS).toContain("0004-oauth-client-secret-rotated-at.sql");
+    // ran ahead of) is folded into a required file.
+    expect(REQUIRED_CORE_MIGRATIONS).toContain("0002-release.sql");
+    expect(CORE_MIGRATION_LEDGER_IDS).toContain("0004-oauth-client-secret-rotated-at.sql");
+  });
+
+  it("is ready on a ledger migrated before the consolidation: 0001…0008, no 0002-release.sql (MIG)", async () => {
+    const legacy = CONSOLIDATED_CORE_MIGRATIONS["0002-release.sql"]!.folds.map((fold) => fold.id);
+    query.mockResolvedValue(ledgerRows(["0001-initial-schema.sql", ...legacy]));
+    const res = await readiness.GET();
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ status: "ready" });
+    expect(logServerError).not.toHaveBeenCalled();
+  });
+
+  it("is behind on a ledger holding only SOME of the folded ids, and logs 0002-release.sql as missing (MIG)", async () => {
+    const legacy = CONSOLIDATED_CORE_MIGRATIONS["0002-release.sql"]!.folds.map((fold) => fold.id);
+    query.mockResolvedValue(ledgerRows(["0001-initial-schema.sql", ...legacy.slice(0, 6)]));
+    const res = await readiness.GET();
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({ status: "unavailable", reason: "schema_behind" });
+    const [, fields] = logServerError.mock.calls[0] as [string, { missing: string[] }];
+    expect(fields.missing).toEqual(["0002-release.sql"]);
   });
 
   it("returns 503 + schema_behind when a required core migration is missing, naming it only in the log", async () => {
-    const missing = "0004-oauth-client-secret-rotated-at.sql";
+    const missing = "0002-release.sql";
     query.mockResolvedValue(ledgerRows(REQUIRED_CORE_MIGRATIONS.filter((id) => id !== missing)));
     const res = await readiness.GET();
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body).toEqual({ status: "unavailable", reason: "schema_behind" });
     // Non-enumerating: the response never lists migration ids...
-    expect(JSON.stringify(body)).not.toContain("0004");
+    expect(JSON.stringify(body)).not.toContain("0002");
     expect(res.headers.get("cache-control")).toBe("no-store");
     // ...but the operator sees exactly which ones are missing in the log.
     expect(logServerError).toHaveBeenCalledTimes(1);

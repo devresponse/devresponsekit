@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   APP_STATUS_VALUES,
@@ -8,6 +6,7 @@ import {
   MEMBERSHIP_STATUS_VALUES,
   ORGANIZATION_STATUSES,
 } from "@/lib/status-values";
+import { coreMigrationSql } from "../helpers/core-migrations";
 
 /**
  * Drift guard between the status CHECK constraints migration 0005 adds
@@ -25,8 +24,8 @@ import {
  * two must agree — otherwise the preflight could pass rows the CHECK then
  * rejects (or vice versa), so both are parsed.
  */
-const MIGRATION = path.resolve(__dirname, "../../src/db/migrations/0005-integrity-constraints.sql");
-const sql = readFileSync(MIGRATION, "utf8");
+// MIG: the 0005 section of 0002-release.sql, exactly what the file held.
+const sql = coreMigrationSql("0005-integrity-constraints.sql");
 
 /** table.column → the values the runtime allows. */
 const EXPECTED: ReadonlyArray<[table: string, column: string, values: readonly string[]]> = [

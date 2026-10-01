@@ -11,7 +11,7 @@ import { ADMIN_PERMISSION_CATALOG, SUPERADMIN_PERMISSION } from "@/lib/admin/per
  * TypeScript catalog, but nothing enforced it — the `admin.groups.*` keys were
  * added to the catalog without a matching migration row, leaving a
  * migrated-but-not-seeded database with no group-admin permissions (fixed by
- * `0002-admin-groups-permissions.sql`). This test parses every seeded
+ * migration 0002, now the first section of `0002-release.sql`). This test parses every seeded
  * (key, description) tuple out of the top-level core migration files and diffs
  * the union against the catalog in BOTH directions, so a new catalog entry
  * without a forward migration — or a migration-only key the runtime doesn't

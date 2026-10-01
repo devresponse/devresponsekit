@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { CONSOLIDATED_CORE_MIGRATIONS } from "@/db/migrations/migration-plan";
 
 /**
  * `.gitleaks.toml` drives the REQUIRED `gitleaks` status check
@@ -365,11 +366,21 @@ describe(".gitleaks.toml — migration filenames are not credentials (review #43
     expect(regex!.test('const clientSecret = "' + synthetic("", 32) + '";')).toBe(false);
   });
 
-  it("still describes a file that exists (no dead fence)", () => {
+  it("still describes a ledger id the kit names (no dead fence)", () => {
     const [regex] = entry!.regexes.map(goRegex);
-    const dir = path.join(ROOT, "src", "db", "migrations");
-    const named = fs.readdirSync(dir).filter((f) => f.endsWith(".sql") && regex!.test(f));
-    expect(named.length).toBeGreaterThan(0);
+    // MIG: the file is a section of 0002-release.sql now; its name lives on
+    // as a legacy ledger id, in the consolidation map and the section banners.
+    const named = Object.values(CONSOLIDATED_CORE_MIGRATIONS)
+      .flatMap(({ folds }) => folds.map((fold) => fold.id))
+      .filter((id) => regex!.test(id));
+    expect(named).toEqual(["0004-oauth-client-secret-rotated-at.sql"]);
+    const release = fs.readFileSync(
+      path.join(ROOT, "src", "db", "migrations", "0002-release.sql"),
+      "utf8",
+    );
+    expect(release).toContain(
+      "-- ===== BEGIN folded 0004-oauth-client-secret-rotated-at.sql =====",
+    );
   });
 });
 

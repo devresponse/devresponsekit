@@ -15,9 +15,10 @@ handoff.
 - **PostgreSQL + Kysely** — typed SQL for app tables; Better Auth shares
   the same `pg` pool. The application schema starts from the frozen
   `0001-initial-schema.sql` baseline, with later changes shipped as
-  append-only numbered migrations (`NNNN-*.sql`). The runner applies any
-  not-yet-recorded file in order, each in a transaction, recording it in
-  `app_schema_migrations`
+  append-only numbered migrations (`NNNN-*.sql`): today `0002-release.sql`,
+  the 1.x/2.x changes consolidated into one file, so a new database applies
+  two core files. The runner applies any not-yet-recorded file in order, each
+  in a transaction, recording it in `app_schema_migrations`
 - **Machine API** — a versioned `/api/v1` REST surface authenticated by
   API keys (`drk_…`) or Ed25519 JWT access tokens, with a published
   JWKS document, OAuth client-credentials, and an OpenAPI spec. Ships

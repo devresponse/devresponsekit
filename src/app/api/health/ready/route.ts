@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { pgPool } from "@/db/database";
-import { REQUIRED_CORE_MIGRATIONS, missingCoreMigrations } from "@/db/migrations/migration-plan";
+import { CORE_MIGRATION_LEDGER_IDS, missingCoreMigrations } from "@/db/migrations/migration-plan";
 import { betterAuthSchemaVerdict } from "@/lib/auth-schema-check.server";
 import { getServerEnv, invalidServerEnvKeys } from "@/lib/env";
 import { logServerError } from "@/lib/observability/logger.server";
@@ -16,10 +16,14 @@ type NotReadyReason = "config_invalid" | "database_unreachable" | "schema_behind
  *
  *   1. The server environment passes its schema (`getServerEnv()`).
  *   2. The database is reachable AND carries every core migration this build
- *      depends on ({@link REQUIRED_CORE_MIGRATIONS}). One fast primary-key
+ *      depends on (`REQUIRED_CORE_MIGRATIONS`). One fast primary-key
  *      lookup against the `app_schema_migrations` ledger covers both — it
  *      fails when the database is down, and comes back short when a migration
- *      is missing.
+ *      is missing. It asks for {@link CORE_MIGRATION_LEDGER_IDS}, which adds
+ *      the ids a consolidated file folds (MIG): a database migrated before
+ *      `0002-release.sql` existed holds 0002…0008 instead, and
+ *      `missingCoreMigrations` counts those as `0002-release.sql`, so the new
+ *      build is ready there before any runner has recorded it.
  *   3. Better Auth's own schema check passes: every table and column this
  *      configuration writes exists where the auth pool's `search_path`
  *      resolves (`auth-schema-check.server.ts`).
@@ -73,7 +77,7 @@ export async function GET() {
   try {
     const { rows } = await pgPool.query<{ id: string }>(
       "select id from app_schema_migrations where id = any($1::text[])",
-      [REQUIRED_CORE_MIGRATIONS],
+      [CORE_MIGRATION_LEDGER_IDS],
     );
     applied = rows.map((row) => row.id);
   } catch {

@@ -88,14 +88,14 @@ An **org-less** credential (minted with `organization_id = null`, which only an 
 
 ## 4. Database schema
 
-_Source: `src/db/migrations/0001-initial-schema.sql` and `src/db/schema/app-schema.ts`._
+_Source: `src/db/migrations/0001-initial-schema.sql`, `src/db/migrations/0002-release.sql` (the later columns and constraints) and `src/db/schema/app-schema.ts`._
 
 Three tables back the subsystem. They are created by the baseline migration and exist whether or not the feature flags are on.
 
 | Table | Purpose | Key columns |
 | --- | --- | --- |
 | `app_api_keys` | Machine API keys | `key_hash` (unique), `key_prefix`, `scopes text[]`, `status`, `expires_at`, `app_user_id`, `organization_id`, `last_used_at`/`last_used_ip`, revocation columns |
-| `app_oauth_clients` | Client-credentials principals | `client_id` (unique), `client_secret_hash`, `app_user_id` (service user), `scopes text[]`, `status`, `secret_rotated_at` (migration `0004`; retires tokens issued before a secret rotation, §6.5) |
+| `app_oauth_clients` | Client-credentials principals | `client_id` (unique), `client_secret_hash`, `app_user_id` (service user), `scopes text[]`, `status`, `secret_rotated_at` (migration `0004`, a section of `0002-release.sql`; retires tokens issued before a secret rotation, §6.5) |
 | `app_revoked_tokens` | Vestigial JWT `jti` denylist (no writer — outstanding-token revocation is the `cid` check, §6.5; kept from the frozen `0001` migration until a later core migration drops it) | `jti` (PK), `expires_at`, `revoked_at`, `reason` |
 
 Notes:

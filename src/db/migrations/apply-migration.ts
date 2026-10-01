@@ -117,6 +117,9 @@ export function createMigrationPool(timeouts: MigrationTimeouts): Pool {
   });
 }
 
+/** The one statement that writes a ledger row, inside the two helpers below only (#84). */
+const LEDGER_INSERT_SQL = "insert into app_schema_migrations (id, checksum) values ($1, $2)";
+
 /**
  * Applies ONE migration file atomically on a DEDICATED, checked-out
  * connection (review #84).
@@ -158,15 +161,34 @@ export async function applyMigrationInTransaction(
       await client.query(statement);
     }
     await client.query(migration.sql);
-    await client.query(`insert into app_schema_migrations (id, checksum) values ($1, $2)`, [
-      migration.id,
-      migration.checksum,
-    ]);
+    await client.query(LEDGER_INSERT_SQL, [migration.id, migration.checksum]);
     await client.query("commit");
   } catch (error) {
     // Never let a failing rollback mask the error that caused it — and always
     // leave the session usable (an un-rolled-back failed transaction would
     // reject every later statement with 25P02).
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Ledgers a consolidated migration WITHOUT running it (MIG): the database
+ * already holds its schema under the ids it folds
+ * (`planConsolidatedMigrations` → `record`), so only the row is written, in
+ * its own transaction on the runner's dedicated client like every other
+ * ledger write. It touches only the ledger, which no application query
+ * writes, so it runs without the per-file ceilings (F-94).
+ */
+export async function recordMigrationInTransaction(
+  client: PoolClient,
+  migration: { id: string; checksum: string },
+): Promise<void> {
+  await client.query("begin");
+  try {
+    await client.query(LEDGER_INSERT_SQL, [migration.id, migration.checksum]);
+    await client.query("commit");
+  } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;
   }

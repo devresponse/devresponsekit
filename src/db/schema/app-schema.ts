@@ -5,7 +5,8 @@ import type { ColumnType, Generated, Insertable, Selectable, Updateable } from "
  *
  * Better Auth owns its own tables (user, account, session, verification, ...)
  * and is configured separately. These types describe the *application*
- * tables defined in `migrations/0001-initial-schema.sql`.
+ * tables defined by the core migrations, `migrations/0001-initial-schema.sql`
+ * and `migrations/0002-release.sql`.
  *
  * Roles, memberships, permissions, and account status MUST live here so
  * that authorization decisions are made against application data and not

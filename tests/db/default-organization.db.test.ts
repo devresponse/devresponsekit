@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { sql } from "kysely";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import { coreMigrationSql } from "../helpers/core-migrations";
 
 /**
  * DB-BACKED tests for F-40: the default organization has ONE identity,
@@ -556,14 +555,9 @@ describe("F-40: routing follows is_default, not the slug (DB-backed)", () => {
     );
     // A database 0007 has not reached yet (M-02): its unique index would
     // refuse the state this test repairs. Recreated from the migration's own
-    // statement in `finally`, once one default is left.
-    const migration = readFileSync(
-      path.resolve(
-        __dirname,
-        "../../src/db/migrations/0007-uniqueness-search-indexes-token-scrub.sql",
-      ),
-      "utf8",
-    );
+    // statement in `finally`, once one default is left (its section of
+    // 0002-release.sql since MIG).
+    const migration = coreMigrationSql("0007-uniqueness-search-indexes-token-scrub.sql");
     const createIndex = migration.match(
       /create unique index if not exists idx_app_organizations_single_default[^;]*;/,
     )?.[0];

@@ -7,6 +7,7 @@ import { pruneAuditEvents } from "@/lib/retention.server";
 
 /**
  * DB-BACKED proof of the invariants migration 0005-integrity-constraints.sql
+ * (a section of 0002-release.sql since MIG)
  * moves into the schema (source review 2026-09-04: #15, #63, #83, #89, #217,
  * #218). Every case here is a real statement against the migrated database —
  * the unit suites mock the DB, so nothing else verifies that the constraints,

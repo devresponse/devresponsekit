@@ -6,11 +6,14 @@ import type { PoolClient } from "pg";
 import { createAppPool, ensureSchema } from "../schema-config";
 import {
   applyMigrationInTransaction,
+  recordMigrationInTransaction,
   resolveMigrationTimeouts,
   RUNNER_SESSION_STATEMENTS,
 } from "./apply-migration";
 import {
+  CONSOLIDATED_CORE_MIGRATIONS,
   migrationChecksum,
+  planConsolidatedMigrations,
   planMigrations,
   reconcileLedgerChecksum,
   shouldIncludeLocales,
@@ -23,13 +26,15 @@ import {
  * (owned by Better Auth's own tooling) and tracking applied ids in an
  * `app_schema_migrations` table so each runs at most once:
  *
- *   1. CORE — every top-level `*.sql` (lexical). `0001-initial-schema.sql` is
- *      the complete baseline (every `app_*` table, index, trigger, and
- *      non-language baseline row — but NOT email templates, which live under
- *      `locales/`). It is FROZEN and never renamed, so its ledger id (the
- *      bare filename) is stable and an existing database skips it. Further
- *      schema changes are the numbered `NNNN-*.sql` files after it, applied
- *      in lexical order, each recorded once in the ledger.
+ *   1. CORE — every top-level `*.sql` (lexical). Two files today:
+ *      `0001-initial-schema.sql`, the baseline (the `app_*` tables, indexes,
+ *      triggers, and non-language baseline rows — but NOT email templates,
+ *      which live under `locales/`), and `0002-release.sql`, the
+ *      1.x/2.x changes that followed it (the former 0002…0008, consolidated
+ *      on 2026-09-30; see below). Both are FROZEN and never renamed, so their
+ *      ledger ids (the bare filenames) are stable and an existing database
+ *      skips them. A new schema change is a new numbered file after them
+ *      (`0003-*.sql`), applied in lexical order and recorded once.
  *
  *   2. LOCALES — `locales/*.sql` (lexical): the email templates, one file per
  *      locale. `0000-email-templates-en.sql` is the English BASE and is ALWAYS
@@ -58,6 +63,23 @@ import {
  * backfilled with the current hash and logged. The column is added
  * idempotently in the bootstrap below — not as a numbered migration — because
  * the ledger must be readable before any numbered file is considered.
+ *
+ * Consolidation (MIG): a core file may replace several applied ones, as
+ * `0002-release.sql` replaces 0002…0008. It is listed in
+ * `CONSOLIDATED_CORE_MIGRATIONS` with the ids and pinned checksums of the
+ * files it folds, and `planConsolidatedMigrations` decides, before anything is
+ * written: ledgered under its own id → the usual path; absent but every folded
+ * id ledgered under its pin (a database migrated before the consolidation) →
+ * RECORD its ledger row and apply nothing, keeping the legacy rows; only some
+ * of them ledgered → refuse, naming the commit to migrate from first; none →
+ * apply it (a new database). To consolidate again later: concatenate the
+ * files verbatim under the same `-- ===== BEGIN/END folded <id> =====`
+ * banners into a new id, add it to `CONSOLIDATED_CORE_MIGRATIONS` with the
+ * folded pins and the last commit that has the files, replace their ids in
+ * `REQUIRED_CORE_MIGRATIONS` with it, and delete them. Fold only files every
+ * live database has applied (one that has not is refused until it migrates
+ * from that commit), and only SQL that is safe as ONE transaction, as the new
+ * file is (no `create index concurrently`, no `alter type … add value`).
  *
  * Each not-yet-applied file runs inside its own transaction on the SAME
  * dedicated client (review #84: `begin`/`commit` on a pool would only be
@@ -175,6 +197,10 @@ async function main() {
       const sql = await fs.readFile(fullPath, "utf8");
       sources.set(migration.id, { sql, checksum: migrationChecksum(sql) });
     }
+    // MIG: decided before the backfill below writes anything, so a refusal
+    // (some folded files applied, or one under another checksum) leaves the
+    // ledger exactly as it was found.
+    const consolidation = planConsolidatedMigrations(applied);
     for (const migration of plan) {
       if (!applied.has(migration.id)) continue;
       const stored = applied.get(migration.id) ?? null;
@@ -188,6 +214,26 @@ async function main() {
         ]);
         console.log(`[migrate] backfilled checksum for ${migration.id} (${checksum})`);
       }
+    }
+
+    // MIG: a database migrated before a consolidation already holds the
+    // consolidated file's schema under the folded ids. Its row is recorded,
+    // nothing is applied (re-running 0002…0008 would repeat 0007's token
+    // scrub and 0005's preflights), and the legacy rows stay.
+    for (const step of consolidation) {
+      if (step.action !== "record") continue;
+      const { folds } = CONSOLIDATED_CORE_MIGRATIONS[step.id]!;
+      for (const id of step.unverified) {
+        console.log(
+          `[migrate] warning: ${id} has no ledgered checksum (ledgered before review #86), so it ` +
+            `was not compared with its section of ${step.id}`,
+        );
+      }
+      const { checksum } = sources.get(step.id)!;
+      await recordMigrationInTransaction(client, { id: step.id, checksum });
+      applied.set(step.id, checksum);
+      const range = `${folds[0]!.id.slice(0, 4)}…${folds.at(-1)!.id.slice(0, 4)}`;
+      console.log(`[migrate] record ${step.id} (already applied as ${range})`);
     }
 
     for (const migration of plan) {

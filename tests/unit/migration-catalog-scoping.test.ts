@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { coreMigrationSql } from "../helpers/core-migrations";
 
 /**
  * Migration-authoring lint: a system-catalog lookup inside a migration must be
@@ -19,7 +20,8 @@ import { describe, expect, it } from "vitest";
  * documented exception; every OTHER migration, present and future, must scope
  * its catalog lookups:
  *
- *   - `pg_constraint`  → `conrelid = '<table>'::regclass` (0005 does this)
+ *   - `pg_constraint`  → `conrelid = '<table>'::regclass` (0005, folded into
+ *     `0002-release.sql`, does this)
  *   - `pg_class` / `pg_index` → join `pg_namespace` and filter `nspname`,
  *     or resolve the relation through `::regclass` / `tg_relid`
  *   - `information_schema.*` → `table_schema = current_schema()`
@@ -117,7 +119,8 @@ const LOCALES = readdirSync(path.join(MIGRATIONS_DIR, "locales"))
 describe("migration authoring: system-catalog lookups are schema-scoped (#88)", () => {
   it("lints the whole applied migration set", () => {
     expect(CORE[0]).toBe("0001-initial-schema.sql");
-    expect(CORE.length).toBeGreaterThanOrEqual(6);
+    // MIG: 0002…0008 are sections of 0002-release.sql, linted with it.
+    expect(CORE).toContain("0002-release.sql");
     expect(LOCALES.length).toBeGreaterThan(0);
   });
 
@@ -145,7 +148,7 @@ describe("migration authoring: system-catalog lookups are schema-scoped (#88)", 
   });
 
   it("0005 shows the required pattern for a CHECK-constraint probe", () => {
-    const sql = readFileSync(path.join(MIGRATIONS_DIR, "0005-integrity-constraints.sql"), "utf8");
+    const sql = coreMigrationSql("0005-integrity-constraints.sql");
     expect(sql).toContain("conrelid = 'app_organizations'::regclass");
   });
 });

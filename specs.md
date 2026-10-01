@@ -550,7 +550,9 @@ src/
   db/
     database.ts
     migrations/
-      0001-initial-schema.sql   # complete app schema — all app_* tables
+      0001-initial-schema.sql   # the baseline app schema (app_* tables)
+      0002-release.sql          # the 1.x/2.x changes after it, consolidated
+      locales/                  # email templates, one file per locale
       run-migrations.ts
     seeds/
       seed-local.ts
@@ -979,8 +981,8 @@ app_schema_migrations         # migration ledger written by run-migrations.ts
 
 All of these tables (including the machine-API credential tables
 `app_api_keys` / `app_oauth_clients` / `app_revoked_tokens`, see §37) are
-created by the single `0001-initial-schema.sql`; `app_schema_migrations`
-is created by the runner itself.
+created by the core migrations, `0001-initial-schema.sql` and
+`0002-release.sql`; `app_schema_migrations` is created by the runner itself.
 
 Roles, permissions, organization memberships, app access, and account status are application concerns. Do not store them inside Better Auth core tables.
 
@@ -1013,19 +1015,21 @@ export const pgPool = pool;
 
 ### 10.3 Application core schema
 
-The **entire** application schema is a single setup script,
-`src/db/migrations/0001-initial-schema.sql` — one file, one setup process. It
-provisions every `app_*` table, index, trigger, and baseline row for a
-first-time setup: the administrator indexes, audit `request_id`, soft-delete
+The application schema is two core setup scripts in `src/db/migrations/`:
+the baseline `0001-initial-schema.sql` and `0002-release.sql`, which holds the
+changes made after it. A new database applies both, then the locale files.
+The baseline provisions the `app_*` tables, indexes, triggers, and baseline
+rows for a first-time setup: the administrator indexes, audit `request_id`, soft-delete
 columns, the permission catalog + superuser provisioning, the SSO/outbox
 delivery infrastructure, the audit append-only trigger, the per-organization
 sign-up policy (`app_organization_auth_settings`), organization invitations
 (`app_organization_invitations`), **and** the machine-API credential tables
 (`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens`) and the four
 `admin.apikeys.*` / `admin.clients.*` permissions (see §37). The core-table
-DDL below is the heart of that file. `0001` is the frozen baseline and today
-the only core file; further schema changes are added as new numbered
-`NNNN-*.sql` files. Email templates are **not** in the core schema: they live
+DDL below is the heart of `0001`, the frozen baseline;
+`0002-release.sql` is the seven files `0002`…`0008` of the 1.x/2.x line,
+consolidated verbatim on 2026-09-30. Further schema changes are added as new
+numbered `NNNN-*.sql` files, `0003` next. Email templates are **not** in the core schema: they live
 as locale data under `migrations/locales/`, one file per locale, with the
 English base `locales/0000-email-templates-en.sql` always applied. See the
 migration runner below and docs/auth-signup-policy.md.
@@ -1033,7 +1037,7 @@ migration runner below and docs/auth-signup-policy.md.
 The runner `src/db/migrations/run-migrations.ts` stays multi-file capable
 (it applies every `NNNN-*.sql` in lexical order and records applied
 filenames in `app_schema_migrations`, so each runs at most once), so a
-future schema change can be appended as a new file if ever needed.
+future schema change is appended as a new file.
 
 ```sql
 create extension if not exists "pgcrypto";
@@ -2925,13 +2929,13 @@ Seed data:
 4. Permissions: the baseline `shell.view` / `audit.view` keys plus the
    full **administrator permission catalog**, which is the single source
    of truth in `src/lib/admin/permissions.ts` (`ADMIN_PERMISSION_CATALOG`)
-   and is currently **30 keys**: the `admin.users.*`, `admin.roles.*`,
+   and covers the `admin.users.*`, `admin.roles.*`, `admin.groups.*`,
    `admin.permissions.manage`, `admin.orgs.*`, `admin.apps.*`,
    `admin.audit.read`, `admin.email.read` / `admin.email.manage`, and the
    machine-credential keys `admin.apikeys.read` / `admin.apikeys.manage`
-   / `admin.clients.read` / `admin.clients.manage`. All 30 are seeded by
-   the single `0001-initial-schema.sql`. Do not hard-code a count
-   elsewhere — derive it from `ADMIN_PERMISSION_CATALOG`.
+   / `admin.clients.read` / `admin.clients.manage`. The core migrations
+   seed every key in it. Do not hard-code a count — derive it from
+   `ADMIN_PERMISSION_CATALOG`.
 5. Enterprise applications:
    - `enterprise-core`, origin `https://app.devresponse.com`, audience `devresponse-app:enterprise-core`
    - `enterprise-admin`, origin `https://admin.devresponse.com`, audience `devresponse-app:enterprise-admin`

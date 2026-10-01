@@ -64,6 +64,8 @@ describe("db tooling transaction discipline (#84)", () => {
   it("the migration runner applies files through the transactional helper only", () => {
     const runner = read("src/db/migrations/run-migrations.ts");
     expect(runner).toContain("applyMigrationInTransaction(client,");
+    // MIG: recording a consolidated file goes through its sibling helper.
+    expect(runner).toContain("recordMigrationInTransaction(client,");
     // The ledger insert must live INSIDE that helper's transaction, never as a
     // free-standing statement in the runner loop.
     expect(runner).not.toMatch(/insert into app_schema_migrations \(id, checksum\)/);

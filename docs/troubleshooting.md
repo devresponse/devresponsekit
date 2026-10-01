@@ -111,12 +111,18 @@ warrant a comms channel and an owner before deep debugging.
   the database has not recorded in `app_schema_migrations` (the log lists the
   ids). Symptoms before anyone looks at the probe: 500s confined to the
   routes that touch the new column/table — e.g. every `/api/v1` call bearing
-  an OAuth-client JWT and admin secret rotation when
-  `0004-oauth-client-secret-rotated-at.sql` is missing (review #43). Fix
+  an OAuth-client JWT and admin secret rotation when migration 0004
+  (`0004-oauth-client-secret-rotated-at.sql`, now a section of
+  `0002-release.sql`) is missing (review #43). Fix
   forward, not back: run `pnpm db:app:migrate` against the production
   `DATABASE_URL` (migrations are additive and idempotent), then re-curl
   `/api/health/ready` for `200`. Rolling the app back also works (the older
   build does not read the column) but leaves the gap for the next deploy.
+  A database migrated before the 2026-09-30 consolidation is not behind for
+  lacking the `0002-release.sql` row: readiness counts its rows `0002-…`
+  through `0008-…` as that file. With only some of those rows it is behind,
+  and the log names `0002-release.sql`: bring it to `0008` from commit
+  `79b4803` first ([deployment.md](./deployment.md#upgrading-a-database-from-before-the-consolidation)).
 - **`kind: "auth-schema-behind"`** (F-26) — Better Auth's own schema check
   found a table or column its configuration writes missing (the log's
   `findings` list them, e.g. `{"kind":"missing-table","table":"rateLimit"}`).
@@ -585,8 +591,26 @@ re-run, compare the `create index` lines in
 pg_indexes where schemaname = 'auth'` (your `DB_SCHEMA`), and create any
 missing index by hand, `concurrently` on a large table.
 
+**`[migrate] "0002-release.sql" consolidates …, and this database has applied
+only some of them (missing: …)`.** The database was migrated before 0002…0008
+were consolidated into `0002-release.sql`, and stopped part-way through them.
+The runner cannot apply part of the file and will not re-run the part already
+applied, so it refused before writing anything. Bring the database to `0008`
+from commit `79b4803` (the last with the individual files), then run
+`pnpm db:app:migrate` from this build, which records `0002-release.sql`
+([deployment.md, Upgrading a database from before the consolidation](./deployment.md#upgrading-a-database-from-before-the-consolidation)).
+
+**`[migrate] cannot record "0002-release.sql": the ledger has … for "000N-…"`.**
+One of the seven folded files was ledgered under another checksum than the
+one folded into `0002-release.sql`: that database applied a different version
+of it (a local edit run against it, say). Nothing was recorded. Compare the
+database with that file's section of `0002-release.sql`, and only once they
+match, correct the row with the `update … set checksum = …` statement the error
+prints.
+
 **`[0005] refusing to apply: N row group(s) violate a constraint`.** Migration
-0005 adds CHECK/uniqueness constraints and first lists every row that would
+0005 (a section of `0002-release.sql`, which rolls back whole when it refuses)
+adds CHECK/uniqueness constraints and first lists every row that would
 violate them (`table.column = value (count)`), changing nothing. Correct or
 remove those rows (e.g. an enterprise app still in the removed `degraded`
 status, two apps sharing an `sso_audience`, a group bundling a role from

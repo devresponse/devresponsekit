@@ -161,7 +161,7 @@ src/
 ├── db/
 │   ├── database.ts                 # Kysely instance + pg pool (shared with Better Auth)
 │   ├── schema/app-schema.ts        # table types
-│   ├── migrations/                 # 0001-initial-schema.sql + runners
+│   ├── migrations/                 # 0001-initial-schema.sql, 0002-release.sql, locales/ + runners
 │   ├── seeds/                      # seed-local.ts, dev-init.ts
 │   └── reset-database.ts           # destructive reset tooling
 ├── components/                     # shadcn/ui, app shell, data grid, navigation
@@ -207,7 +207,7 @@ docker/postgres/init/              # Postgres init SQL (extensions)
 
 A typical admin feature (mirror an existing one such as Roles or Groups):
 
-1. **Schema** (if needed): add a new numbered forward migration (`src/db/migrations/000N-….sql`) — `0001-initial-schema.sql` is **frozen/append-only**, never edit it — and add types to `src/db/schema/app-schema.ts`.
+1. **Schema** (if needed): add a new numbered forward migration (`src/db/migrations/000N-….sql`, `0003-…` next) — `0001-initial-schema.sql` and `0002-release.sql` are **frozen/append-only**, never edit them — and add types to `src/db/schema/app-schema.ts`.
 2. **Permissions:** add keys to `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts` (they flow into the `admin.platform`/`superuser` roles automatically). Update the catalog-count test.
 3. **API:** add a route handler under `src/app/api/administrator/<feature>/...`. Use `requireAdminPermission`, `resolveOrgScope`/`canAccessOrg`, `enforceRateLimit`, Zod validation, the list-query helper, the error envelope, and an audit call.
 4. **UI:** add pages under `src/app/[locale]/(secure)/app/administrator/<feature>/` and a nav entry in `administrator-navigation.ts` with a `requires` permission. Reuse the shared `DataGrid` and form patterns.

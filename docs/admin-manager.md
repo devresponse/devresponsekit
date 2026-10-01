@@ -2092,8 +2092,8 @@ pages leaves a row and a probe of its API does not.
 
 The audit log is a tamper-evident compliance record. A row-level
 `BEFORE UPDATE OR DELETE` trigger (`app_audit_events_block_mutation`, installed
-by `0001-initial-schema.sql`, replaced by `0005-integrity-constraints.sql` and
-again by `0008-user-data-export-erasure.sql`) **raises on any UPDATE or
+by `0001-initial-schema.sql`, replaced by migration 0005 and again by migration
+0008, both sections of `0002-release.sql`) **raises on any UPDATE or
 DELETE**; INSERTs are unaffected. It permits two UPDATEs: the org-deletion
 `SET NULL` tombstone (organization_id → null with every other column
 unchanged), and an erasure's pseudonymisation (next list).

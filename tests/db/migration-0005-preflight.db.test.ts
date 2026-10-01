@@ -1,8 +1,7 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pgPool } from "@/db/database";
+import { coreMigrationSql, coreMigrationsBefore } from "../helpers/core-migrations";
 
 /**
  * DB-BACKED proof that migration 0005-integrity-constraints.sql refuses to run
@@ -12,24 +11,26 @@ import { pgPool } from "@/db/database";
  * shape).
  *
  * The migrated dev/CI database already carries the constraints, so the
- * scenario is built in a SCRATCH SCHEMA on a dedicated connection: apply the
- * every core file that sorts BEFORE 0005 there (read from the directory, so
- * a sibling that lands on main in between — 0004-oauth-… did — is never
- * silently omitted), plant offending rows, run 0005 in a
- * transaction exactly as the runner does, and inspect. The schema (and the
- * `<schema>_runtime` role 0005 creates for it) are dropped afterwards.
+ * scenario is built in a SCRATCH SCHEMA on a dedicated connection: apply
+ * every core migration that came BEFORE 0005 there (0001 and the sections of
+ * 0002-release.sql ahead of it, read from the files, so none is silently
+ * omitted — 0004-oauth-… once landed in between), plant offending rows, run
+ * 0005 in a transaction exactly as the runner applied it, and inspect. The
+ * schema (and the `<schema>_runtime` role 0005 creates for it) are dropped
+ * afterwards.
+ *
+ * MIG: 0005 is now a section of 0002-release.sql, read out of it by
+ * tests/helpers/core-migrations.ts, byte for byte the SQL production ledgered
+ * as 0005 (tests/unit/migration-checksums.test.ts proves the checksum).
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts).
  */
 const SCHEMA = "__dbtest_m0005";
 const RUNTIME_ROLE = `${SCHEMA}_runtime`;
-const MIGRATIONS_DIR = path.resolve(__dirname, "../../src/db/migrations");
-const read = (file: string) => readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
 const MIGRATION = "0005-integrity-constraints.sql";
-/** The core files the scratch schema needs first: every `NNNN-*.sql` that sorts before MIGRATION. */
-const BASELINE = readdirSync(MIGRATIONS_DIR)
-  .filter((file) => /^\d{4}-.*\.sql$/.test(file) && file < MIGRATION)
-  .sort();
+const MIGRATION_SQL = coreMigrationSql(MIGRATION);
+/** The core migrations the scratch schema needs first: 0001, then 0002…0004. */
+const BASELINE = coreMigrationsBefore(MIGRATION);
 
 let client: PoolClient;
 
@@ -65,10 +66,10 @@ beforeAll(async () => {
   await client.query(`set search_path to "${SCHEMA}", public`);
   // Sanity: the listing starts at the frozen baseline and includes the
   // sibling that once shared this migration's number.
-  expect(BASELINE[0]).toBe("0001-initial-schema.sql");
-  expect(BASELINE).toContain("0004-oauth-client-secret-rotated-at.sql");
-  for (const file of BASELINE) {
-    await applyInTransaction(read(file));
+  expect(BASELINE[0]!.id).toBe("0001-initial-schema.sql");
+  expect(BASELINE.map((m) => m.id)).toContain("0004-oauth-client-secret-rotated-at.sql");
+  for (const migration of BASELINE) {
+    await applyInTransaction(migration.sql);
   }
 });
 
@@ -114,7 +115,7 @@ describe("0005 preflight (scratch schema)", () => {
 
     let message = "";
     try {
-      await applyInTransaction(read(MIGRATION));
+      await applyInTransaction(MIGRATION_SQL);
     } catch (err) {
       message = (err as Error).message;
     }
@@ -154,7 +155,7 @@ describe("0005 preflight (scratch schema)", () => {
       update app_organizations set status = 'archived' where slug = 'bad-status';
     `);
 
-    await applyInTransaction(read(MIGRATION));
+    await applyInTransaction(MIGRATION_SQL);
     expect(await constraintExists("app_organizations", "app_organizations_status_check")).toBe(
       true,
     );
@@ -175,7 +176,7 @@ describe("0005 preflight (scratch schema)", () => {
     expect(role.rows).toEqual([{ rolcanlogin: false }]);
 
     // Idempotent re-run: every guard short-circuits, nothing throws.
-    await applyInTransaction(read(MIGRATION));
+    await applyInTransaction(MIGRATION_SQL);
     expect(await constraintExists("app_organizations", "app_organizations_status_check")).toBe(
       true,
     );

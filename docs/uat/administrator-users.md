@@ -105,9 +105,9 @@ resource — that is the invariant every negative story below asserts.
 
 ## ADMIN-LAYOUT — Administrator console (layout guard)
 
-- Route: `/app/administrator/*` (shell wrapper) · Example URL: `/en/app/administrator` · Code: `src/app/[locale]/(secure)/app/administrator/layout.tsx:41`
+- Route: `/app/administrator/*` (shell wrapper) · Example URL: `/en/app/administrator` · Code: `src/app/[locale]/(secure)/app/administrator/layout.tsx:44`
 - Purpose: Wraps every administrator screen in the console shell (sidebar + header) and re-validates, defense-in-depth, that the caller holds *some* `admin.*` permission before any child page renders.
-- Guard / who can access: caller must hold at least one key in `ANY_ADMIN_PERMISSION` (the full `admin.*` catalog) via `checkAdminPermissionServer([...ANY_ADMIN_PERMISSION])`; otherwise `notFound()` (`layout.tsx:49`). The catalog is defined at `src/lib/admin/permissions.ts:23` / `:65`.
+- Guard / who can access: caller must hold at least one key in `ANY_ADMIN_PERMISSION` (the full `admin.*` catalog) via `checkAdminPermissionServer([...ANY_ADMIN_PERMISSION])`; otherwise `notFound()` (`layout.tsx:52`). The catalog is defined at `src/lib/admin/permissions.ts:23` / `:65`.
 - Access matrix:
   - Visitor / Pending / Blocked → redirected by the parent secure layout (not an admin at all).
   - Member → **404** (holds `shell.view` only; no `admin.*`).
@@ -142,7 +142,7 @@ Negative & edge cases
 2. The sidebar gate must match each page guard: the Users link requires `admin.users.read` (`administrator-navigation.ts:69`), which is exactly the Users page guard (`users/page.tsx:29`). Confirm no visible link 404s (the historical bug class).
 3. Not-found status: open `/en/app/administrator/users/<well-formed unknown UUID>` with the browser devtools Network tab open — the document response is an HTTP **404** (not a 200 that merely renders "Page not found"). The administrator tree deliberately has no `loading.tsx` streaming boundary: a boundary above the pages would flush the shell before the page's `notFound()` runs, turning every admin `[id]` 404 into a 200 (review #29, `tests/e2e/admin-cross-org-404.spec.ts`).
 
-Accessibility: the sidebar is keyboard-navigable; the active item is derived from the path (`administrator-sidebar.tsx:47`) and announced to screen readers as `aria-current="page"` (F-120); group labels auto-hide when the rail is collapsed. Its collapse toggle is independent of the root shell (own cookie, no Ctrl/Cmd+B — `layout.tsx:39`).
+Accessibility: the sidebar is keyboard-navigable; the active item is derived from the path (`administrator-sidebar.tsx:47`) and announced to screen readers as `aria-current="page"` (F-120); group labels auto-hide when the rail is collapsed. Its collapse toggle is independent of the root shell (own cookie, no Ctrl/Cmd+B — `layout.tsx:42`).
 i18n: run `en` + `uk`; sidebar group and item labels come from the `administrator.nav` catalog — no raw keys.
 
 ---

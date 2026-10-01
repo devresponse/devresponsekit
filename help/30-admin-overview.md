@@ -30,7 +30,7 @@ The admin console's landing page: headline counts for every managed entity plus 
 - Navigation only — every card and "View all" link leads to the matching management page.
 
 ## Navigation
-- Reached from: primary sidebar → Administration.
+- Reached from: primary sidebar → Administration, or **Administration Console**, the first entry of the brand bar's **Applications** switcher.
 - Leads to: all 12 admin section pages.
 
 ## Access

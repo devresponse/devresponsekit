@@ -256,6 +256,8 @@
     "menuLoadError": "メニューの読み込みに失敗しました。",
     "unauthorized": "このコンテンツを表示する権限がありません。",
     "noApplications": "ご利用いただけるアプリケーションはまだありません。",
+    "administrationConsole": "管理コンソール",
+    "administrationConsoleDescription": "ユーザー、組織、ロール、設定を管理します",
     "skipToMain": "メインコンテンツへスキップ",
     "skipToNavigation": "ナビゲーションへスキップ",
     "account": "アカウント",

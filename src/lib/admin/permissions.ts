@@ -8,7 +8,7 @@
  * import sentinel.
  *
  * This module MUST stay free of side effects and runtime imports — it
- * only exports static data.
+ * only exports static data and pure predicates over it.
  */
 export interface AdminPermissionDescriptor {
   key: string;
@@ -104,3 +104,22 @@ export const SUPERUSER_PERMISSIONS: ReadonlyArray<string> = [
   SUPERADMIN_PERMISSION,
   ...ANY_ADMIN_PERMISSION,
 ];
+
+/**
+ * Whether these permissions open the Administrator console (NAVK): the gate
+ * for the shell's "Administration Console" switcher entry.
+ *
+ * A nav gate must equal its destination's guard, so this is the console
+ * layout's guard restated as a pure predicate: that layout calls
+ * `checkAdminPermissionServer([...ANY_ADMIN_PERMISSION])`, which admits the
+ * SUPERADMIN marker or any one key of the catalog. Pure and argument-only so
+ * the secure layout can decide it from the access context it already holds
+ * and hand the client only an href. tests/unit/admin-console-gate.test.ts
+ * runs it against the real guard so the two cannot drift.
+ */
+export function canAccessAdminConsole(permissions: ReadonlyArray<string>): boolean {
+  return (
+    permissions.includes(SUPERADMIN_PERMISSION) ||
+    ANY_ADMIN_PERMISSION.some((key) => permissions.includes(key))
+  );
+}

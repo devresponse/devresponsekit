@@ -256,6 +256,8 @@
     "menuLoadError": "मेन्यू लोड करने में विफल।",
     "unauthorized": "आपके पास यह सामग्री देखने की अनुमति नहीं है।",
     "noApplications": "आपके लिए अभी तक कोई एप्लिकेशन उपलब्ध नहीं है।",
+    "administrationConsole": "प्रशासन कंसोल",
+    "administrationConsoleDescription": "उपयोगकर्ताओं, संगठनों, भूमिकाओं और सेटिंग्स का प्रबंधन करें",
     "skipToMain": "मुख्य सामग्री पर जाएँ",
     "skipToNavigation": "नेविगेशन पर जाएँ",
     "account": "खाता",

@@ -121,6 +121,14 @@ For a deployment running 2.0.0.
    `[deploy-gate] PASS … runtime=owner` and the owner warning. Never set
    `DB_RUNTIME_LOGIN_PASSWORD` in Vercel, and never create a database login
    in the Neon Console.
+9. **Adopt the least-privilege database login (DEP4).** From a clean kit
+   checkout at origin/main with `PRODUCTION_DIRECT_DATABASE_URL` exported,
+   run `drk-deploy db:runtime-login --dry-run` to see the plan, then
+   `drk-deploy db:runtime-login --redeploy`; confirm `/api/health/ready` is
+   200 and the build log shows `runtime=non-owner`. Once it is live and
+   healthy, `drk-deploy db:runtime-login --retire-except <the login it
+   printed>`. Rollback: Vercel Instant Rollback
+   ([docs/deployment.md §8.3](docs/deployment.md#83-pnpm-dbruntime-login-creating-rotating-and-adopting-a-login)).
 
 ### Security fixes the satellite forks must port
 
@@ -138,6 +146,21 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Added
 
+- **`drk-deploy db:runtime-login` (DEP4).** Moves production onto a new
+  least-privilege login in one command, and rotates it the same way: checks
+  the owner's direct URL against the database the serving deployment's schema
+  gate names (its build log's `[deploy-gate] target` line), mints
+  `<DB_SCHEMA>_app_<UTC yyyymmddhhmm>` with a password generated in memory and
+  never printed, has the kit's `pnpm db:runtime-login` create it (SCRAM
+  verifier) and verify it through the pooled host, writes `DATABASE_URL` and
+  `DB_SEARCH_PATH_VIA_OPTIONS` to Vercel Production as `sensitive`, and with
+  `--redeploy` redeploys and confirms `user=<login> runtime=non-owner`.
+  Refusals exit 2 with nothing written; a failure after a write exits 3 with
+  the way back. `--retire-except <login>` and `--retire-all` drop old rotated
+  logins, through new retire modes of `pnpm db:runtime-login` that touch only
+  `<DB_SCHEMA>_app_` and 12 digits and keep a login with open sessions unless
+  `--force`. See operator action 9 and
+  [vercel-cli/README.md](vercel-cli/README.md#dbruntime-login-the-least-privilege-login).
 - **`pnpm db:runtime-login` (DEP3).** Creates, or rotates the password of, a
   LOGIN role that inherits `<DB_SCHEMA>_runtime` (`INHERIT`, no `SET`), with
   the role defaults a pooled connection needs (`search_path`, and both 30 s

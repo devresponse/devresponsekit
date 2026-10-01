@@ -17,8 +17,16 @@ import { DB_SCHEMA, resolveDatabaseUrl } from "@/db/schema-config";
  * - A rerun rotates the password: the old one stops working.
  * - With no runtime role it exits 1 and creates nothing.
  * - Nothing it prints contains the password.
+ * - The retire modes (DEP4) drop rotated logins (`<schema>_app_<12 digits>`)
+ *   and nothing outside the pattern; keep one with an open session unless
+ *   --force; refuse a --retire-except login that does not exist; and work as
+ *   Neon's owner, a non-superuser CREATEROLE role that is only an ADMIN
+ *   member of the logins it made.
  *
  * Roles are cluster-wide, so every login made here is dropped in afterAll.
+ * The retire cases use a scratch schema with its own runtime role and a
+ * random name: `auth_runtime` is shared by every database on the cluster, and
+ * `--retire-all` against it would reach logins that are not this suite's.
  * Driven by `pnpm test:db` (vitest.db.config.ts).
  */
 const RUNTIME = runtimeRoleName(DB_SCHEMA);
@@ -194,7 +202,7 @@ describe("pnpm db:runtime-login against a live database (DEP3)", () => {
     await fresh.end();
   }, 60_000);
 
-  it("exits 1 and creates nothing when the runtime role does not exist", async () => {
+  it("exits 1 and creates nothing when the runtime role does not exist (create mode)", async () => {
     await admin.query(`create schema "${SCRATCH}"`);
     await admin.query(`create table "${SCRATCH}".app_schema_migrations (id text primary key)`);
     const password = newPassword();
@@ -208,5 +216,143 @@ describe("pnpm db:runtime-login against a live database (DEP3)", () => {
       `${SCRATCH}%`,
     ]);
     expect(rows).toEqual([]);
+  }, 60_000);
+});
+
+describe("pnpm db:runtime-login --retire-except / --retire-all against a live database (DEP4)", () => {
+  const RT = `__dbtest_rt${randomBytes(4).toString("hex")}`;
+  /** A rotated kit login name for the scratch schema: `<schema>_app_` and 12 digits. */
+  const rotated = (n: number) => `${RT}_app_2099${String(n).padStart(8, "0")}`;
+  const OLD = rotated(1);
+  const BUSY = rotated(2);
+  const KEEP = rotated(3);
+  /** Rotated by name, but no member of the runtime role. */
+  const STRANGER = rotated(4);
+  /** LOGIN members of the runtime role outside the pattern: never retired. */
+  const OUTSIDE = [`${RT}_app`, `${RT}_app_ci`, `${RT}_sat_x`];
+  const ALL = [OLD, BUSY, KEEP, STRANGER, ...OUTSIDE];
+  const busyPassword = newPassword();
+
+  const NEON = `${RT}n`;
+  const NEON_OWNER = `${NEON}_owner`;
+  const NEON_LOGIN = `${NEON}_app_209900000001`;
+  const neonOwnerPassword = newPassword();
+
+  const exists = async (name: string) =>
+    (await admin.query("select 1 from pg_roles where rolname = $1", [name])).rows.length > 0;
+  const surviving = async () => {
+    const found: string[] = [];
+    for (const name of ALL) if (await exists(name)) found.push(name);
+    return found;
+  };
+  const retire = (argv: string[], env: Record<string, string> = {}) =>
+    runLogin({ DB_SCHEMA: RT, ...env }, argv);
+
+  beforeAll(async () => {
+    await admin.query(`create schema "${RT}"`);
+    await admin.query(`create table "${RT}".app_schema_migrations (id text primary key)`);
+    await admin.query(`create role "${RT}_runtime" nologin`);
+    for (const name of ALL) {
+      await admin.query(
+        `create role "${name}" login password '${name === BUSY ? busyPassword : newPassword()}'`,
+      );
+      if (name !== STRANGER) await admin.query(`grant "${RT}_runtime" to "${name}"`);
+    }
+  });
+
+  afterAll(async () => {
+    await admin.query(`drop schema if exists "${RT}" cascade`);
+    await admin.query(`drop schema if exists "${NEON}" cascade`);
+    for (const name of [...ALL, NEON_LOGIN, `${RT}_runtime`, `${NEON}_runtime`, NEON_OWNER]) {
+      await dropRole(name);
+    }
+  });
+
+  it("keeps a login with an open session, retires the rest of the pattern, and never touches other names", async () => {
+    const url = new URL(DATABASE_URL);
+    url.username = BUSY;
+    url.password = busyPassword;
+    const busy = new Client({ connectionString: url.toString() });
+    await busy.connect();
+    try {
+      const ran = await retire(["--retire-except", KEEP]);
+      expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(1);
+      expect(ran.stdout).toContain(`[db:runtime-login] retired ${OLD}`);
+      expect(ran.stdout).toContain(
+        `[db:runtime-login] kept ${BUSY}: 1 open session(s) in pg_stat_activity. A pooler keeps idle server connections for a while after its last client, so retry later, or pass --force`,
+      );
+      expect(ran.stdout).toContain(`[db:runtime-login] FAILED 1 login(s) not retired: ${BUSY}`);
+      expect(await surviving()).toEqual([BUSY, KEEP, STRANGER, ...OUTSIDE]);
+
+      // --force: retired although the session is still open.
+      const forced = await retire(["--retire-except", KEEP, "--force"]);
+      expect(forced.code, `${forced.stdout}\n${forced.stderr}`).toBe(0);
+      expect(forced.stdout).toContain(
+        `[db:runtime-login] retired ${BUSY} (--force: its 1 open session(s) lose their role)`,
+      );
+      expect(await surviving()).toEqual([KEEP, STRANGER, ...OUTSIDE]);
+    } finally {
+      await busy.end().catch(() => undefined);
+    }
+  }, 60_000);
+
+  it("--retire-except naming a login that does not exist exits 1 and retires nothing", async () => {
+    const missing = rotated(99);
+    const ran = await retire([`--retire-except=${missing}`]);
+    expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(1);
+    expect(ran.stdout.trim()).toBe(
+      `[db:runtime-login] FAILED --retire-except ${missing} does not exist: nothing was retired. Name the login production connects as`,
+    );
+    expect(await surviving()).toEqual([KEEP, STRANGER, ...OUTSIDE]);
+  }, 60_000);
+
+  it("--retire-all retires the last rotated login, and still nothing outside the pattern", async () => {
+    const ran = await retire(["--retire-all"]);
+    expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
+    expect(ran.stdout).toContain(`[db:runtime-login] retired ${KEEP}`);
+    expect(await surviving()).toEqual([STRANGER, ...OUTSIDE]);
+
+    const again = await retire(["--retire-all"]);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain(
+      `[db:runtime-login] nothing to retire: no LOGIN member of ${RT}_runtime is named ${RT}_app_<12 digits>`,
+    );
+  }, 60_000);
+
+  it("works as Neon's owner: a non-superuser CREATEROLE role, only an ADMIN member of its logins", async () => {
+    // neondb_owner's shape: it owns the schema and the ledger, and created
+    // the runtime role and the login itself, which from Postgres 16 makes it
+    // an ADMIN-only member of each. DROP OWNED needs the login's privileges,
+    // which that does not give, so the command must not issue it there.
+    await admin.query(
+      `create role "${NEON_OWNER}" login createrole password '${neonOwnerPassword}'`,
+    );
+    await admin.query(`create schema "${NEON}" authorization "${NEON_OWNER}"`);
+    const ownerUrl = new URL(DATABASE_URL);
+    ownerUrl.username = NEON_OWNER;
+    ownerUrl.password = neonOwnerPassword;
+    const owner = new Client({ connectionString: ownerUrl.toString() });
+    await owner.connect();
+    try {
+      await owner.query(`create table "${NEON}".app_schema_migrations (id text primary key)`);
+      await owner.query(`create role "${NEON}_runtime" nologin`);
+      await owner.query(`create role "${NEON_LOGIN}" login password '${newPassword()}'`);
+      await owner.query(`grant "${NEON}_runtime" to "${NEON_LOGIN}" with inherit true, set false`);
+      const { rows } = await owner.query<{ usage: boolean }>(
+        "select pg_has_role(current_user, $1, 'USAGE') as usage",
+        [NEON_LOGIN],
+      );
+      expect(rows).toEqual([{ usage: false }]);
+    } finally {
+      await owner.end();
+    }
+
+    const ran = await runLogin({ DB_SCHEMA: NEON, DATABASE_URL: ownerUrl.toString() }, [
+      "--retire-all",
+    ]);
+    expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
+    expect(ran.stdout).toContain(`[db:runtime-login] retired ${NEON_LOGIN}`);
+    expect(ran.stdout + ran.stderr).not.toContain(neonOwnerPassword);
+    expect(await exists(NEON_LOGIN)).toBe(false);
   }, 60_000);
 });

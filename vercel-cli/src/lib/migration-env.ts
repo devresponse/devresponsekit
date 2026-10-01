@@ -84,6 +84,16 @@ const CHECKED_AGAINST_AUTH_URL = ["COOKIE_DOMAIN", "API_JWT_ISSUER"];
 /** The names dotenv reads the file to load from: DOTENV_PATH first (dotenv 18), then DOTENV_CONFIG_PATH. */
 const DOTENV_FILE_OPTIONS = ["DOTENV_PATH", "DOTENV_CONFIG_PATH"];
 
+/** dotenv pointed at the null device, quietly: the kit checkout's `.env` is not read. */
+function noDotenv(inherited: Shell): Record<string, string | undefined> {
+  return {
+    ...unset(DOTENV_FILE_OPTIONS, inherited),
+    DOTENV_CONFIG_PATH: devNull,
+    // Otherwise dotenv prints "injected env (0)" and the null device's path.
+    DOTENV_CONFIG_QUIET: "true",
+  };
+}
+
 /**
  * What `db:auth:migrate` is handed (F-141): {@link migrationEnv}, a
  * placeholder for each of {@link AUTH_MIGRATION_PLACEHOLDERS} the shell does
@@ -119,10 +129,51 @@ export function authMigrationEnv(
   return {
     ...migrationEnv(databaseUrl, schema, inherited),
     ...(inherited.BETTER_AUTH_URL ? {} : unset(CHECKED_AGAINST_AUTH_URL, inherited)),
-    ...unset(DOTENV_FILE_OPTIONS, inherited),
-    DOTENV_CONFIG_PATH: devNull,
-    // Otherwise dotenv prints "injected env (0)" and the null device's path.
-    DOTENV_CONFIG_QUIET: "true",
+    ...noDotenv(inherited),
     ...Object.fromEntries(missing),
+  };
+}
+
+/**
+ * The variable `pnpm db:runtime-login` reads the login's password from. The
+ * kit's `LOGIN_PASSWORD_ENV` (src/db/runtime-login.ts) is the same name, which
+ * tests/unit/drk-deploy-runtime-login-env.test.ts holds it to.
+ */
+export const RUNTIME_LOGIN_PASSWORD_ENV = "DB_RUNTIME_LOGIN_PASSWORD";
+
+/**
+ * What `pnpm db:runtime-login` is handed by `drk-deploy db:runtime-login`
+ * (DEP4): {@link migrationEnv} (the owner's direct URL, the schema, no libpq
+ * fallback), the password when it creates a login (none for a retire mode),
+ * and nothing the kit checkout or the shell could add.
+ *
+ * - `DB_SEARCH_PATH_VIA_OPTIONS` is removed, however it is spelled. The
+ *   command connects as the owner to the DIRECT endpoint, with the startup
+ *   `search_path` on; the pooled-shape flag is the runtime's, and a shell set
+ *   up for a pooled app would otherwise send the owner session to `public`.
+ * - dotenv reads nothing: the script loads `dotenv/config`, which fills every
+ *   variable left unset from the kit checkout's `.env`, so a developer's
+ *   `DB_SEARCH_PATH_VIA_OPTIONS=0` or a password left there would reach a
+ *   command run against production (the F-47 failure class).
+ * - The password travels here, in the environment, never in argv, and
+ *   `undefined` removes any other copy of the variable.
+ * - The Vercel token is removed in either spelling. The child already gets
+ *   only the allow-listed shell (`inheritedEnv`), which never carries it; this
+ *   says so where the environment is built.
+ */
+export function runtimeLoginEnv(
+  databaseUrl: string,
+  schema: string,
+  password: string | undefined,
+  inherited: Shell = process.env,
+): Record<string, string | undefined> {
+  return {
+    ...unset(
+      ["DB_SEARCH_PATH_VIA_OPTIONS", RUNTIME_LOGIN_PASSWORD_ENV, "VERCEL_TOKEN", "NOW_TOKEN"],
+      inherited,
+    ),
+    ...migrationEnv(databaseUrl, schema, inherited),
+    ...noDotenv(inherited),
+    [RUNTIME_LOGIN_PASSWORD_ENV]: password,
   };
 }

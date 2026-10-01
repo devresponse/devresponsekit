@@ -851,6 +851,109 @@ there is nothing to redeploy: the newer commit's build is the one that ships.
   in Vercel, after `gh workflow run migrate-production.yml --ref main` if the
   run never started.
 
+### `drk-deploy db:runtime-login` refused or failed
+
+The operator command that moves production onto a least-privilege login (DEP4,
+[deployment.md §8.3](./deployment.md#83-pnpm-dbruntime-login-creating-rotating-and-adopting-a-login)).
+**Exit 2** is a refusal: nothing was created or written, so fix the cause and
+rerun.
+
+- **`is for the kit's own production`** — the config is a satellite's. Satellites
+  keep connecting as their owner for now
+  ([integration-satellite-apps.md](./integration-satellite-apps.md)).
+- **`No owner URL`**, **`That looks like a POOLED connection
+  string`** or **`re-points the connection with …`** — export
+  `PRODUCTION_DIRECT_DATABASE_URL` (or name a `--from-env` file holding it) as
+  production's DIRECT owner URL, with user, host, port and database in the URL
+  itself. `DATABASE_URL` is never read.
+- **`has no pnpm db:runtime-login script`** — the kit checkout predates DEP3:
+  update it to origin's default branch.
+- **`Refusing: the kit checkout has N uncommitted change(s)`, `… is not pushed`
+  or `… HEAD … is not origin/main`** — the kit command reconciles the runtime
+  role to the manifest in that checkout, so it must be the reviewed one. Commit
+  and push, or check out what origin's default branch holds (`git pull
+  --ff-only`).
+- **`serves no deployment`** — production has never been deployed: deploy it
+  first.
+- **`the owner URL is not the database production uses`** — the host (with
+  Neon's `-pooler` removed), port or database of `PRODUCTION_DIRECT_DATABASE_URL`
+  differs from the serving deployment's `[deploy-gate] target …` line, both
+  printed. Point the variable at production's direct endpoint. There is no
+  override.
+- **`production's schema gate checked schema X`** — pass `--schema X`.
+- **`has no [deploy-gate] target line`** — the serving deployment's build did
+  not run the schema gate on Vercel: it was built before the gate, or
+  `drk-deploy deploy`/`up` built it on your machine and promoted it prebuilt
+  (the gate skips there, and that build log never reaches Vercel). A production
+  build by Vercel's git integration prints the line: push to the production
+  branch, and rerun once that build serves production. Or, having checked the
+  printed host and database yourself, rerun with `--allow-unverified-target`
+  and type the database name when asked (`the name typed is not the owner URL's
+  database` means it did not match). Over a prebuilt deployment, leave out
+  `--redeploy` and push instead: the command proves the switch from the
+  redeploy's gate line, and a redeploy of prebuilt output may not run a build,
+  so it may print none.
+- **`production already connects as <login>, the name this run would mint`** —
+  logins are named by the minute: wait for the next one.
+- **`The pooled host of <host> cannot be derived`**, **`The owner URL is
+  already pooled`** or **`--pooled-host … is not a host name`** — only Neon's
+  pooled host is derived; elsewhere pass `--pooled-host <host>` (a host name
+  alone), or `--endpoint direct`.
+- **`N DATABASE_URL entries cover Production`** or **`also covers
+  Development`** — keep one entry per key for Production, and give Development
+  its own: Vercel stores no `sensitive` value for Development.
+- **`Refusing to retire every login but X: production connects as Y`** —
+  `--retire-except` must name the login the serving deployment's gate line
+  names (`user=`): retiring that one would cut production off. When `Y` is the
+  owner, no rotated login is in use and `--retire-except` cannot name the owner
+  (**`is not a kit login name`**): run `--retire-all`. **`Refusing to retire
+  every rotated login: production connects as X, a kit login`** — retiring `X`
+  cuts production off. If a deployment built before the first switch (it
+  connects as the owner) is recent enough to serve, roll back to it and rerun.
+  Otherwise, as after a rotation, a rollback lands on another login and the
+  refusal stands: set `DATABASE_URL` to the owner's URL, rerun with `--force`
+  (production is cut off until the next step is live) and redeploy at once,
+  since a build that connects as the owner fails the ratchet while any rotated
+  login exists (deployment.md §8.5). `--force` overrides either refusal,
+  deliberately.
+- **`--force applies only to …`** or **`cannot be combined with a retire
+  mode`** — a retire run takes only `--force`, `--schema`, `--from-env`,
+  `--allow-unverified-target`, `--dry-run` and `--yes`.
+
+**Exit 1, `pnpm db:runtime-login exited N: nothing was written to Vercel`** —
+the kit command's own `[db:runtime-login] FAILED …` line above says why:
+`may not grant <runtime>` (run the printed `grant … with admin option`), a
+refused SCRAM verifier (rerun with `--plaintext-password`), a verification that
+found `CREATE on schema public` or `CREATE on the database` (as the owner,
+`revoke create on database <db> from public`: an operator decision, since it
+changes what every role may do), or a pooler that refuses the login. Then
+rerun: a new login is minted. A verification failure (`<login> exists but
+failed verification`) leaves that login behind, unused, and the hint says what
+it does to production. While production connects as the owner, every
+production build that connects as the owner fails the gate's ratchet (`a
+least-privilege login … exists`), pushes to main included, until a rerun
+succeeds or `drk-deploy db:runtime-login --retire-all` drops the login
+(`--retire-except` cannot name the owner). While production connects as a kit
+login, the stray one harms nothing, and `--retire-except <that login>` drops
+it. In a retire run, **`kept <login>: N open session(s)`** is a pooler's idle
+connection: rerun later, or pass `--force`.
+
+**Exit 3** means something was written: the message says the way back.
+`Writing <key> failed` leaves production as it was, because a deployment keeps
+the environment it was built with: rerun. The new login exists: when the
+`DATABASE_URL` write failed, it is a stray as above (with production on the
+owner, owner builds fail the ratchet until a rerun succeeds or `--retire-all`
+drops it); when a later write failed, `DATABASE_URL` already names it, so do
+not retire it, rerun. `The redeploy failed` is a build that
+failed its gate and was not promoted: production still serves the previous
+deployment, but new production builds read the new login and fail the same way
+until you fix the cause from the build's `[deploy-gate]` lines and rerun, or
+follow the break-glass in deployment.md §8.5. `still serves …` means Vercel did
+not assign the domain to the redeploy: promote it once its gate line names the
+login. `is not healthy` or `its schema gate shows …` means production serves
+the redeploy and it is wrong: run the printed `vercel promote` (Instant
+Rollback), then investigate.
+
 ## Known risks & missing information
 
 - **Per-process rate limiting and metrics** — the authenticated per-actor and

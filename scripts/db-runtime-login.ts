@@ -17,6 +17,11 @@ import { DB_SCHEMA, createAppPool, resolveDatabaseUrl } from "@/db/schema-config
  *     [--login <schema>_app_<x>] [--connection-limit <n>] \
  *     [--verify-host <pooled host>] [--allow-remote] [--plaintext-password]
  *
+ *   pnpm db:runtime-login --retire-except <login> | --retire-all \
+ *     [--force] [--allow-remote]
+ *
+ * The retire modes (DEP4) drop old rotated logins and need no password.
+ *
  * DATABASE_URL is the owner's DIRECT connection, as for db:app:migrate, and
  * dotenv fills it from .env like every other kit db script.
  */

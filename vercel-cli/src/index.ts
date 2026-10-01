@@ -7,6 +7,7 @@ import { doctor } from "./commands/doctor.js";
 import { envCheck, envPrune, envSync } from "./commands/env.js";
 import { init, login } from "./commands/init.js";
 import { deploy, migrateCommand, status, up } from "./commands/release.js";
+import { runtimeLogin } from "./commands/runtime-login.js";
 import { assertFreshBuild } from "./lib/build-stamp.js";
 import { configFileFrom, useConfigFile } from "./lib/config.js";
 import { CliError, dim, fail, info, setQuiet, warn } from "./lib/log.js";
@@ -90,8 +91,9 @@ program
       "One config file per deployment: --config (or DRK_DEPLOY_CONFIG) picks it.",
       // I-14: not every command takes --dry-run. test/unit.test.ts pins this
       // list against the flag each command's --help declares.
-      "Every command is idempotent. These also take --dry-run: env:sync, env:prune,",
-      "db:provision, migrate, deploy and up.",
+      "Every command is safe to re-run (db:runtime-login mints a new login each time).",
+      "These also take --dry-run: env:sync, env:prune, db:provision, db:runtime-login,",
+      "migrate, deploy and up.",
     ].join("\n"),
   )
   .version("1.0.0")
@@ -221,6 +223,44 @@ program
   .command("db:status")
   .description("Show the database variables wired into the project")
   .action(async () => dbStatus(CLI_ROOT));
+
+program
+  .command("db:runtime-login")
+  .description(
+    "Move production onto a NEW least-privilege database login (or retire old ones): checked against the database production's own build names, created and verified through the pooled endpoint by the kit's pnpm db:runtime-login, then DATABASE_URL and DB_SEARCH_PATH_VIA_OPTIONS written to Production, sensitive and never printed",
+  )
+  .option("--endpoint <pooled|direct>", 'the endpoint the app connects through (default "pooled")')
+  .option(
+    "--pooled-host <host>",
+    "the pooled host for the same database; derived for Neon, required elsewhere",
+  )
+  .option("--connection-limit <n>", "the login's connection limit (default -1: none)")
+  .option(
+    "--redeploy",
+    "redeploy production afterwards, probe it, and check that its schema gate connects as the new login",
+  )
+  .option(
+    "--plaintext-password",
+    "send the password itself instead of a SCRAM verifier, if the server refuses a pre-hashed one",
+  )
+  .option(
+    "--retire-except <login>",
+    "retire every rotated login (<schema>_app_<12 digits>) but this one, which must be the one production connects as",
+  )
+  .option("--retire-all", "retire every rotated login: the break-glass back to the owner")
+  .option(
+    "--force",
+    "with a retire mode: go ahead although production connects as another login, and retire logins with open sessions",
+  )
+  .option("--schema <name>", 'the schema (default "auth"), checked against the one production\'s gate names')
+  .option("--from-env <file>", "read PRODUCTION_DIRECT_DATABASE_URL from a .env file")
+  .option(
+    "--allow-unverified-target",
+    "go ahead when the serving deployment's build log has no [deploy-gate] target line (built before the gate); you then type the database name",
+  )
+  .option("--dry-run", "show the plan: nothing is created, written or redeployed")
+  .option("-y, --yes", "skip typing the database name under --allow-unverified-target")
+  .action(async (options) => runtimeLogin(CLI_ROOT, options));
 
 program
   .command("migrate")

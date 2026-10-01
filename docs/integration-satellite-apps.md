@@ -216,6 +216,8 @@ Every app keeps the kit's multi-stage `Dockerfile` (`output: "standalone"`, non-
 | **The primary's database and schema** (the stock forks, the §6.6 rig) | A, B | Works with the stock code, and is **not contained**: security-equivalent to Option C (§1.1). First-party, co-trusted satellites only. |
 | **Shared `auth` schema** | C | The satellite reads the primary's `auth.session`/`auth.user`; app-specific tables belong in the satellite's own schema. |
 
+**Satellites still connect as the owner.** The primary moves its own production onto a least-privilege login with `drk-deploy db:runtime-login` ([Deployment §8.3](./deployment.md#83-pnpm-dbruntime-login-creating-rotating-and-adopting-a-login)); that command refuses a satellite config, and a satellite has no `pnpm db:runtime-login` of its own. A satellite login (`<DB_SCHEMA>_sat_<x>`, which the primary's retire modes never touch) is a follow-up. Until then, a satellite on the primary's database connects as whatever role its `DATABASE_URL` names, so the containment rules above are the whole of its boundary.
+
 ### 6.5 Cron & email
 
 Each app ships the kit's `vercel.json` with the daily `outbox-drain` cron — set `CRON_SECRET` (the route fails closed without it) or **remove the `crons` block** on satellites that never send email.

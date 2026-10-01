@@ -12,6 +12,7 @@ import {
   defaultLoginName,
   isCleanReport,
   isKitLoginName,
+  isRotatedLoginName,
   quoteIdent,
   quoteLiteral,
   runtimeRoleName,
@@ -48,12 +49,28 @@ import { scramSha256Verifier } from "./scram";
  *      timeouts, the ledger read and `verifyCurrentUserPrivileges`;
  *   8. print the login, host, database and `verified`.
  *
+ * The two retire modes (DEP4) drop old rotated logins instead, after steps 1
+ * to 3: `--retire-except <login>` every LOGIN member of `<schema>_runtime`
+ * named `<schema>_app_<12 digits>` (`isRotatedLoginName`) but `<login>`, which
+ * must exist and be able to log in, and `--retire-all` every one of them. A
+ * login with sessions in `pg_stat_activity` is kept unless `--force`. No
+ * other name is ever touched: `<schema>_app`, `auth_app_ci` and a satellite's
+ * `<schema>_sat_*` survive both. They need no password.
+ *
  * The logic is here, with every connection injected, so
  * tests/unit/runtime-login.test.ts drives it against a fake; the wiring is
  * scripts/db-runtime-login.ts.
  */
 
 const PREFIX = "[db:runtime-login]";
+
+/**
+ * The variable the login's password is read from. `drk-deploy
+ * db:runtime-login` (DEP4) hands it to this command by this name
+ * (`runtimeLoginEnv` in vercel-cli/src/lib/migration-env.ts), and
+ * tests/unit/drk-deploy-runtime-login-env.test.ts holds the two to each other.
+ */
+export const LOGIN_PASSWORD_ENV = "DB_RUNTIME_LOGIN_PASSWORD";
 
 /** What the password may be: URL-safe as it is, and long enough to be a secret. */
 export const LOGIN_PASSWORD_RE = /^[A-Za-z0-9_-]{32,128}$/;
@@ -70,9 +87,16 @@ export interface RuntimeLoginArgs {
   allowRemote: boolean;
   verifyHost: string | null;
   plaintextPassword: boolean;
+  /** A retire mode (DEP4): `except` is `--retire-except`'s login, null for `--retire-all`. */
+  retire: { except: string | null } | null;
+  /** Retire a login despite its open sessions. Only with a retire mode. */
+  force: boolean;
 }
 
 export type ParsedArgs = { ok: true; args: RuntimeLoginArgs } | { ok: false; error: string };
+
+/** The flags that create or rotate a login, which a retire mode does not take. */
+const CREATE_FLAGS = ["--login", "--connection-limit", "--verify-host", "--plaintext-password"];
 
 /** The command's flags. `--name value` and `--name=value` both work; anything else is refused. */
 export function parseRuntimeLoginArgs(argv: readonly string[], schema: string): ParsedArgs {
@@ -82,9 +106,18 @@ export function parseRuntimeLoginArgs(argv: readonly string[], schema: string): 
     allowRemote: false,
     verifyHost: null,
     plaintextPassword: false,
+    retire: null,
+    force: false,
   };
+  const seen = new Set<string>();
+  /** Why `name` cannot be a login this command names, or null. */
+  const loginNameProblem = (flag: string, name: string): string | null =>
+    name === defaultLoginName(schema) || isKitLoginName(schema, name)
+      ? null
+      : `${flag} ${name} is not a kit login name: use ${defaultLoginName(schema)}, or ${schema}_app_ and 1 to 24 lower-case letters or digits`;
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i]!.split(/=(.*)/s, 2) as [string, string | undefined];
+    seen.add(flag);
     const value = (): string | null => {
       if (inline !== undefined) return inline;
       const next = argv[i + 1];
@@ -96,15 +129,31 @@ export function parseRuntimeLoginArgs(argv: readonly string[], schema: string): 
       case "--login": {
         const login = value();
         if (login === null) return { ok: false, error: "--login needs a name" };
-        if (login !== defaultLoginName(schema) && !isKitLoginName(schema, login)) {
-          return {
-            ok: false,
-            error: `--login ${login} is not a kit login name: use ${defaultLoginName(schema)}, or ${schema}_app_ and 1 to 24 lower-case letters or digits`,
-          };
-        }
+        const problem = loginNameProblem(flag, login);
+        if (problem) return { ok: false, error: problem };
         args.login = login;
         break;
       }
+      case "--retire-except": {
+        const keep = value();
+        if (keep === null) return { ok: false, error: "--retire-except needs the login to keep" };
+        const problem = loginNameProblem(flag, keep);
+        if (problem) return { ok: false, error: problem };
+        if (args.retire)
+          return { ok: false, error: "--retire-except and --retire-all exclude each other" };
+        args.retire = { except: keep };
+        break;
+      }
+      case "--retire-all":
+        if (inline !== undefined) return { ok: false, error: `${flag} takes no value` };
+        if (args.retire)
+          return { ok: false, error: "--retire-except and --retire-all exclude each other" };
+        args.retire = { except: null };
+        break;
+      case "--force":
+        if (inline !== undefined) return { ok: false, error: `${flag} takes no value` };
+        args.force = true;
+        break;
       case "--connection-limit": {
         const raw = value();
         const n = raw !== null && /^-?\d+$/.test(raw) ? Number(raw) : NaN;
@@ -134,6 +183,14 @@ export function parseRuntimeLoginArgs(argv: readonly string[], schema: string): 
       default:
         return { ok: false, error: `unknown argument ${flag}` };
     }
+  }
+  if (args.retire) {
+    const creating = CREATE_FLAGS.filter((flag) => seen.has(flag));
+    if (creating.length > 0) {
+      return { ok: false, error: `${creating.join(", ")} cannot be combined with a retire mode` };
+    }
+  } else if (args.force) {
+    return { ok: false, error: "--force applies only to --retire-except and --retire-all" };
   }
   return { ok: true, args };
 }
@@ -221,6 +278,32 @@ const VERIFY_SQL = `
          current_setting('statement_timeout') as statement_timeout,
          current_setting('idle_in_transaction_session_timeout') as idle_timeout`;
 
+/** `--retire-except`'s login, which must exist and be able to log in. */
+const KEEP_SQL = "select rolcanlogin from pg_roles where rolname = $1";
+
+/**
+ * Every LOGIN member of the runtime role, its open sessions in any database,
+ * and whether this session holds its privileges (what DROP OWNED needs).
+ * `exists`, not a join: from Postgres 16 one membership can be granted by
+ * several grantors, one pg_auth_members row each.
+ */
+const RETIRE_CANDIDATES_SQL = `
+  select r.rolname,
+         (select count(*)::int from pg_stat_activity a where a.usename = r.rolname) as sessions,
+         pg_has_role(current_user, r.oid, 'USAGE') as acts_as
+    from pg_roles r
+   where r.rolcanlogin
+     and exists (select 1 from pg_auth_members m
+                  where m.member = r.oid
+                    and m.roleid = (select oid from pg_roles where rolname = $1))
+   order by r.rolname`;
+
+interface RetireCandidate {
+  rolname: string;
+  sessions: number;
+  acts_as: boolean;
+}
+
 interface Preflight {
   user_name: string;
   database_name: string;
@@ -241,12 +324,14 @@ export async function runRuntimeLogin(deps: RuntimeLoginDeps): Promise<number> {
 
   const parsed = parseRuntimeLoginArgs(deps.argv, schema);
   if (!parsed.ok) return fail(parsed.error);
-  const { login, connectionLimit, allowRemote, verifyHost, plaintextPassword } = parsed.args;
+  const { login, connectionLimit, allowRemote, verifyHost, plaintextPassword, retire, force } =
+    parsed.args;
 
-  const password = deps.env.DB_RUNTIME_LOGIN_PASSWORD ?? "";
-  if (!LOGIN_PASSWORD_RE.test(password)) {
+  // A retire mode sets no password, so it needs none.
+  const password = deps.env[LOGIN_PASSWORD_ENV] ?? "";
+  if (!retire && !LOGIN_PASSWORD_RE.test(password)) {
     return fail(
-      "DB_RUNTIME_LOGIN_PASSWORD must be 32 to 128 characters of A-Z, a-z, 0-9, _ and - (it goes into a connection URL unescaped). " +
+      `${LOGIN_PASSWORD_ENV} must be 32 to 128 characters of A-Z, a-z, 0-9, _ and - (it goes into a connection URL unescaped). ` +
         "Generate one with: node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64url'))\"",
     );
   }
@@ -258,7 +343,9 @@ export async function runRuntimeLogin(deps: RuntimeLoginDeps): Promise<number> {
     assertLocalDatabaseTarget(ownerUrl!, {
       allowRemote,
       tool: "db:runtime-login",
-      consequence: "It creates or rotates a database login and changes the runtime role's grants.",
+      consequence: retire
+        ? "It drops database logins."
+        : "It creates or rotates a database login and changes the runtime role's grants.",
       overrideHint: "re-run with --allow-remote",
     });
   } catch (err) {
@@ -296,6 +383,17 @@ export async function runRuntimeLogin(deps: RuntimeLoginDeps): Promise<number> {
       return fail(
         `${runtime} does not exist: run pnpm db:app:migrate first (migration 0005 creates it)`,
       );
+    }
+    if (retire) {
+      return await retireLogins(session, {
+        schema,
+        runtime,
+        keep: retire.except,
+        force,
+        self: pre.user_name,
+        log,
+        fail,
+      });
     }
     if (!pre.superuser && !pre.admin_option) {
       return fail(
@@ -429,5 +527,95 @@ export async function runRuntimeLogin(deps: RuntimeLoginDeps): Promise<number> {
   log(
     `${PREFIX} login=${login} host=${host} database=${decodeURIComponent(owner.pathname.slice(1))} verified`,
   );
+  return 0;
+}
+
+/**
+ * The retire modes (DEP4): drops every LOGIN member of the runtime role whose
+ * name is a rotated kit login (`<schema>_app_<12 digits>`), other than `keep`
+ * and the session's own role. Resolves to the exit code.
+ *
+ * `drk-deploy db:runtime-login` mints a new login on every run, so rotation
+ * never cuts off the deployment still serving; this is how the old ones go
+ * once the new deployment is live. The name rule is the whole of what it may
+ * drop: `<schema>_app`, `auth_app_ci` and a satellite's `<schema>_sat_*` are
+ * never candidates, whatever they are a member of.
+ *
+ * A login with sessions open in any database is kept unless `force`: they
+ * are what a deployment still using it holds, though a transaction pooler
+ * keeps idle server connections for a while after the last client left, so
+ * the remedy is to retry later. Each login is dropped in its own transaction,
+ * and one that fails does not stop the others.
+ */
+async function retireLogins(
+  session: LoginSession,
+  opts: {
+    schema: string;
+    runtime: string;
+    keep: string | null;
+    force: boolean;
+    self: string;
+    log: (line: string) => void;
+    fail: (reason: string) => number;
+  },
+): Promise<number> {
+  const { schema, runtime, keep, force, log, fail } = opts;
+  if (keep !== null) {
+    const row = (await session.query<{ rolcanlogin: boolean }>(KEEP_SQL, [keep])).rows[0];
+    if (!row || !row.rolcanlogin) {
+      return fail(
+        `--retire-except ${keep} ${row ? "cannot log in" : "does not exist"}: nothing was retired. Name the login production connects as`,
+      );
+    }
+  }
+  const candidates = (await session.query<RetireCandidate>(RETIRE_CANDIDATES_SQL, [runtime])).rows;
+  const doomed = candidates.filter(
+    (role) =>
+      isRotatedLoginName(schema, role.rolname) &&
+      role.rolname !== keep &&
+      role.rolname !== opts.self,
+  );
+  if (doomed.length === 0) {
+    log(
+      `${PREFIX} nothing to retire: no${keep ? " other" : ""} LOGIN member of ${runtime} is named ${schema}_app_<12 digits>`,
+    );
+    return 0;
+  }
+
+  const kept: string[] = [];
+  for (const role of doomed) {
+    if (role.sessions > 0 && !force) {
+      log(
+        `${PREFIX} kept ${role.rolname}: ${role.sessions} open session(s) in pg_stat_activity. A pooler keeps idle server connections for a while after its last client, so retry later, or pass --force`,
+      );
+      kept.push(role.rolname);
+      continue;
+    }
+    const R = quoteIdent(role.rolname);
+    await session.query("begin");
+    try {
+      // Defensive: a login owns nothing and holds no direct grant (it
+      // inherits the runtime role). DROP OWNED needs the privileges OF the
+      // role, which a non-superuser CREATEROLE owner lacks from Postgres 16:
+      // Neon's neondb_owner is only an ADMIN member of the logins it creates,
+      // so DROP OWNED fails there with 42501. It is skipped then; DROP ROLE
+      // still refuses (2BP01) a role that anything depends on.
+      if (role.acts_as) await session.query(`drop owned by ${R}`);
+      await session.query(`drop role ${R}`);
+      await session.query("commit");
+    } catch (err) {
+      await session.query("rollback").catch(() => undefined);
+      log(`${PREFIX} could not retire ${role.rolname}: ${describeError(err)}`);
+      kept.push(role.rolname);
+      continue;
+    }
+    log(
+      `${PREFIX} retired ${role.rolname}${role.sessions > 0 ? ` (--force: its ${role.sessions} open session(s) lose their role)` : ""}`,
+    );
+  }
+  if (kept.length > 0) {
+    return fail(`${kept.length} login(s) not retired: ${kept.join(", ")}`);
+  }
+  log(`${PREFIX} retired ${doomed.length} login(s)${keep ? `; kept ${keep}` : ""}`);
   return 0;
 }

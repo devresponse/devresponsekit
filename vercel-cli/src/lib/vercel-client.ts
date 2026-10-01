@@ -1,5 +1,6 @@
 import { Vercel } from "@vercel/sdk";
 import type { EnvTarget } from "./env-spec.js";
+import { deploymentEventTexts } from "./gate-target.js";
 import { CliError } from "./log.js";
 
 /**
@@ -297,6 +298,46 @@ export class VercelClient {
     const failure = result.failed?.find((f) => f.error)?.error;
     if (failure?.code === ALREADY_EXISTS) throw alreadyExists(variable.key, variable.target);
     if (failure) throw new CliError(`Could not set ${variable.key}: ${failure.message ?? failure.code}`);
+  }
+
+  /**
+   * Replaces one entry's value by its id (`PATCH /v9/projects/{id}/env/{envId}`),
+   * as `type`, leaving its targets, branch and comment as they are (DEP4). The
+   * value is sent once and never read back: a `sensitive` entry cannot be.
+   */
+  async editEnv(
+    idOrName: string,
+    entry: { id: string; key: string },
+    change: { value: string; type: "encrypted" | "plain" | "sensitive" },
+  ): Promise<void> {
+    try {
+      await this.sdk.projects.editProjectEnv(
+        this.scope({
+          idOrName,
+          id: entry.id,
+          requestBody: { value: change.value, type: change.type },
+        }) as Parameters<Vercel["projects"]["editProjectEnv"]>[0],
+      );
+    } catch (err) {
+      throw asCliError(err, `Could not set ${entry.key}`);
+    }
+  }
+
+  /**
+   * Every line of a deployment's build log, oldest first
+   * (`GET /v3/deployments/{id}/events`, all of them, not followed), read-only
+   * (DEP4: the schema gate's `target` line is read from it).
+   */
+  async deploymentEvents(idOrUrl: string): Promise<string[]> {
+    try {
+      return deploymentEventTexts(
+        await this.sdk.deployments.getDeploymentEvents(
+          this.scope({ idOrUrl, direction: "forward", limit: -1, follow: 0 }),
+        ),
+      );
+    } catch (err) {
+      throw asCliError(err, `Could not read the build log of ${idOrUrl}`);
+    }
   }
 
   async removeEnv(idOrName: string, envId: string): Promise<void> {

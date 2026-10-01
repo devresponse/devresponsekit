@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  * refactor that promoted before migrating, merged green. ci.yml now runs its
  * checks in a job of its own. A workflow file is never executed by the test
  * suite, so what makes that job a gate is pinned here, in the style of
- * `dependency-governance.test.ts` and `deploy-workflow-guards.test.ts`:
+ * `dependency-governance.test.ts` and `migrate-workflow-guards.test.ts`:
  *
  * - the job `name` branch protection requires, named in the docs that tell
  *   the operator to require it;

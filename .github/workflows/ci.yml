@@ -104,7 +104,7 @@ jobs:
         # imports @/lib/auth, which validates the whole server env at load, so
         # it gets the schema-drift job's CI-only placeholders — on that command
         # alone, so the suites below run in the job's unchanged env. Auth
-        # first, then the app, the order db:provision, deploy.yml and
+        # first, then the app, the order db:provision, migrate-production.yml and
         # drk-deploy apply them in (F-141).
         run: |
           BETTER_AUTH_SECRET=ci-only-better-auth-secret-not-for-production \

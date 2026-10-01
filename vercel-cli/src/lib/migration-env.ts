@@ -55,8 +55,8 @@ export function migrationEnv(
 
 /**
  * The server variables the kit's env schema requires and cannot default,
- * DATABASE_URL aside, as the CI-only placeholders deploy.yml and ci.yml give
- * `db:auth:migrate` (F-141).
+ * DATABASE_URL aside, as the CI-only placeholders migrate-production.yml and
+ * ci.yml give `db:auth:migrate` (F-141).
  *
  * The auth runner imports `@/lib/auth` for its OPTIONS (tables, plugins,
  * fields), and that import validates the whole server environment. None of

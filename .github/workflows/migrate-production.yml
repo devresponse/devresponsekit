@@ -1,0 +1,162 @@
+name: Migrate production database
+
+# DEP2 — the database half of every production deploy.
+#
+# Production ships through Vercel's Git integration, which builds and promotes
+# every push to `main` and never migrates. This workflow applies that push's
+# migrations to the production database, in parallel with Vercel's build of
+# the same commit: `pnpm db:auth:migrate`, then `pnpm db:app:migrate` (F-26:
+# Better Auth's tables first, as `pnpm db:provision`, CI and drk-deploy do),
+# against production's DIRECT endpoint, as the role that owns the schema.
+#
+# The race is safe because of the build's schema gate (DEP1,
+# scripts/deploy-gate.ts): the production build polls for up to ten minutes
+# until the ledger holds every migration this commit needs and Better Auth has
+# nothing to add, and Vercel promotes only a build that passed. Run first or
+# second, this workflow cannot let code go live ahead of its schema; and a
+# migration that lands before its build is safe because every migration
+# follows the expand/contract rule (docs/deployment.md §5).
+#
+# Why `push` and not `workflow_run` after CI (deploy.yml's audit #19 trigger):
+# deploy.yml waited for CI because it also PROMOTED. Promotion now belongs to
+# Vercel's Git integration, which never waited for CI. `main` requires the CI
+# checks with STRICT up-to-date branches, so the merged tree is the tree CI
+# tested. Waiting for CI on `main` (the e2e job alone may take 30 minutes)
+# would push the migrations past the gate's window and fail the build.
+# Residual risk: an admin-bypass merge of a red PR migrates, and would ship
+# through Vercel anyway.
+#
+# Activation is an operator step (docs/deployment.md §3): create the GitHub
+# environment `production-migrations` (deployment branches: `main` only; no
+# required reviewers, since a reviewer who is not there within the gate's
+# window fails the build) and set its one secret, PRODUCTION_DIRECT_DATABASE_URL,
+# to the Neon DIRECT owner URL (host without `-pooler`, `sslmode=require`).
+# Until then `preflight` reports "not configured", `migrate` is skipped, the run
+# is green, and the hand gate in docs/deployment.md §1.1 applies. A skipping
+# run cannot ship code ahead of its schema: the gate fails any build whose
+# migrations are missing (what DEPLOY-1 made deploy.yml say out loud).
+#
+# Guards carried over from deploy.yml (retired by DEP2): the secret is scoped
+# to the two steps that use it; the trigger guard is restated on the job that
+# holds it; no fork-controlled code runs (push to `main` and dispatch both need
+# write access, and the checkout is the pushed commit); a run in progress is
+# never cancelled; CI placeholders for the auth step; Node 24; every action
+# pinned by SHA. tests/unit/migrate-workflow-guards.test.ts pins this shape.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never interrupt a migration mid-flight: the next run waits. GitHub keeps one
+# waiting run per group, so a newer push cancels a run that is still waiting;
+# the newer run applies the same migrations and more. The runners' advisory
+# lock serialises against any other run (a hand migrate, drk-deploy) too.
+concurrency:
+  group: production-migrations
+  cancel-in-progress: false
+
+jobs:
+  # Presence only: the secret is read into an expression that yields "true" or
+  # "false", and nothing else leaves this job. The `secrets` context is not
+  # available in `jobs.<id>.if`, so the verdict travels as an output. The job
+  # names the environment because an environment secret is invisible to a job
+  # that does not.
+  preflight:
+    name: Is the migration credential configured?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production-migrations
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          HAS_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL != '' }}
+        run: |
+          echo "## Production migrations" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$HAS_URL" = "true" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "The migration credential is configured: applying this commit's migrations." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "**Skipped: migrations are not automated; docs/deployment.md §1.1 hand gate applies.**"
+            echo ""
+            echo "The \`production-migrations\` environment has no \`PRODUCTION_DIRECT_DATABASE_URL\`."
+            echo "Nothing was migrated. The production build's schema gate fails any build whose"
+            echo "migrations are missing, so nothing ships ahead of its schema: apply them by hand"
+            echo "(docs/deployment.md §1.1), or configure the secret (docs/deployment.md §3)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Production migrations not automated::No PRODUCTION_DIRECT_DATABASE_URL in the production-migrations environment, so nothing was migrated; the docs/deployment.md §1.1 hand gate applies."
+
+  migrate:
+    name: Apply migrations to production (direct endpoint)
+    needs: preflight
+    # Restated where the secret is used, never inherited through `needs:`
+    # (deploy.yml's fork-guard lesson, review 2026-09-04 #10): dropping
+    # `needs`, or adding `always()` so the job reports instead of skipping, must
+    # not put production's owner credential in reach of another ref or event.
+    if: ${{ needs.preflight.outputs.configured == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production-migrations
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit this run was triggered for, which is the commit
+          # Vercel is building and gating.
+          ref: ${{ github.sha }}
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        # Version comes from the packageManager field in package.json.
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # No secret here: install runs the dependency tree's lifecycle scripts.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The auth migrator imports @/lib/auth for its OPTIONS (tables, plugins,
+      # fields), which validates the whole server environment at load. None of
+      # these values shapes the schema (the committed better-auth-schema.sql
+      # is generated under the same placeholders) or reaches the database, so
+      # the database URL is the only secret this step reads.
+      # DB_MIGRATE_LOCK_WAIT_MS bounds the wait for the runners' advisory lock:
+      # a hand run left open fails this job after five minutes, with the
+      # reason, instead of hanging until the job timeout.
+      - name: Apply Better Auth migrations (production)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
+          DB_SCHEMA: ${{ vars.DB_SCHEMA || 'auth' }}
+          DB_MIGRATE_LOCK_WAIT_MS: "300000"
+          BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
+          BETTER_AUTH_URL: http://localhost:3000
+          SSO_HANDOFF_ISSUER: http://localhost:3000
+          SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
+          SSO_HANDOFF_APPLICATION_ID: portal
+        run: pnpm db:auth:migrate
+
+      - name: Apply application migrations (production)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
+          DB_SCHEMA: ${{ vars.DB_SCHEMA || 'auth' }}
+          DB_MIGRATE_LOCK_WAIT_MS: "300000"
+        run: pnpm db:app:migrate
+
+      # The commit, never a URL or a host.
+      - name: Summary
+        run: |
+          {
+            echo "## Production migrations"
+            echo ""
+            echo "Migrations applied for commit \`$GITHUB_SHA\`: Better Auth's, then the application's."
+            echo "The production build of this commit passes its schema gate once it sees them."
+          } >> "$GITHUB_STEP_SUMMARY"

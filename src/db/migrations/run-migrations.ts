@@ -3,9 +3,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PoolClient } from "pg";
-import { createAppPool, ensureSchema } from "../schema-config";
+import { migrationUrlProblem } from "../connection-shape";
+import { resolveMigrationLockWait } from "../migration-lock";
+import { createAppPool, DB_SCHEMA, ensureSchema } from "../schema-config";
 import {
+  acquireMigrationLock,
   applyMigrationInTransaction,
+  assertMigrationSession,
+  MIGRATION_UNLOCK_SQL,
   recordMigrationInTransaction,
   resolveMigrationTimeouts,
   RUNNER_SESSION_STATEMENTS,
@@ -48,10 +53,17 @@ import {
  * session — taken BEFORE the ledger is read, released in `finally` — so two
  * runners started together (a redeploy racing a manual `db:app:migrate`)
  * serialise instead of colliding on the ledger primary key or on the DDL
- * itself. This is the lock `provision.ts`, `schema-config.ts` and
- * `deploy.yml` describe. It is a SESSION lock, so it must live on a client
- * checked out for the run's lifetime — not on `pool.query`, which may hand
- * every statement a different connection.
+ * itself. The Better Auth runner takes the same lock (DEP2). It is a SESSION
+ * lock, so it must live on a client checked out for the run's lifetime — not
+ * on `pool.query`, which may hand every statement a different connection.
+ *
+ * Refusals (DEP2), each an exit 1 that names the reason and never the URL:
+ * before connecting, a pooled or re-pointed `DATABASE_URL`
+ * (`migrationUrlProblem`, `src/db/connection-shape.ts`) and a malformed
+ * `DB_MIGRATE_LOCK_WAIT_MS` (`src/db/migration-lock.ts`); waiting longer than
+ * that for the lock (`acquireMigrationLock`); and, before the ledger is
+ * created, a session whose search_path does not resolve to DB_SCHEMA or a role
+ * that does not own the existing ledger (`assertMigrationSession`).
  *
  * Integrity (review #86): the ledger also stores a sha256 `checksum` of each
  * applied file — of its NORMALISED content (`normalizeMigrationSql`: comments
@@ -91,19 +103,15 @@ import {
  * `DB_MIGRATE_STATEMENT_TIMEOUT_MS`, default 10 min), so a file whose DDL
  * waits on a lock fails and rolls back instead of queueing every query on that
  * table behind it. The advisory-lock wait above is outside those transactions
- * and unbounded: before taking the lock the runner clears `lock_timeout` and
- * `statement_timeout` for its session (`RUNNER_SESSION_STATEMENTS`), so a
- * role default cannot cancel it. The planning/ordering/checksum
- * logic lives in `migration-plan.ts` (pure + unit-tested); this module only
- * does the fs + db side effects.
+ * and unbounded unless `DB_MIGRATE_LOCK_WAIT_MS` bounds it: before taking the
+ * lock the runner clears `lock_timeout` and `statement_timeout` for its
+ * session (`RUNNER_SESSION_STATEMENTS`), so a role default cannot cancel it.
+ * The planning/ordering/checksum logic lives in `migration-plan.ts` (pure +
+ * unit-tested); this module only does the fs + db side effects.
  */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const LOCALES_DIR = path.join(__dirname, "locales");
-
-/** Stable advisory-lock key shared by every runner instance (review #85). */
-const MIGRATION_LOCK_SQL = "select pg_advisory_lock(hashtext('app_schema_migrations'))";
-const MIGRATION_UNLOCK_SQL = "select pg_advisory_unlock(hashtext('app_schema_migrations'))";
 
 /**
  * Bootstraps the ledger. Both statements are idempotent so the runner can
@@ -138,15 +146,17 @@ async function readDirSafe(dir: string): Promise<string[]> {
 }
 
 async function main() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required to run migrations.");
+  // DEP2: a missing, pooled or re-pointed URL is refused before connecting.
+  const urlProblem = migrationUrlProblem(process.env.DATABASE_URL);
+  if (urlProblem) {
+    throw new Error(urlProblem);
   }
 
   const includeLocales = shouldIncludeLocales(process.env.DB_MIGRATE_LOCALES);
   // Resolved before connecting, so a malformed value fails with nothing
-  // touched (F-94).
+  // touched (F-94, DEP2).
   const timeouts = resolveMigrationTimeouts();
+  const lockWaitMs = resolveMigrationLockWait();
   const pool = createAppPool();
   // One dedicated session for the whole run: it owns the advisory lock and
   // every migration transaction (reviews #84, #85).
@@ -165,12 +175,15 @@ async function main() {
     for (const statement of RUNNER_SESSION_STATEMENTS) {
       await client.query(statement);
     }
-    await client.query(MIGRATION_LOCK_SQL);
+    await acquireMigrationLock(client, lockWaitMs);
     locked = true;
 
     // The target schema must exist before the (unqualified) ledger and
     // schema DDL run, so they land in DB_SCHEMA rather than `public`.
     await ensureSchema(pool);
+    // DEP2: and this session must resolve to it, as the role that owns any
+    // existing ledger, before the bootstrap below creates or alters anything.
+    await assertMigrationSession(client, DB_SCHEMA);
     await ensureMigrationTable(client);
     const applied = await getApplied(client);
 

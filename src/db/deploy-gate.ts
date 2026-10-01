@@ -9,7 +9,7 @@ import {
  * The production build's schema gate (DEP1): the pure half.
  *
  * Vercel's git integration builds and promotes every push to `main`, and
- * nothing in that path migrates. Until DEP1 the only thing keeping a build
+ * never migrates. Until DEP1 the only thing keeping a build
  * from going live ahead of its schema was a person remembering the hand gate
  * in docs/deployment.md §1.1, and forgetting it was an outage that
  * `/api/health/ready` could only report afterwards (review #43). Now every
@@ -27,10 +27,11 @@ import {
  * under the coverage ratchet. The one database attempt is
  * `migrations/deploy-gate-check.ts`; the wiring is the script.
  *
- * The gate never writes. How migrations are applied is unchanged (the hand
- * gate, or `drk-deploy migrate`); the gate only refuses to let a build that
- * needs them go live without them, and polls for {@link DEFAULT_GATE_WAIT_MS}
- * so a migration started around the merge still lets the build through.
+ * The gate never writes. Migrations are applied by `migrate-production.yml`
+ * on the same push (DEP2), or, as the fallback, by the hand gate or
+ * `drk-deploy migrate`; the gate only refuses to let a build that needs them
+ * go live without them, and polls for {@link DEFAULT_GATE_WAIT_MS} so a
+ * migration started around the merge still lets the build through.
  */
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -105,10 +106,10 @@ function isPostgresUrl(value: string): boolean {
 /**
  * Decides, from the build's environment alone, what the gate does. In order:
  *
- *   1. `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE` set: drk-deploy and deploy.yml
- *      migrate and then run `vercel build --prod` on their own machine, where
- *      a sensitive DATABASE_URL comes back as {@link SENSITIVE_PLACEHOLDER}
- *      and cannot be checked. They pass the commit they migrated from. It is
+ *   1. `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE` set: drk-deploy migrates and then
+ *      runs `vercel build --prod` on its own machine, where a sensitive
+ *      DATABASE_URL comes back as {@link SENSITIVE_PLACEHOLDER} and cannot be
+ *      checked. It passes the commit it migrated from. It is
  *      refused on Vercel's build machines whatever its value, so a copy left
  *      in the project's environment can never switch the gate off there, and
  *      honoured elsewhere only when it is exactly the commit being built

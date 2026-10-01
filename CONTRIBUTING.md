@@ -113,9 +113,11 @@ checks it).
 changes as new numbered, append-only, idempotent forward migrations
 (`NNNN-*.sql`, numbered after the highest file in `src/db/migrations/`, so
 `0003-…` next); the runner applies and ledgers them.
-Production applies a migration by hand **before** the PR that needs it merges
-(see [README → Deployment](README.md#deployment)); a production build whose
-migration is missing fails at the schema gate and is not promoted.
+Production applies a merge's migrations in `migrate-production.yml`, on the
+same push Vercel builds, and by hand **before** the merge while that workflow
+is not configured (see [README → Deployment](README.md#deployment)); a
+production build whose migration is missing fails at the schema gate and is
+not promoted.
 
 Old code runs on the new schema (the live build while the migration runs, any
 deployment an Instant Rollback restores, every satellite on the shared

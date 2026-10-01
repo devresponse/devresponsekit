@@ -68,6 +68,11 @@ async function runMigrations(ledger: Array<[string, string | null]>): Promise<Ru
       if (text.trim() === "select id, checksum from app_schema_migrations") {
         return { rows: ledger.map(([id, checksum]) => ({ id, checksum })) };
       }
+      // DEP2's session check: the search_path resolves to DB_SCHEMA, and the
+      // migrating role owns the ledger.
+      if (text.includes("current_schema()")) {
+        return { rows: [{ schema_name: params?.[0], login: "owner", ledger_owner: "owner" }] };
+      }
       return { rows: [] };
     },
     on: () => session,

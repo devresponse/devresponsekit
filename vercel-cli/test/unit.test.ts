@@ -1619,3 +1619,18 @@ test("I-14: --dry-run is claimed for exactly the commands whose --help declares 
   );
   assert.doesNotMatch(readme.replace(/\s+/g, " "), /every command accepts `--dry-run`/i);
 });
+
+test("DEP2: no command offers --allow-pooled, which the kit's own runners would refuse anyway", async () => {
+  // Since DEP2 `pnpm db:auth:migrate` and `db:app:migrate` refuse every pooled
+  // URL with no override, so a pooled URL this CLI let through would fail in
+  // the runner, after `up` had already synced the environment.
+  const entry = join(CLI_ROOT, "dist", "index.js");
+  for (const command of ["migrate", "deploy", "up"]) {
+    const { stdout } = await promisify(execFile)(process.execPath, [entry, command, "--help"], {
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.match(stdout, /--schema <name>/, `${command} --help lists its options`);
+    assert.doesNotMatch(stdout, /--allow-pooled/, `${command} --help`);
+  }
+  assert.doesNotMatch(readFileSync(join(CLI_ROOT, "README.md"), "utf8"), /--allow-pooled/, "README.md");
+});

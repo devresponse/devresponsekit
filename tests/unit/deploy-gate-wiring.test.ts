@@ -9,8 +9,7 @@ import { describe, expect, it } from "vitest";
  * - `vercel.json` names the build command. A configured `buildCommand` wins
  *   over the dashboard's Build Command and over any package script
  *   (@vercel/next 15.0.2), so the gate cannot be switched off from the
- *   project's settings, and `vercel build` (drk-deploy, deploy.yml) reads the
- *   same field.
+ *   project's settings, and `vercel build` (drk-deploy) reads the same field.
  * - `vercel-build` runs the gate AFTER `next build`, which needs no database,
  *   so a migration running at the same time overlaps the build.
  * - `build` stays `next build`: CI's Build job and the Docker image build

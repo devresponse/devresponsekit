@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { ClientBase, Pool, PoolClient } from "pg";
+import { type ClientBase, Pool, type PoolClient } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as SchemaConfig from "@/db/schema-config";
 import {
@@ -55,9 +55,14 @@ vi.mock("@/db/schema-config", async (importOriginal) => {
 function recordingClient(failOn?: RegExp) {
   const statements: string[] = [];
   const client = {
-    query: async (text: string) => {
+    query: async (text: string, params?: unknown[]) => {
       statements.push(text);
       if (failOn?.test(text)) throw new Error(`refused: ${text}`);
+      // DEP2's session check (`assertMigrationSession`), answered as a
+      // session in DB_SCHEMA with no ledger yet.
+      if (text.includes("current_schema()")) {
+        return { rows: [{ schema_name: params?.[0], login: "owner", ledger_owner: null }] };
+      }
       return { rows: [] };
     },
   };
@@ -279,7 +284,18 @@ describe("the runners (F-94)", () => {
     vi.stubEnv("DB_MIGRATE_LOCK_TIMEOUT_MS", "4321");
     vi.stubEnv("DB_MIGRATE_STATEMENT_TIMEOUT_MS", "");
     const runMigrations = vi.fn(async () => undefined);
-    getMigrations.mockResolvedValue({ runMigrations });
+    // DEP2: the runner holds one connection of the migration pool for the
+    // run, for the advisory lock and the session check. What that session
+    // had been sent when Better Auth was asked for its plan is kept.
+    const { client: lockSession, statements: sessionStatements } = recordingClient();
+    const release = vi.fn();
+    vi.spyOn(Pool.prototype, "connect").mockImplementation((async () =>
+      Object.assign(lockSession, { release })) as never);
+    let sentBeforePlan: string[] = [];
+    getMigrations.mockImplementation(async () => {
+      sentBeforePlan = [...sessionStatements];
+      return { runMigrations };
+    });
     vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code})`);
     }) as never);
@@ -306,5 +322,18 @@ describe("the runners (F-94)", () => {
     ]);
     // …and the runner ends that pool once the migrator is done.
     await vi.waitFor(() => expect(config.database.ended).toBe(true));
+
+    // DEP2: before the plan, the held session cleared its ceilings, took the
+    // application runner's lock and passed the session check; it unlocked
+    // after the migrator and went back to the pool.
+    expect(sentBeforePlan).toEqual([
+      ...RUNNER_SESSION_STATEMENTS,
+      "select pg_advisory_lock(hashtext('app_schema_migrations'))",
+      expect.stringContaining("current_schema()"),
+    ]);
+    expect(sessionStatements.slice(sentBeforePlan.length)).toEqual([
+      "select pg_advisory_unlock(hashtext('app_schema_migrations'))",
+    ]);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });

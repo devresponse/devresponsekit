@@ -29,7 +29,8 @@ const read = (rel: string) => readFileSync(path.join(root, rel), "utf8");
 /**
  * Slice between markers that must exist. A missing marker throws rather than
  * silently slicing from -1, which would hand every assertion a haystack that
- * happens to contain what it looks for (as in deploy-workflow-guards.test.ts).
+ * happens to contain what it looks for (as the retired
+ * deploy-workflow-guards.test.ts once did).
  * `to` is searched for AFTER `from`, so the two may share a prefix (`\n## `).
  */
 function sliceAt(haystack: string, from: string, to?: string): string {
@@ -315,7 +316,7 @@ describe("dependency governance: Node runtime major", () => {
   });
 
   it("every workflow's node-version equals .nvmrc", () => {
-    for (const wf of ["ci.yml", "deploy.yml", "mutation.yml", "dependency-audit.yml"]) {
+    for (const wf of ["ci.yml", "migrate-production.yml", "mutation.yml", "dependency-audit.yml"]) {
       const versions = [...read(`.github/workflows/${wf}`).matchAll(/node-version:\s*(\S+)/g)].map(
         (m) => m[1],
       );

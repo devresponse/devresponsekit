@@ -182,6 +182,14 @@ of 2.0.0's list below. Each entry names what to carry over.
   (I-13). Import and mock them by the new paths. A branch or satellite fork
   that ports a kit file applies the same rewrite
   ([Architecture §8.1](docs/architecture.md#81-how-it-moved)).
+- **Shell navigation (NAVK).** The brand in the signed-in top bar links to
+  the app's home, `/{locale}/app`, as the public bar's brand already did.
+  The **Applications** switcher lists **Administration Console** first for a
+  user the Administrator console admits, and shows it while the enterprise
+  apps load, fail or are empty. The secure layout decides it with
+  `canAccessAdminConsole` (`src/lib/admin/permissions.ts`), the console
+  layout's own rule (any `admin.*` key or the superadmin marker), and sends
+  the switcher only the href. Two new `shell` messages in all eight locales.
 
 ### Security
 

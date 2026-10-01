@@ -16,7 +16,7 @@ captured: 2026-07-10
 The default screen after signing in — a minimal home inside the authenticated app shell. Its main job on this demo is to present the shell chrome around a welcome message.
 
 ## Key elements
-- Brand bar: sidebar toggle, **Applications** switcher (opens a menu of the enterprise applications: Portal, Analytics, Documentation), theme toggle (light/dark), language switcher, **Sign out**.
+- Brand bar: sidebar toggle, the product name (a link back to the app's home, this dashboard), **Applications** switcher (opens a menu of the enterprise applications: Portal, Analytics, Documentation; for a user who can open the Administrator console, **Administration Console** comes first), theme toggle (light/dark), language switcher, **Sign out**.
 - Primary sidebar: Dashboard, Workspace, Account, Documentation, Administration, Users, Audit log. The sidebar is served by a navigation API and only shows entries the current user's permissions allow.
 - Main region: "Dashboard — Welcome to the secure DevResponse Enterprise shell."
 
@@ -29,7 +29,7 @@ The default screen after signing in — a minimal home inside the authenticated 
 - Leads to: every app and admin area via the sidebar.
 
 ## Access
-Any signed-in active member (`shell.view`). The Administration/Users/Audit entries only appear for users holding the matching admin permissions.
+Any signed-in active member (`shell.view`). The Administration/Users/Audit entries only appear for users holding the matching admin permissions, and the switcher's **Administration Console** entry only for users the console admits (any `admin.*` permission), the same rule as the sidebar's Administration entry.
 
 ## Observations
 Content is intentionally sparse — the value of the shell is the chrome (navigation, switcher, theming, localization), not this page.

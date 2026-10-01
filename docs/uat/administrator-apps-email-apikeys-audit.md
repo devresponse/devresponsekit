@@ -48,7 +48,7 @@ Key permission keys for this set (`src/lib/admin/permissions.ts:50`):
 - Communication group -> `email` (outbox) and `email/templates` both require `admin.email.read`.
 - Activity group -> `audit` requires `admin.audit.read`.
 
-The Administrator layout itself is a defence-in-depth gate: any single `admin.*` permission admits the caller, otherwise `notFound()` (`src/app/[locale]/(secure)/app/administrator/layout.tsx:49`).
+The Administrator layout itself is a defence-in-depth gate: any single `admin.*` permission admits the caller, otherwise `notFound()` (`src/app/[locale]/(secure)/app/administrator/layout.tsx:52`).
 
 ---
 

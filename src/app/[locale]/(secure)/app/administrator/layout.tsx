@@ -20,6 +20,9 @@ export const dynamic = "force-dynamic";
  *     the caller holds *some* `admin.*` permission. If not, we render
  *     `notFound()` so the route is indistinguishable from a missing
  *     page (docs/admin-manager.md §6.2).
+ *   - The shell's "Administration Console" switcher entry mirrors this
+ *     guard through `canAccessAdminConsole` (NAVK);
+ *     tests/unit/admin-console-gate.test.ts fails if the two part.
  *   - Per-page guards call the more specific
  *     `checkAdminPermissionServer(<exact perm>)` to enforce the read needed
  *     by that page (`requireAdminPermission` is the route-handler guard).

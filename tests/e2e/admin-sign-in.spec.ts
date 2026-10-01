@@ -16,5 +16,14 @@ test("seed admin signs in through the form and reaches the dashboard", async ({ 
 
   await expect(page).toHaveURL(/\/en\/app\/dashboard/, { timeout: 15_000 });
   // The secure shell is up: brand bar + primary navigation landmark.
-  await expect(page.getByRole("banner", { name: /brand/i })).toBeVisible();
+  const brandBar = page.getByRole("banner", { name: /brand/i });
+  await expect(brandBar).toBeVisible();
+
+  // NAVK: the app switcher offers the admin the Administration Console, and the
+  // brand (the bar's only link; the sheet portals outside it) returns home.
+  await page.getByRole("button", { name: /switch application/i }).click();
+  await page.getByRole("link", { name: /administration console/i }).click();
+  await expect(page).toHaveURL(/\/en\/app\/administrator$/, { timeout: 15_000 });
+  await brandBar.getByRole("link").click();
+  await expect(page).toHaveURL(/\/en\/app\/dashboard/, { timeout: 15_000 });
 });

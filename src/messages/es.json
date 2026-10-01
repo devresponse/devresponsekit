@@ -256,6 +256,8 @@
     "menuLoadError": "No se pudo cargar el menú.",
     "unauthorized": "No tiene permiso para ver este contenido.",
     "noApplications": "Aún no hay aplicaciones disponibles para usted.",
+    "administrationConsole": "Consola de administración",
+    "administrationConsoleDescription": "Gestione usuarios, organizaciones, roles y configuración",
     "skipToMain": "Saltar al contenido principal",
     "skipToNavigation": "Saltar a la navegación",
     "account": "Cuenta",

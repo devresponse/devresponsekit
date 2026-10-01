@@ -21,6 +21,13 @@ import type { EnterpriseApplicationMenuItem } from "@/components/navigation/menu
 
 export interface ApplicationSwitcherSheetProps {
   locale: string;
+  /**
+   * The Administrator console's localized href, present only for a caller the
+   * console admits. The secure layout decides that server-side with
+   * `canAccessAdminConsole` and passes this string alone: never the grant
+   * list, never a function (NAVK).
+   */
+  adminConsoleHref?: string;
 }
 
 /**
@@ -32,10 +39,17 @@ export interface ApplicationSwitcherSheetProps {
  * cross-subdomain redirect through the secure handoff route — the client
  * never receives a long-lived token.
  *
+ * With `adminConsoleHref`, an "Administration Console" entry comes first,
+ * outside the fetched list: the server already decided it, so it shows at
+ * once, whether the list is loading, failed or empty (NAVK).
+ *
  * Loading and failure states use the skeleton + retry pattern required
  * by §25.
  */
-export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetProps) {
+export function ApplicationSwitcherSheet({
+  locale,
+  adminConsoleHref,
+}: ApplicationSwitcherSheetProps) {
   const t = useTranslations("shell");
   const tCommon = useTranslations("common");
   const [open, setOpen] = useState(false);
@@ -96,6 +110,29 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
           <SheetTitle>{t("switchApplication")}</SheetTitle>
           <SheetDescription>{t("applications")}</SheetDescription>
         </SheetHeader>
+
+        {adminConsoleHref ? (
+          <ul className="flex flex-col gap-1" role="list">
+            <li>
+              {/*
+                Plain <a>, like the entries below: the href already carries
+                the locale, which next-intl's Link would prefix again. The
+                click closes the sheet rather than leave it open over the
+                page while the console loads, or after a new-tab click.
+              */}
+              <a
+                href={adminConsoleHref}
+                className="hover:bg-muted focus-visible:ring-ring block rounded-md p-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+                onClick={() => setOpen(false)}
+              >
+                <span className="font-medium">{t("administrationConsole")}</span>
+                <span className="text-muted-foreground block text-xs">
+                  {t("administrationConsoleDescription")}
+                </span>
+              </a>
+            </li>
+          </ul>
+        ) : null}
 
         {loading || items === null ? (
           errorStatus ? (

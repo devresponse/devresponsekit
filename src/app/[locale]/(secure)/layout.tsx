@@ -12,10 +12,12 @@ import { DialogManagerProvider } from "@/components/ui/dialog-manager";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/flexsidebar";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ClientMessagesProvider } from "@/components/i18n/client-messages-provider";
+import { LocaleLink } from "@/components/i18n/locale-link";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { OrganizationSwitcher } from "@/components/app-shell/organization-switcher";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
+import { canAccessAdminConsole } from "@/lib/admin/permissions";
 import { getImpersonatorId, requireSecureSession } from "@/lib/auth-guard";
 import { listUserActiveOrganizations } from "@/lib/active-org.server";
 import { listImpersonationReachableOrgIds } from "@/lib/impersonation-reach.server";
@@ -93,6 +95,16 @@ export default async function SecureLayout({
   const tRegions = await getTranslations("shell.regions");
   const brand = getBrand();
 
+  // NAVK: the app switcher's "Administration Console" entry, for exactly the
+  // callers the console's own layout guard admits (a nav gate must equal its
+  // destination's guard). `access` is the session-resolved context that guard
+  // reads too, so under impersonation the entry follows the same confinement.
+  // Only the href crosses into the client component (review #213 keeps the
+  // grant list out of the RSC payload).
+  const adminConsoleHref = canAccessAdminConsole(access.permissions)
+    ? `/${safeLocale}/app/administrator`
+    : undefined;
+
   const shell = (
     <CompactDensityWrapper density="compact" className="h-screen">
       <SidebarProvider defaultOpen={sidebarDefaultOpen} className="h-full">
@@ -103,9 +115,16 @@ export default async function SecureLayout({
           branding={
             <TopShellBar ariaLabel={tRegions("banner")}>
               <SidebarTrigger className="-ml-1" srLabel={tRegions("toggleSidebar")} />
-              <BrandLogo compact className="text-sm font-semibold" />
+              {/* NAVK: the brand returns to this app's home, as the public bar's does. */}
+              <LocaleLink
+                href="/app"
+                locale={safeLocale}
+                className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
+              >
+                <BrandLogo compact className="text-sm font-semibold" />
+              </LocaleLink>
               <div className="ml-auto flex items-center gap-2">
-                <ApplicationSwitcherSheet locale={safeLocale} />
+                <ApplicationSwitcherSheet locale={safeLocale} adminConsoleHref={adminConsoleHref} />
                 {organizations.length > 1 && access.organizationId ? (
                   <OrganizationSwitcher
                     current={access.organizationId}

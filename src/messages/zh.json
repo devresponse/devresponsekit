@@ -256,6 +256,8 @@
     "menuLoadError": "加载菜单失败。",
     "unauthorized": "您没有权限查看此内容。",
     "noApplications": "目前还没有可供您使用的应用。",
+    "administrationConsole": "管理控制台",
+    "administrationConsoleDescription": "管理用户、组织、角色和设置",
     "skipToMain": "跳转到主要内容",
     "skipToNavigation": "跳转到导航",
     "account": "账户",

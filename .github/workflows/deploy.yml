@@ -25,9 +25,14 @@ name: Deploy (production)
 #   1. Add the four credentials below.
 #   2. DISABLE Vercel's automatic Git production deploys (Vercel → Project →
 #      Settings → Git: turn off production-branch auto-deploy, or set an
-#      "Ignored Build Step") so THIS workflow is the only path to production.
-#      Leaving both on double-deploys and lets a push promote a build ahead of
-#      its migrations — the exact race the ordering above exists to prevent.
+#      "Ignored Build Step", or set `git.deploymentEnabled` false for `main` in
+#      vercel.json) so THIS workflow is the only path to production. Leaving
+#      both on builds and deploys every push twice, by two deployers that
+#      cannot see each other. Before the schema gate (DEP1) the Vercel half
+#      also promoted a build ahead of its migrations, the race the ordering
+#      above exists to prevent; scripts/deploy-gate.ts now fails that build,
+#      so it is not promoted, until the migrations are applied
+#      (docs/deployment.md §1.2).
 #
 # Credentials, in the `production` GitHub Environment (preferred — scoped to
 # that environment) or as repository secrets (Settings → Secrets → Actions):
@@ -331,10 +336,19 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
+      # DEP1: `vercel build` runs vercel.json's build command, so the schema
+      # gate (scripts/deploy-gate.ts) runs here too. It cannot check this
+      # database from the runner: `vercel pull` returns a sensitive
+      # DATABASE_URL as a placeholder. The two migrate steps above have just
+      # succeeded on this very checkout (a failed step stops the job), so the
+      # build is told its HEAD. Not an event expression: on workflow_dispatch
+      # the checkout is the ref's tip when it ran, which `github.sha` (the tip
+      # at dispatch) need not be. The gate honours the value only off Vercel's
+      # build machines and only when it is exactly the commit being built.
       - name: Build for production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel build --prod --token="$VERCEL_TOKEN"
+        run: DEPLOY_GATE_PREBUILT_AFTER_MIGRATE="$(git rev-parse HEAD)" vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy the prebuilt output to production
         env:

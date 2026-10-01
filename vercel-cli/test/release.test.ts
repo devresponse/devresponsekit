@@ -55,14 +55,22 @@ import { verifyMigrationTarget } from "../dist/lib/migration-target.js";
 import {
   describeCommit,
   gitEnv,
+  hasSchemaGate,
   inspectTree,
   productionAutoDeploy,
+  readPackageJson,
   readStatus,
+  readVercelJson,
   treeProblems,
 } from "../dist/lib/release-tree.js";
 import { projectGit } from "../dist/lib/vercel-client.js";
 import { resolveProfile } from "../dist/lib/target.js";
-import { assertCheckoutLink, issuerProjectProblem, vercelEnvFor } from "../dist/lib/vercel-project.js";
+import {
+  assertCheckoutLink,
+  buildEnv,
+  issuerProjectProblem,
+  vercelEnvFor,
+} from "../dist/lib/vercel-project.js";
 
 /* ================================================================== */
 /*  F-45 / F-47: the release ORDER, asserted rather than read          */
@@ -2493,18 +2501,33 @@ test("F-49: a run that migrates is refused while Vercel's git integration deploy
   }
 
   // Auto-deploy turned off where this can tell: in vercel.json, or an Ignored
-  // Build Step that skips every build.
-  const off: [string, ProjectGit, unknown][] = [
-    ["vercel.json, the production branch", GIT_CONNECTED, { git: { deploymentEnabled: { main: false } } }],
-    ["vercel.json, every branch", GIT_CONNECTED, { git: { deploymentEnabled: false } }],
-    ["Ignored Build Step exit 0", { ...GIT_CONNECTED, ignoreCommand: "exit 0" }, null],
+  // Build Step that skips every build. Off wins over the schema gate (DEP1):
+  // a gated checkout whose vercel.json also disables the branch is off.
+  const off: [string, ProjectGit, Record<string, unknown> | null, boolean][] = [
+    [
+      "vercel.json, the production branch",
+      GIT_CONNECTED,
+      { git: { deploymentEnabled: { main: false } } },
+      false,
+    ],
+    ["vercel.json, every branch", GIT_CONNECTED, { git: { deploymentEnabled: false } }, false],
+    ["Ignored Build Step exit 0", { ...GIT_CONNECTED, ignoreCommand: "exit 0" }, null, false],
+    [
+      "gated, and the production branch off",
+      GIT_CONNECTED,
+      { git: { deploymentEnabled: { main: false } } },
+      true,
+    ],
   ];
-  for (const [name, git, vercelJson] of off) {
+  for (const [name, git, vercelJson, gated] of off) {
     const { cliRoot, kitRoot } = fixture("kit");
-    if (vercelJson) writeFileSync(join(kitRoot, "vercel.json"), JSON.stringify(vercelJson));
+    if (gated) withSchemaGate(kitRoot, vercelJson ?? {});
+    else if (vercelJson) writeFileSync(join(kitRoot, "vercel.json"), JSON.stringify(vercelJson));
     const { runner, calls } = recordingRunner({ git });
-    await deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner);
+    const told = await captureOutput(() => deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner));
+    assert.equal(told.error, undefined, `${name}: ${told.out}`);
     assert.deepEqual(calls, KIT_ORDER, name);
+    assert.match(told.out, /vercel git integration\s+off/, name);
   }
 
   // Any other Ignored Build Step is a program this cannot run: it counts as
@@ -2546,6 +2569,7 @@ test("F-49: productionAutoDeploy and projectGit read the project's git connectio
   ];
   for (const [name, git, vercelJson, on] of cases) {
     assert.equal(productionAutoDeploy(git, vercelJson).on, on, name);
+    assert.equal(productionAutoDeploy(git, vercelJson).gated, undefined, `${name}: no package.json, no gate`);
   }
 
   assert.deepEqual(projectGit(undefined, undefined), NO_GIT);
@@ -2568,6 +2592,211 @@ test("F-49: productionAutoDeploy and projectGit read the project's git connectio
     projectGit({ type: "bitbucket", owner: "acme", slug: "kit", productionBranch: "main" }, null).repository,
     "bitbucket:acme/kit",
   );
+});
+
+/* ================================================================== */
+/*  DEP1: the kit's production build runs a schema gate                */
+/* ================================================================== */
+
+/** The kit's own checkout: the repository this CLI lives in. */
+const KIT_CHECKOUT = fileURLToPath(new URL("../../", import.meta.url));
+
+/**
+ * Makes every Vercel build of a fixture checkout run the schema gate, the way
+ * the kit's own vercel.json and package.json do (DEP1). `vercelJson` is
+ * merged in, for a checkout that also sets `git.deploymentEnabled`.
+ */
+function withSchemaGate(root: string, vercelJson: Record<string, unknown> = {}): void {
+  writeFileSync(
+    join(root, "vercel.json"),
+    JSON.stringify({ ...vercelJson, buildCommand: "pnpm run vercel-build" }),
+  );
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      scripts: { build: "next build", "vercel-build": "next build && tsx scripts/deploy-gate.ts" },
+    }),
+  );
+}
+
+test("DEP1: productionAutoDeploy calls a checkout gated only when vercel.json and its vercel-build script both run the gate", () => {
+  assert.equal(
+    hasSchemaGate(readVercelJson(KIT_CHECKOUT), readPackageJson(KIT_CHECKOUT)),
+    true,
+    "the kit's own vercel.json and package.json",
+  );
+  const gateJson = { buildCommand: "pnpm run vercel-build" };
+  const gateScripts = { scripts: { "vercel-build": "next build && tsx scripts/deploy-gate.ts" } };
+  const cases: [string, unknown, unknown, boolean][] = [
+    ["both", gateJson, gateScripts, true],
+    ["a vercel-build without the gate", gateJson, { scripts: { "vercel-build": "next build" } }, false],
+    ["the gate under another script", gateJson, { scripts: { build: "tsx scripts/deploy-gate.ts" } }, false],
+    ["another build command", { buildCommand: "pnpm build" }, gateScripts, false],
+    ["no vercel.json", null, gateScripts, false],
+    ["no package.json", gateJson, null, false],
+  ];
+  for (const [name, vercelJson, packageJson, gated] of cases) {
+    assert.equal(hasSchemaGate(vercelJson, packageJson), gated, name);
+    const verdict = productionAutoDeploy(GIT_CONNECTED, vercelJson, packageJson);
+    assert.equal(verdict.on, true, name);
+    assert.equal(verdict.gated === true, gated, name);
+  }
+  assert.match(
+    productionAutoDeploy(GIT_CONNECTED, gateJson, gateScripts).why,
+    /^github:devresponse\/devresponsekit: every push to main is built by Vercel and promoted only once its schema gate \(scripts\/deploy-gate\.ts\) finds the commit's migrations applied$/,
+  );
+  assert.deepEqual(
+    productionAutoDeploy(NO_GIT, gateJson, gateScripts).on,
+    false,
+    "nothing connected is still off",
+  );
+
+  // The fixtures as the release reads them: the kit gated, a satellite's app not.
+  const kit = fixture("kit");
+  withSchemaGate(kit.kitRoot);
+  assert.equal(
+    productionAutoDeploy(GIT_CONNECTED, readVercelJson(kit.kitRoot), readPackageJson(kit.kitRoot)).gated,
+    true,
+  );
+  const satellite = fixture("satellite", { database: "own" });
+  writeFileSync(join(satellite.appRoot, "vercel.json"), JSON.stringify({ regions: ["iad1"] }));
+  writeFileSync(
+    join(satellite.appRoot, "package.json"),
+    JSON.stringify({ scripts: { build: "next build" } }),
+  );
+  const verdict = productionAutoDeploy(
+    GIT_CONNECTED,
+    readVercelJson(satellite.appRoot),
+    readPackageJson(satellite.appRoot),
+  );
+  assert.equal(verdict.on, true);
+  assert.equal(verdict.gated, undefined);
+});
+
+test("DEP1: a migrating run is told, not refused, when Vercel's builds are gated; a satellite's ungated build keeps the F-49 refusal", async () => {
+  const gated = fixture("kit");
+  withSchemaGate(gated.kitRoot);
+  const deployed = recordingRunner({ git: GIT_CONNECTED });
+  const told = await captureOutput(() =>
+    deploy(gated.cliRoot, { databaseUrl: PRODUCTION_DIRECT }, deployed.runner),
+  );
+  assert.equal(told.error, undefined, told.out);
+  assert.deepEqual(deployed.calls, KIT_ORDER);
+  assert.match(told.out, /vercel git integration\s+DEPLOYS PRODUCTION, gated/);
+  assert.match(
+    told.out,
+    /Vercel promotes a push only after its schema gate passes, so this run's migrate-then-promote is not a race\./,
+  );
+  const gatedUp = fixture("kit");
+  withSchemaGate(gatedUp.kitRoot);
+  const upped = recordingRunner({ git: GIT_CONNECTED });
+  await up(gatedUp.cliRoot, { databaseUrl: PRODUCTION_DIRECT }, upped.runner);
+  assert.deepEqual(upped.calls, UP_ORDER);
+
+  // A satellite that owns its database migrates from the (gated) kit, but
+  // Vercel builds the satellite's app, which has no gate.
+  const satellite = fixture("satellite", { database: "own" });
+  withSchemaGate(satellite.kitRoot);
+  const refused = recordingRunner({ git: GIT_CONNECTED });
+  await assert.rejects(
+    deploy(satellite.cliRoot, { databaseUrl: PRODUCTION_DIRECT }, refused.runner),
+    refusal(/^Refusing to deploy: Vercel's git integration also deploys this project's production/),
+  );
+  assert.deepEqual(
+    refused.calls,
+    ["envCheck", "tree", "tree", "project"],
+    "nothing linked, pulled or migrated",
+  );
+});
+
+test("DEP1: the build is told the commit this run migrated, and nothing when it migrated nothing", async () => {
+  // The commit the F-49 check printed beside the database, once the migration succeeded.
+  const migrated = recordingRunner();
+  await deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, migrated.runner);
+  assert.deepEqual((migrated.args.build as unknown[])[1], { migratedCommit: MAIN_SHA });
+  const viaUp = recordingRunner();
+  await up(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, viaUp.runner);
+  assert.deepEqual((viaUp.args.build as unknown[])[1], { migratedCommit: MAIN_SHA });
+
+  // No migration in this run: nothing to vouch for.
+  const unmigrated: [string, string, Record<string, unknown>][] = [
+    ["--skip-migrations", fixture("kit").cliRoot, { skipMigrations: true }],
+    ["a satellite on the kit's database", fixture("satellite").cliRoot, {}],
+  ];
+  for (const [name, cliRoot, options] of unmigrated) {
+    const { runner, args } = recordingRunner();
+    await deploy(cliRoot, options, runner);
+    assert.deepEqual((args.build as unknown[])[1], {}, name);
+  }
+
+  // A failed migration builds nothing at all.
+  const failed = recordingRunner({ failAt: "migrate" });
+  await assert.rejects(deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, failed.runner));
+  assert.ok(!failed.calls.includes("build"));
+
+  // buildEnv: the token travels only with a migrated commit, and never the Vercel token.
+  const env = { VERCEL_TOKEN: TOKEN, VERCEL_ORG_ID: "team_test", VERCEL_PROJECT_ID: "prj_test" };
+  assert.deepEqual(buildEnv(env, { migratedCommit: MAIN_SHA }), {
+    VERCEL_TOKEN: undefined,
+    VERCEL_ORG_ID: "team_test",
+    VERCEL_PROJECT_ID: "prj_test",
+    DEPLOY_GATE_PREBUILT_AFTER_MIGRATE: MAIN_SHA,
+  });
+  for (const options of [undefined, {}, { migratedCommit: "" }]) {
+    const built = buildEnv(env, options);
+    assert.ok("DEPLOY_GATE_PREBUILT_AFTER_MIGRATE" in built, "named, so a shell's copy is removed");
+    assert.equal(built.DEPLOY_GATE_PREBUILT_AFTER_MIGRATE, undefined);
+  }
+});
+
+test("DEP1: the real `vercel build` gets the migrated commit, and never a shell's copy", async () => {
+  const { cliRoot, kitRoot } = fixture("kit");
+  const config = requireConfig(cliRoot);
+  const record = join(cliRoot, "vercel-build-env.json");
+  const stub = join(cliRoot, "record-vercel.cjs");
+  writeFileSync(
+    stub,
+    `require("node:fs").writeFileSync(${JSON.stringify(record)}, JSON.stringify(process.env.DEPLOY_GATE_PREBUILT_AFTER_MIGRATE ?? null));\n`,
+  );
+  const invocation = { vercelJs: stub, config, root: kitRoot, ...vercelEnvFor(config, TOKEN, {}) };
+  const seen = async (options?: { migratedCommit?: string }) => {
+    rmSync(record, { force: true });
+    await withEnv({ DEPLOY_GATE_PREBUILT_AFTER_MIGRATE: PR_SHA }, () =>
+      releaseRunner.build(invocation as never, options),
+    );
+    return JSON.parse(readFileSync(record, "utf8")) as string | null;
+  };
+  assert.equal(await seen({ migratedCommit: MAIN_SHA }), MAIN_SHA);
+  assert.equal(await seen(), null, "a shell's value never reaches the build");
+});
+
+test("DEP1: a gated build that fails after --skip-migrations says to drop the flag if the gate stopped it", async () => {
+  const gated = fixture("kit");
+  withSchemaGate(gated.kitRoot);
+  const failed = recordingRunner({ failAt: "build" });
+  // The build's output streams above the hint, and the build can fail for
+  // reasons of its own: the hint names the gate's lines rather than blaming it.
+  await assert.rejects(
+    deploy(gated.cliRoot, { skipMigrations: true }, failed.runner),
+    refusal(
+      /^build failed$/,
+      /^If the build log above ends with `\[deploy-gate\] REFUSE …` or `\[deploy-gate\] FAIL behind: …`, the kit's schema gate \(scripts\/deploy-gate\.ts\) stopped it:[\s\S]*Drop --skip-migrations: the migrations are idempotent[\s\S]*Any other failure is the build's own\.$/,
+    ),
+  );
+  // Without the flag, or without a gate, the build's own error stands as thrown.
+  const gatedAgain = fixture("kit");
+  withSchemaGate(gatedAgain.kitRoot);
+  for (const [name, cliRoot, options] of [
+    ["migrated", gatedAgain.cliRoot, { databaseUrl: PRODUCTION_DIRECT }],
+    ["no gate", fixture("kit").cliRoot, { skipMigrations: true }],
+  ] as const) {
+    const runner = recordingRunner({ failAt: "build" });
+    await assert.rejects(
+      deploy(cliRoot, options, runner.runner),
+      (err: unknown) => err instanceof Error && !(err instanceof CliError) && err.message === "build failed",
+      name,
+    );
+  }
 });
 
 test("F-49: doctor counts a checkout every release command refuses, and only notes one that is off the release ref", async () => {

@@ -42,8 +42,10 @@ import {
   type TreeState,
   assertRefName,
   describeCommit,
+  hasSchemaGate,
   inspectTree,
   productionAutoDeploy,
+  readPackageJson,
   readVercelJson,
   shortSha,
   treeProblems,
@@ -473,8 +475,12 @@ export interface ReleaseRunner {
   pull(vercel: VercelInvocation): Promise<void>;
   /** The migrations, on a target already checked against production. */
   migrate: typeof migrate;
-  /** `vercel build --prod`, the one `vercel` child run without the token (F-139). */
-  build(vercel: VercelInvocation): Promise<void>;
+  /**
+   * `vercel build --prod`, the one `vercel` child run without the token
+   * (F-139). `migratedCommit` is the commit this run migrated production
+   * from, which the kit's schema gate is told (DEP1, `buildEnv`).
+   */
+  build(vercel: VercelInvocation, options?: { migratedCommit?: string }): Promise<void>;
   /** `vercel deploy --prebuilt --prod`: the promotion. */
   promote(vercel: VercelInvocation): Promise<void>;
   /**
@@ -541,9 +547,9 @@ export const releaseRunner: ReleaseRunner = {
   pull: (vercel) => runVercel(vercel, ["pull", "--yes", "--environment=production"], "vercel pull failed"),
   migrate,
   // Without the token: `build` runs the checkout's own build (F-139).
-  build: (vercel) =>
+  build: (vercel, options) =>
     runVercel(
-      { ...vercel, env: buildEnv(vercel.env) },
+      { ...vercel, env: buildEnv(vercel.env, options) },
       ["build", "--prod"],
       "vercel build failed — nothing was promoted",
     ),
@@ -852,21 +858,34 @@ async function assertReleasableTree(
  * merge is exactly the gate that path relies on.
  *
  * The git connection comes from the project read {@link readProject} made.
+ *
+ * A checkout whose every Vercel build runs the kit's schema gate (DEP1) is
+ * told, not refused: Vercel then promotes a push only once its migrations are
+ * applied, so a merge cannot go live ahead of them and there is no race left
+ * to lose. A satellite checkout has no gate and keeps the refusal.
  */
 function assertNoAutoDeployRace(
   git: ProjectGit,
   vercel: VercelInvocation,
   options: { migrates: boolean; allowGitIntegrationRace?: boolean; dryRun?: boolean },
 ): void {
-  const verdict = productionAutoDeploy(git, readVercelJson(vercel.root));
+  const verdict = productionAutoDeploy(git, readVercelJson(vercel.root), readPackageJson(vercel.root));
   heading("Other deployers");
   field(
     "vercel git integration",
-    verdict.on
-      ? `${yellow("DEPLOYS PRODUCTION")} ${dim(verdict.why)}`
-      : `${green("off")} ${dim(verdict.why)}`,
+    verdict.gated
+      ? `${yellow("DEPLOYS PRODUCTION")}, ${green("gated")} ${dim(verdict.why)}`
+      : verdict.on
+        ? `${yellow("DEPLOYS PRODUCTION")} ${dim(verdict.why)}`
+        : `${green("off")} ${dim(verdict.why)}`,
   );
   if (!verdict.on) return;
+  if (verdict.gated) {
+    warn(
+      "Vercel promotes a push only after its schema gate passes, so this run's migrate-then-promote is not a race.",
+    );
+    return;
+  }
   if (!options.migrates) {
     warn(
       "Vercel also deploys production on every push. This run has no migrate step, so that is two deployers of the same code, not a race.",
@@ -1165,14 +1184,23 @@ export async function deploy(
   }
 
   const handoffSigning = await withProductionEnv(vercel, runner, async (production) => {
+    // DEP1: the commit printed beside the database it migrated, handed to the
+    // build only once that migration succeeded (`buildEnv`).
+    let migratedCommit: string | undefined;
     if (migration) {
-      const target = checkMigrationTarget(migration, production(), options, commitOf(trees, config.kitRoot));
+      const commit = commitOf(trees, config.kitRoot);
+      const target = checkMigrationTarget(migration, production(), options, commit);
       await runner.migrate(cliRoot, migrationStep(migration, target, options));
+      migratedCommit = commit?.head ?? undefined;
     }
 
     heading("Build and promote");
     step("Building");
-    await buildLeavingCheckout(vercel, runner);
+    try {
+      await buildLeavingCheckout(vercel, runner, migratedCommit ? { migratedCommit } : {});
+    } catch (err) {
+      throw withSkippedMigrationsHint(err, vercel, options);
+    }
 
     step("Promoting the prebuilt output to production");
     await runner.promote(vercel);
@@ -1329,11 +1357,38 @@ function readIfPresent(file: string): Buffer | null {
   }
 }
 
-async function buildLeavingCheckout(vercel: VercelInvocation, runner: ReleaseRunner): Promise<void> {
+/**
+ * A failed build after `--skip-migrations`, in a checkout whose build runs
+ * the kit's schema gate (DEP1), gets the fix as its hint, worded for the case
+ * where the gate is what stopped it. The gate refuses a local production
+ * build that migrated nothing in this run whenever it cannot read
+ * production's DATABASE_URL (`vercel pull` returns a sensitive one as a
+ * placeholder), and its own last line does not mention this flag. The build's
+ * output streams above the hint, so the hint names the line to look for
+ * instead of assuming every failure is the gate's.
+ */
+function withSkippedMigrationsHint(
+  err: unknown,
+  vercel: VercelInvocation,
+  options: { skipMigrations?: boolean },
+): unknown {
+  if (!options.skipMigrations || !(err instanceof Error)) return err;
+  if (!hasSchemaGate(readVercelJson(vercel.root), readPackageJson(vercel.root))) return err;
+  return new CliError(err.message, {
+    exitCode: err instanceof CliError ? err.exitCode : 1,
+    hint: "If the build log above ends with `[deploy-gate] REFUSE …` or `[deploy-gate] FAIL behind: …`, the kit's schema gate (scripts/deploy-gate.ts) stopped it: with --skip-migrations nothing told the gate this run migrated the commit, so it checks production's DATABASE_URL itself, and refuses one it cannot read (`vercel pull` returns a sensitive one as [SENSITIVE]). Drop --skip-migrations: the migrations are idempotent and ledgered, so a run with nothing new to apply changes nothing. Any other failure is the build's own.",
+  });
+}
+
+async function buildLeavingCheckout(
+  vercel: VercelInvocation,
+  runner: ReleaseRunner,
+  options: { migratedCommit?: string },
+): Promise<void> {
   const file = join(vercel.root, NEXT_ENV_FILE);
   const before = readIfPresent(file);
   try {
-    await runner.build(vercel);
+    await runner.build(vercel, options);
   } finally {
     if (before !== null) {
       try {

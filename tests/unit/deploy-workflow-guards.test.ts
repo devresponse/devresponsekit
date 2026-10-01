@@ -186,7 +186,7 @@ describe("deploy workflow: both migrators run before anything is built (F-26)", 
     // call answering 500 until someone migrated by hand.
     const auth = steps.indexOf("run: pnpm db:auth:migrate");
     const app = steps.indexOf("run: pnpm db:app:migrate");
-    const build = steps.indexOf("run: vercel build --prod");
+    const build = steps.indexOf(" vercel build --prod");
     expect(auth).toBeGreaterThan(-1);
     expect(app).toBeGreaterThan(auth);
     expect(build).toBeGreaterThan(app);
@@ -204,6 +204,26 @@ describe("deploy workflow: both migrators run before anything is built (F-26)", 
       "${{ secrets.PRODUCTION_DIRECT_DATABASE_URL",
     ]);
     expect(authStep).toMatch(/BETTER_AUTH_SECRET: ci-only-[a-z0-9-]+-not-for-production\n/);
+  });
+});
+
+describe("deploy workflow: the build tells the schema gate it migrated this commit (DEP1)", () => {
+  it("passes the commit it checked out, on the build step alone, after both migrators", () => {
+    // `vercel build` runs vercel.json's build command, schema gate included,
+    // and on the runner a sensitive DATABASE_URL comes back as a placeholder
+    // the gate refuses. The migrate steps have just applied this checkout.
+    // Its HEAD, not an event expression: on workflow_dispatch the checkout's
+    // `github.ref` tip can have moved past `github.sha`, and the gate refuses
+    // a value that is not exactly the commit being built.
+    const buildStep = step("Build for production");
+    expect(buildStep).toContain(
+      'run: DEPLOY_GATE_PREBUILT_AFTER_MIGRATE="$(git rev-parse HEAD)" vercel build --prod --token="$VERCEL_TOKEN"',
+    );
+    expect(steps.split("DEPLOY_GATE_PREBUILT_AFTER_MIGRATE")).toHaveLength(2);
+    expect(deployHeader).not.toContain("DEPLOY_GATE_PREBUILT_AFTER_MIGRATE");
+    expect(steps.indexOf("- name: Build for production\n")).toBeGreaterThan(
+      steps.indexOf("run: pnpm db:app:migrate"),
+    );
   });
 });
 

@@ -387,9 +387,25 @@ in the checkout's `vercel.json`, or an Ignored Build Step of exactly `exit 0`. A
 Build Step is a program the CLI cannot run, so it is named in the refusal and counts as on.
 `--allow-git-integration-race` deploys anyway, with a warning. A run with no migrate step
 (`--skip-migrations`, or a satellite on the kit's database) has no order to lose, so it is only
-warned. `migrate` never asks, because it promotes nothing. The kit's own production is deployed by
-the git integration today (docs/deployment.md §1.1), so `deploy` and `up` refuse to migrate it until
-auto-deploy is off or the flag is passed.
+warned. `migrate` never asks, because it promotes nothing.
+
+**A gated git integration is not a race (DEP1).** When the checkout's `vercel.json` makes
+`pnpm run vercel-build` the build command and its `package.json` `vercel-build` script runs
+`scripts/deploy-gate.ts`, as the kit's do, every Vercel build ends with the kit's schema gate: a
+production build fails, and is not promoted, until the database holds that commit's migrations.
+Vercel's push can then no longer go live ahead of them, so the verdict reads
+`DEPLOYS PRODUCTION, gated` and `deploy` and `up` go ahead with a warning instead of refusing. A
+satellite's checkout has no gate and keeps the refusal.
+
+**The build is told what this run migrated (DEP1).** `vercel build --prod` runs that same gate
+here, where a `sensitive` `DATABASE_URL` comes back as `[SENSITIVE]` and cannot be checked. So once
+the migrations have succeeded, `deploy` and `up` hand the build the commit they migrated from (the
+one printed beside the database) as `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE`, and the gate skips. The
+gate honours it only off Vercel's build machines and only when it is the commit being built. A run
+that migrated nothing passes nothing, and removes a copy the shell may hold. With
+`--skip-migrations` the kit's gate therefore refuses a production build it cannot check, and the
+failure's hint says to drop the flag if the build log ends with the gate's `REFUSE` (or `FAIL
+behind`) line: the migrations are idempotent, so a run with nothing new to apply changes nothing.
 
 **A pooled connection string is refused.** Migrations need the _direct_ endpoint: DDL and the
 advisory lock the migration runner takes do not survive a transaction pooler, and the failure is
@@ -687,6 +703,15 @@ delete it — nothing reads it.
 
 ## Upgrading
 
+### DEP1: the kit's build runs a schema gate
+
+After the pull that brings the kit's schema gate, `deploy` and `up` stop refusing a kit project
+that Vercel deploys on every push: they print `DEPLOYS PRODUCTION, gated` and go ahead
+([above](#what-it-does-about-the-things-that-go-wrong)). `deploy --skip-migrations` on the kit now
+fails at the build when production's `DATABASE_URL` is stored `sensitive`, because the gate cannot
+check the database from here and the run migrated nothing to vouch for. Drop the flag. Never set
+`DEPLOY_GATE_PREBUILT_AFTER_MIGRATE` on the project yourself: a Vercel build refuses it.
+
 ### I-14: a build older than its source is refused
 
 After the pull that brings this change, run `pnpm build` in `vercel-cli/` once (after
@@ -848,9 +873,11 @@ on the first run:
    holds for `deploy`, `up` and `migrate`, with no flag. Merge the kit's migration first, pull the kit
    checkout, then migrate or deploy the satellite.
 4. **A project that Vercel deploys on every push refuses `deploy` and `up` when they would migrate.**
-   The kit's production is one. Keep migrating from the pull request's branch with
+   Since DEP1 the kit's own production is not one: its builds run the schema gate, so the run goes
+   ahead ([DEP1](#dep1-the-kits-build-runs-a-schema-gate)). For a satellite, keep migrating with
    `drk-deploy migrate` and let the git integration promote the merge, as docs/deployment.md §1.1
-   describes, or turn production auto-deploy off (§1.2), or pass `--allow-git-integration-race`.
+   describes for the kit, or turn production auto-deploy off (§1.2), or pass
+   `--allow-git-integration-race`.
 
 ### F-48: the project's owner is recorded
 
@@ -989,8 +1016,10 @@ The job deploys the commit it checked out, so that commit must be releasable (F-
 write only ignored paths. A job for any other ref needs `--allow-ref origin/<branch>`.
 
 If this becomes the deployment path, turn off Vercel's automatic production deploys for the
-project. Otherwise a push promotes a build before this has migrated anything, which is the exact race
-the ordering above exists to prevent, and `up` refuses to migrate while they are on (F-49).
+project. Otherwise every push is built and deployed twice. A satellite's ungated push would also be
+promoted before this has migrated anything, which is the exact race the ordering above exists to
+prevent, so `up` refuses to migrate while they are on (F-49). The kit's push is held back by its
+schema gate until the migration is applied (DEP1).
 
 ---
 

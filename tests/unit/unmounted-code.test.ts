@@ -42,6 +42,10 @@ const KEPT_COMPONENTS: Record<string, string> = {
 };
 const KEPT_MODULES: Record<string, string> = {
   "src/components/i18n/language-menu.tsx": "home of LanguageMenu, see KEPT_COMPONENTS",
+  // DEP1: a CI check on migration files, not runtime code. It lives in src/
+  // so the coverage ratchet holds it, and its one caller is the guard test.
+  "src/db/migration-compat.ts":
+    "the expand/contract classifier tests/unit/migration-compat-guard.test.ts runs over new core migrations (DEP1)",
 };
 
 function walk(dir: string, out: string[] = []): string[] {

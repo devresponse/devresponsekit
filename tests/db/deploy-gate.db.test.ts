@@ -105,7 +105,8 @@ const SYSTEM_VARIABLES =
 /**
  * The gate's environment as a production build would hand it over: no
  * `.env` (the gate reads none), the variables named, and the CI placeholders
- * `@/lib/auth` validates at load, as deploy.yml's auth migrate step gives it.
+ * `@/lib/auth` validates at load, as migrate-production.yml's auth step gives
+ * them.
  */
 function gateEnv(extra: Record<string, string>): Record<string, string | undefined> {
   return {

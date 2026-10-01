@@ -151,7 +151,7 @@ export interface MigrateOptions {
  * that changed no migrations is a no-op.
  *
  * Better Auth's tables come first (F-141), as in `pnpm db:provision`,
- * deploy.yml and CI. This ran the application migrations first, so an auth
+ * migrate-production.yml and CI. This ran the application migrations first, so an auth
  * step that failed (as it did on every CI run, for want of the server
  * environment) left production with the application's schema changes
  * applied and the release that needed them unpromoted.

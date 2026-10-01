@@ -52,9 +52,10 @@ For a deployment running 2.0.0.
 
 2. **Repository settings.** From
    [SECURITY.md → Repository security settings](SECURITY.md#repository-security-settings),
-   require actions pinned to a full-length commit SHA, and restrict the
-   `production` environment's deployment branches to `main`, adding required
-   reviewers with its first secret (I-09).
+   require actions pinned to a full-length commit SHA (I-09). The
+   `production` environment's rules are moot: since DEP2 no workflow names
+   it. Restrict the `production-migrations` environment's deployment
+   branches to `main` before its secret goes in (item 7).
 3. **The old help screenshots.** Until F-89 the walkthrough's admin and
    account screenshots, taken on the live demo, showed the operator's real
    email addresses, public IP address and an active, non-expiring API key
@@ -75,7 +76,7 @@ For a deployment running 2.0.0.
    `0008` is in the ledger this build's `GET /api/health/ready` answers
    `503 schema_behind`. Vercel runs no migrations: apply it by hand, before
    the merge that needs it
-   ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
+   ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate)).
 5. **Core migrations consolidated: nothing to do on a database at `0008`.**
    Production's ledger holds `0001`…`0008`, so the build is ready there as
    it stands, and the next `pnpm db:app:migrate` only records
@@ -93,11 +94,24 @@ For a deployment running 2.0.0.
    what production already sets (`DATABASE_URL`, `DB_SCHEMA`,
    `DB_SEARCH_PATH_VIA_OPTIONS`), polls for ten minutes, and the previous
    deployment keeps serving meanwhile
-   ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
+   ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate)).
    After the merge, the production build log shows `[deploy-gate] verify`,
    `[deploy-gate] target … runtime=owner` and `[deploy-gate] PASS`. Never
    set `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE` in Vercel. Break-glass is
    reverting the commit that added the gate.
+7. **Optional: let every merge migrate production (DEP2).** Create the
+   GitHub environment `production-migrations` with deployment branches
+   `main` only and **no** required reviewers, give it one secret,
+   `PRODUCTION_DIRECT_DATABASE_URL` (Neon's DIRECT owner URL: host without
+   `-pooler`, `sslmode=require`), and dispatch **Migrate production
+   database** once; the commands are in
+   [docs/deployment.md §3](docs/deployment.md#3-vercel-project--environment).
+   After that the hand gate is no longer needed. Until then the workflow
+   skips green on every push and says so in its summary, and the hand gate
+   applies as before. Do not copy that URL into Vercel. Also check that
+   nothing runs `db:app:migrate` or `db:auth:migrate` with a pooled URL,
+   with `DB_SEARCH_PATH_VIA_OPTIONS=0`, or as a role that does not own the
+   schema: each is now refused.
 
 ### Security fixes the satellite forks must port
 
@@ -115,6 +129,30 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Added
 
+- **Every push to `main` migrates production (DEP2).**
+  `.github/workflows/migrate-production.yml` runs `pnpm db:auth:migrate`,
+  then `pnpm db:app:migrate`, against production's direct endpoint as the
+  owner, while Vercel builds the same commit; the schema gate (below) holds
+  the build until the migrations are in. It triggers on the push, not after
+  CI, because it no longer promotes and the merged tree is the tree CI
+  tested. The owner URL is one secret in the `production-migrations` GitHub
+  environment, exposed to the two migrate steps only and never to Vercel.
+  Without it the run skips green with a notice. See operator action 7 and
+  [docs/deployment.md §1.2](docs/deployment.md#12-automated-migrations-migrate-productionyml).
+- **The migration runners refuse what would migrate the wrong thing
+  (DEP2).** `db:app:migrate` and `db:auth:migrate`, which every path runs
+  (the workflow, `drk-deploy`, the hand gate, `db:provision`, the Docker init
+  step), exit 1 with the reason, never the URL: before connecting, on a
+  pooled `DATABASE_URL` (a `-pooler` or `.pooler.` host, port 6543,
+  `pgbouncer=true`) or one whose query re-points it (`host`, `hostaddr`,
+  `port`, `dbname`, `database`, `user`), with drk-deploy's rules; before
+  creating anything, on a session whose `search_path` does not resolve to
+  `DB_SCHEMA` (the ledger and `0001` used to land in `public`) and on a role
+  that does not own the existing ledger. The Better Auth runner now takes
+  the application runner's advisory lock, and the new
+  `DB_MIGRATE_LOCK_WAIT_MS` bounds both runners' wait for it (unset waits as
+  before). See
+  [docs/deployment.md §5](docs/deployment.md#5-operations--gotchas).
 - **A schema gate in every Vercel production build (DEP1).** `vercel.json`
   makes `pnpm run vercel-build` the build: `next build`, then
   `scripts/deploy-gate.ts`, which connects with the build's own
@@ -127,7 +165,7 @@ of 2.0.0's list below. Each entry names what to carry over.
   user=… runtime=owner|non-owner`, never a password). Vercel does not
   promote a failed build, so code can no longer go live ahead of its
   schema. `pnpm build` is unchanged, so CI and the Docker image do not run
-  it. See [docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations).
+  it. See [docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate).
 - **The expand/contract rule, and a guard on new core migrations (DEP1).**
   [docs/deployment.md → Compatibility: expand, then contract](docs/deployment.md#compatibility-expand-then-contract)
   states what a migration must leave working (the live build, any build an
@@ -170,8 +208,8 @@ of 2.0.0's list below. Each entry names what to carry over.
   the schema gate (`DEPLOYS PRODUCTION, gated`, with a warning); a
   satellite keeps the F-49 refusal. After migrating, they pass the commit
   they migrated from to `vercel build --prod` as
-  `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE`, and `deploy.yml` does the same, so
-  the gate skips a build it cannot check from there. With
+  `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE`, so the gate skips a build it cannot
+  check from there. With
   `--skip-migrations` nothing is passed and the gate refuses; the failure's
   hint says to drop the flag if the gate's line ends the build log. See
   [vercel-cli/README.md → DEP1](vercel-cli/README.md#dep1-the-kits-build-runs-a-schema-gate).
@@ -239,6 +277,21 @@ of 2.0.0's list below. Each entry names what to carry over.
   `canAccessAdminConsole` (`src/lib/admin/permissions.ts`), the console
   layout's own rule (any `admin.*` key or the superadmin marker), and sends
   the switcher only the href. Two new `shell` messages in all eight locales.
+
+### Removed
+
+- **`.github/workflows/deploy.yml` (DEP2).** The optional Actions pipeline
+  that migrated and then promoted with `vercel build` and `vercel deploy`.
+  It was never configured (no run ever migrated or promoted), and adopting
+  it meant turning Vercel's Git integration off, which contradicts the one
+  production path. `migrate-production.yml` takes over its migrate steps
+  and every guard that still applies; promotion stays with Vercel, behind
+  the schema gate. Nothing to do: it held no secrets.
+- **`drk-deploy`'s `--allow-pooled` (DEP2).** `migrate`, `deploy` and `up`
+  no longer take it, and refuse a pooled migration URL with no override:
+  the kit's runners now refuse one themselves, so the flag only carried a
+  pooled URL to a certain failure (for `up`, after the environment sync).
+  Use the provider's direct connection string.
 
 ### Security
 
@@ -344,7 +397,7 @@ says when it applies; most must be done before the deploy.
    after the deploy. `0007` is a required core migration, so until it is in
    the ledger `GET /api/health/ready` answers `503 schema_behind`. Vercel runs
    no migrations: apply every migration by hand, before the merge that needs
-   it ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
+   it ([docs/deployment.md §1.1](docs/deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate)).
    A database behind `main` also needs `0002` to `0006` (`pnpm db:app:migrate`
    applies them in order; `0005` lists and refuses rows that break its new
    constraints) and two Better Auth changes, the `user.emailVerificationWaived`

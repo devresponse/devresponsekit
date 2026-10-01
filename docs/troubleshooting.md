@@ -134,10 +134,12 @@ warrant a comms channel and an owner before deep debugging.
   life of the process, so an instance that already saw the gap keeps failing
   auth, and keeps answering `schema_behind`, after the database is fixed. New
   instances start clean. Re-curl `/api/health/ready` for `200`.
-- Root cause is the deploy path: see [deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)
+- Root cause is the deploy path: see [deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate)
   — Vercel's git integration builds every push to `main` and cannot migrate,
-  so a migration must be applied to production before its build goes live.
-  That includes a change to `src/db/migrations/better-auth-schema.sql`. Since
+  so a migration must be applied to production before its build goes live:
+  by `migrate-production.yml` on the same push, or by hand while that is not
+  configured. That includes a change to
+  `src/db/migrations/better-auth-schema.sql`. Since
   DEP1 every production build runs a schema gate that holds such a build back
   instead ([Production build failed at `[deploy-gate]`](#production-build-failed-at-deploy-gate)),
   so this 503 means a deployment reached production without a passing gate:
@@ -340,10 +342,10 @@ build** and leave the additive migrations ahead — **never auto-down-migrate**
   the next merge is built and never goes live. `drk-deploy deploy` and `up`
   record the deployment to promote before they release, and promote it back
   themselves under `--rollback-on-fail` (the default under `--yes`). Migrations
-  always land *before* the build that needs them — by hand on the live path
-  ([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)),
-  by the tooling on the optional paths (deployment.md §1.2, §1.3) — so a
-  rollback needs no DB change.
+  always land *before* the build that needs them goes live — the schema gate
+  holds a build back until they have
+  ([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate))
+  — so a rollback needs no DB change.
 - **Container:** redeploy the previous (digest-pinned) image tag; keep the prior
   tag available.
 - A migration that must be reverted is a separate **forward** migration — never
@@ -557,10 +559,11 @@ idempotent (ledgered in `app_schema_migrations`) and safe to re-run. An
 instance that started while a Better Auth table was missing keeps refusing
 auth until it restarts, so restart or redeploy after `db:auth:migrate` (§4,
 Schema behind). Always use
-the **direct** (non-pooled) endpoint — by hand before the merge on the live path
-([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)),
-or via the tooling paths, which apply them before promoting (deployment.md
-§1.2, §1.3).
+the **direct** (non-pooled) endpoint, as the role that owns the schema: the
+migrate workflow does (deployment.md §1.2), and so must a hand run before the
+merge while the workflow is not configured
+([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate))
+and `drk-deploy` (deployment.md §1.3).
 
 **`[migrate] checksum mismatch for applied migration "…"`.** The runner hashes
 every applied file — comments stripped and whitespace collapsed, so a re-flowed
@@ -692,7 +695,7 @@ outbox drain used up the tick's budget before retention started: check its
 ### Production build failed at `[deploy-gate]`
 
 Every Vercel production build ends with the schema gate (DEP1,
-[deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)).
+[deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate)).
 A failed one was **not promoted**: the previous deployment is still serving, so
 this is never an outage. The build log's last `[deploy-gate]` line says why;
 the `target …` line above it names the database, schema and login it checked.
@@ -700,7 +703,10 @@ Once fixed, **Redeploy** the failed deployment from Vercel's Deployments page,
 or push again.
 
 - **`FAIL behind: the ledger lacks <ids>`** — the commit needs a migration
-  production has not applied. Apply it against the **direct** endpoint:
+  production has not applied. First look at that commit's **Migrate
+  production database** run ([below](#migrate-production-database-run-failed)):
+  red, skipped (`not automated`), or never started. Then apply it, by re-running
+  the workflow or against the **direct** endpoint by hand:
   `pnpm db:app:migrate` (and `pnpm db:auth:migrate` for a Better Auth change),
   or `drk-deploy migrate`, then redeploy. Within the gate's wait
   (`DEPLOY_GATE_WAIT_MS`, default 10 minutes) the build would have passed by
@@ -736,13 +742,84 @@ or push again.
   System Environment Variables** under Project → Settings → Environment
   Variables); `DEPLOY_GATE_PREBUILT_AFTER_MIGRATE is not honoured on Vercel
   build infrastructure` (delete that variable from the project: only
-  `drk-deploy` and `deploy.yml` set it, for their own local builds); or a
+  `drk-deploy` sets it, for its own local build); or a
   malformed `DEPLOY_GATE_WAIT_MS`. A **local** `vercel build --prod` refused
   with `DATABASE_URL is [SENSITIVE]` was run without migrating first: drop
   `--skip-migrations` from `drk-deploy`.
 
 There is no switch to turn the gate off. If the gate itself is wrong, revert
 the commit that added it; that revert's build runs no gate.
+
+### Migrate production database run failed
+
+`migrate-production.yml`
+([deployment.md §1.2](./deployment.md#12-automated-migrations-migrate-productionyml))
+applies each push's migrations while Vercel builds it. A red run means they
+did not all land, so that build fails at its schema gate and is **not
+promoted**: production keeps serving the previous deployment. The failed
+step's log ends with `[auth:migrate] FAILED` or `[migrate] FAILED` and the
+reason. Once it is fixed, **Re-run** the job (or `gh workflow run
+migrate-production.yml --ref main`), then **Redeploy** the failed build in
+Vercel. A green run whose summary says `Skipped: migrations are not automated`
+is not a failure: the workflow has no secret yet (deployment.md §3), and the
+migrations are applied by hand. Nor is a **cancelled** run ("a higher
+priority waiting request … exists") for a commit that more pushes followed:
+GitHub keeps one waiting run per concurrency group, and a newer push's run
+took its place, applying the same migrations and more. Look at that newer
+run instead. If the cancelled commit's build failed at its gate meanwhile,
+there is nothing to redeploy: the newer commit's build is the one that ships.
+
+- **A migration file failed** (an SQL error, `[0005] refusing to apply`, a
+  lock timeout: the entries under [Deployment issues](#deployment-issues)) —
+  that file rolled back and is not ledgered; the files before it stay
+  applied. Fix it in a new commit: a file production never ledgered may
+  still be edited.
+- **`another session holds the migration lock: gave up after
+  DB_MIGRATE_LOCK_WAIT_MS=300000ms`** — something else held the runners'
+  advisory lock for five minutes: a hand `db:app:migrate` still running,
+  `drk-deploy`, or a session left holding it. Find it with `select a.pid,
+  a.usename, a.application_name, a.state, a.backend_start, a.query from
+  pg_locks l join pg_stat_activity a using (pid) where l.locktype =
+  'advisory' and l.granted`. Let it finish, or end an abandoned session with
+  `select pg_terminate_backend(<pid>)`, then re-run the workflow and
+  redeploy. Another run of the workflow is never the holder: its
+  concurrency group runs one at a time.
+- **`DATABASE_URL looks pooled: …`** or **`re-points the connection with …`**
+  — the secret is a pooled URL (a `-pooler` or `.pooler.` host, port 6543,
+  `pgbouncer=true`), or carries `host`, `hostaddr`, `port`, `dbname`,
+  `database` or `user` in its query. Refused before connecting; nothing was
+  attempted. Store Neon's **direct** owner URL, with user, host, port and
+  database in the URL itself (deployment.md §3). The same refusal from a hand
+  run, `db:provision` or the Docker init step means the same thing.
+- **`the session's search_path resolves to X, not DB_SCHEMA Y`** — the
+  session would have created the ledger and the tables in `X`. The secret's
+  role has a `search_path` default naming another schema, or
+  `DB_SEARCH_PATH_VIA_OPTIONS=0` reached the runner (it is for a pooled
+  runtime: never set it for migrations). Check the repository variable
+  `DB_SCHEMA` against production's too. Nothing was created there.
+- **`permission denied for database <name>`** — the URL logs in as a role
+  that may not create schemas in the database, usually the least-privilege
+  runtime login of
+  [deployment.md §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended)
+  (`auth_runtime`). Both runners run `create schema if not exists` before
+  they create anything, and Postgres checks `CREATE` on the database even
+  when the schema exists, so the run stops there. Store the owner's URL (on
+  Neon usually `neondb_owner`). Nothing was changed.
+- **`<schema>.app_schema_migrations is owned by A, but this session migrates
+  as B`** — the URL logs in as a role other than the schema's owner (on Neon
+  usually `neondb_owner`) that may create schemas, such as a superuser or
+  another admin role. Tables another role creates get no runtime grants and
+  break the audit trigger's owner rule, so the runner refuses instead of
+  migrating as `B`. Store the owner's URL. Nothing was changed.
+- **The run is green, but the build still failed `behind`** — the secret
+  points at another database or schema than production's runtime
+  `DATABASE_URL` and `DB_SCHEMA`, and the migrations landed there. Compare it
+  with the gate's `[deploy-gate] target host=… database=… schema=…` line, fix
+  the secret or the variable, re-run and redeploy.
+- **The run started too late** (GitHub Actions delayed past the gate's ten
+  minutes) — the build failed while the run may be green. Redeploy the build
+  in Vercel, after `gh workflow run migrate-production.yml --ref main` if the
+  run never started.
 
 ## Known risks & missing information
 

@@ -95,7 +95,9 @@ export interface MigrationUrl {
  * runs against a POOLED endpoint, while DDL and the migration runner's advisory
  * lock must use the DIRECT one. Getting this wrong fails in a confusing way
  * (the lock silently does nothing through a transaction pooler), so a pooled
- * shape is refused up front unless explicitly allowed.
+ * shape is refused up front. There is no override: since DEP2 the kit's own
+ * runners refuse every pooled shape too, so a URL let through here would only
+ * fail there, after `up` had already synced the environment.
  *
  * The sources, in order: `--database-url`, then the target's own variable in
  * the shell, then the same variable in the `--from-env` file. The shell wins
@@ -122,7 +124,7 @@ export interface MigrationUrl {
  * pooled check are table-tested without touching `process.env` (F-45).
  */
 export function resolveMigrationUrl(
-  options: { databaseUrl?: string; allowPooled?: boolean; satellite?: boolean; fromEnv?: string },
+  options: { databaseUrl?: string; satellite?: boolean; fromEnv?: string },
   env: NodeJS.ProcessEnv = process.env,
 ): MigrationUrl {
   const variable = options.satellite ? "SATELLITE_DIRECT_DATABASE_URL" : "PRODUCTION_DIRECT_DATABASE_URL";
@@ -185,9 +187,9 @@ export function resolveMigrationUrl(
   const repointed = repointingParams(parsed);
   if (repointed.length > 0) throw repointedError(repointed);
   const pooled = pooledReason(parsed);
-  if (pooled && !options.allowPooled) {
+  if (pooled) {
     throw new CliError(`That looks like a POOLED connection string: ${pooled}.`, {
-      hint: "Migrations need the direct endpoint: DDL and the runner's advisory lock do not survive a transaction pooler. Pass --allow-pooled to override.",
+      hint: "Migrations need the direct endpoint: DDL and the runner's advisory lock do not survive a transaction pooler, and the kit's migration runners refuse a pooled URL themselves, so there is no override. Use the provider's DIRECT connection string.",
     });
   }
   return resolved;
@@ -226,7 +228,7 @@ function assertMayMigrate(profile: DeploymentProfile): void {
  */
 export async function migrate(
   cliRoot: string,
-  options: { databaseUrl?: string; schema?: string; allowPooled?: boolean; dryRun?: boolean },
+  options: { databaseUrl?: string; schema?: string; dryRun?: boolean },
 ): Promise<void> {
   const config = requireConfig(cliRoot);
   const profile = resolveProfile(config);
@@ -263,7 +265,6 @@ interface MigrationOptions {
   fromEnv?: string;
   databaseUrl?: string;
   schema?: string;
-  allowPooled?: boolean;
   allowUnverifiedTarget?: boolean;
   forceSchema?: boolean;
 }
@@ -317,7 +318,7 @@ export async function migrateCommand(
   }
   await withProductionEnv(vercel, runner, async (production) => {
     const target = checkMigrationTarget(migration, production(), options, commitOf(trees, config.kitRoot));
-    await runner.migrate(cliRoot, migrationStep(migration, target, options));
+    await runner.migrate(cliRoot, migrationStep(migration, target));
   });
 }
 
@@ -342,7 +343,6 @@ async function dryRunMigration(
   await runner.migrate(cliRoot, {
     databaseUrl: migration.url,
     ...(options.schema !== undefined ? { schema: options.schema } : {}),
-    ...(options.allowPooled !== undefined ? { allowPooled: options.allowPooled } : {}),
     dryRun: true,
   });
 }
@@ -386,13 +386,8 @@ function checkMigrationTarget(
 function migrationStep(
   migration: MigrationUrl,
   target: MigrationTarget,
-  options: MigrationOptions,
-): { databaseUrl: string; schema: string; allowPooled?: boolean } {
-  return {
-    databaseUrl: migration.url,
-    schema: target.schema,
-    ...(options.allowPooled !== undefined ? { allowPooled: options.allowPooled } : {}),
-  };
+): { databaseUrl: string; schema: string } {
+  return { databaseUrl: migration.url, schema: target.schema };
 }
 
 /**
@@ -1190,7 +1185,7 @@ export async function deploy(
     if (migration) {
       const commit = commitOf(trees, config.kitRoot);
       const target = checkMigrationTarget(migration, production(), options, commit);
-      await runner.migrate(cliRoot, migrationStep(migration, target, options));
+      await runner.migrate(cliRoot, migrationStep(migration, target));
       migratedCommit = commit?.head ?? undefined;
     }
 

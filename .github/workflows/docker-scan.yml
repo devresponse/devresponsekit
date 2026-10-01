@@ -126,10 +126,10 @@ jobs:
 
       # F-108: the runtime image has no migration tooling (docs/docker.md §4);
       # the `builder` stage has all of it. Auth first, then the app, the order
-      # deploy.yml and drk-deploy apply them in (F-141); the seed creates the
-      # admin the docs probe signs in as. Its password is minted per run: the
-      # documented seed default may appear only where .gitleaks.toml allows it,
-      # and nothing here needs a known value.
+      # migrate-production.yml and drk-deploy apply them in (F-141); the seed
+      # creates the admin the docs probe signs in as. Its password is minted per
+      # run: the documented seed default may appear only where .gitleaks.toml
+      # allows it, and nothing here needs a known value.
       - name: Migrate and seed the smoke database
         run: |
           SEED_ADMIN_PASSWORD=$(openssl rand -hex 24)

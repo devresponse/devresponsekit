@@ -274,33 +274,26 @@ I-09).
 | **Dependabot alerts** | on | `gh api -i repos/devresponse/devresponsekit/vulnerability-alerts` answers `204` (`404` = off) | Settings → Advanced Security → Dependabot alerts → **Enable** | GitHub stops matching the lockfiles against its advisory database. The weekly `Dependabot alerts` job cannot read the alerts API and fails, so this one is detected after all. |
 | **Dependabot security updates** | on | `gh api repos/devresponse/devresponsekit/automated-security-fixes` returns `"enabled": true` | Settings → Advanced Security → Dependabot security updates → **Enable**, or `gh api -X PUT repos/devresponse/devresponsekit/automated-security-fixes` | An advisory raises an alert and **no PR**. Nothing proposes the fix: the next weekly run fails and opens the tracking issue, and someone bumps or floors the package by hand. Every comment in [`.github/dependabot.yml`](.github/dependabot.yml) that says a security update "still arrives" assumes this setting is on. |
 | **Actions pinned to a full-length commit SHA** | required | `gh api repos/devresponse/devresponsekit/actions/permissions` returns `"sha_pinning_required": true` | Settings → Actions → General → Actions permissions → tick **Require actions to be pinned to a full-length commit SHA** → **Save**, or `gh api -X PUT repos/devresponse/devresponsekit/actions/permissions -F enabled=true -f allowed_actions=all -F sha_pinning_required=true` (the call sets `enabled` and `allowed_actions` too, so pass their current values) | Pinning is a convention only review enforces. Every `uses:` in `.github/workflows/` is pinned today, so turning this on breaks nothing, but a `uses: owner/action@v1` slipped into a later edit would run whatever that movable tag points at, and no check would fail. |
-| **`production` environment: deployment branches** | `main` only | `gh api repos/devresponse/devresponsekit/environments/production --jq .deployment_branch_policy` shows `custom_branch_policies: true`, and `gh api repos/devresponse/devresponsekit/environments/production/deployment-branch-policies --jq '[.branch_policies[].name]'` returns `["main"]` | Settings → Environments → `production` → Deployment branches and tags → **Selected branches and tags** → **Add deployment branch or tag rule** → branch `main`, or the commands below | An environment secret is readable by **any** job that names `environment: production`, in any workflow, pushed on any branch. `deploy.yml`'s fork guard fences that one workflow; a workflow somebody pushes on a feature branch could still read the deploy credentials. |
-| **`production` environment: required reviewers** | set, in the same sitting as the first deploy secret | `gh api repos/devresponse/devresponsekit/environments/production --jq '[.protection_rules[].type]'` includes `"required_reviewers"` | Settings → Environments → `production` → tick **Required reviewers**, add people or teams → **Save protection rules**, or the commands below | Once the secrets are set, anything merged to `main` migrates production and promotes with nobody approving it. Added before the secrets exist, reviewers only cost an approval prompt per merge for a deploy that skips ([docs/deployment.md §3](docs/deployment.md#3-vercel-project--environment)). |
+| **`production-migrations` environment: deployment branches** | `main` only | `gh api repos/devresponse/devresponsekit/environments/production-migrations --jq .deployment_branch_policy` shows `custom_branch_policies: true`, and `gh api repos/devresponse/devresponsekit/environments/production-migrations/deployment-branch-policies --jq '[.branch_policies[].name]'` returns `["main"]` | Settings → Environments → `production-migrations` → Deployment branches and tags → **Selected branches and tags** → **Add deployment branch or tag rule** → branch `main`, or the commands below, before its secret is set | Its one secret is production's OWNER database URL, and an environment secret is readable by **any** job that names `environment: production-migrations`, in any workflow, pushed on any branch. `migrate-production.yml`'s own guard fences that one workflow; a workflow somebody pushes on a feature branch could still read the URL. |
+| **`production-migrations` environment: required reviewers** | none | `gh api repos/devresponse/devresponsekit/environments/production-migrations --jq '[.protection_rules[].type]'` does not include `"required_reviewers"` | Leave **Required reviewers** unticked | With reviewers, every merge's migrations wait for an approval while the production build's schema gate waits ten minutes for them, so an approval given later fails that build (approve, then **Redeploy** it in Vercel). Review belongs on the pull request; the branch policy keeps the credential on `main` ([docs/deployment.md §1.2](docs/deployment.md#12-automated-migrations-migrate-productionyml)). |
 
-The environment rules by API. The branch policy is two calls, and the call
-that adds reviewers repeats `deployment_branch_policy` so it cannot widen it:
+The branch policy by API, two calls. Run them before the secret goes in: the
+first creates the environment if the workflow's first run has not already.
 
 ```bash
-# Now: only `main` may deploy to the environment.
-gh api -X PUT repos/devresponse/devresponsekit/environments/production --input - <<'JSON'
+gh api -X PUT repos/devresponse/devresponsekit/environments/production-migrations --input - <<'JSON'
 { "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
 JSON
-gh api -X POST repos/devresponse/devresponsekit/environments/production/deployment-branch-policies \
+gh api -X POST repos/devresponse/devresponsekit/environments/production-migrations/deployment-branch-policies \
   -f name=main -f type=branch
-
-# With the first deploy secret: reviewers (a user's id: gh api users/<login> --jq .id).
-gh api -X PUT repos/devresponse/devresponsekit/environments/production --input - <<'JSON'
-{
-  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true },
-  "reviewers": [{ "type": "User", "id": <user-id> }]
-}
-JSON
 ```
 
-`deploy.yml`'s own trigger passes a `main`-only policy, because a
-`workflow_run` job runs on the default branch; a manual dispatch must then be
-started from `main`. Both of its jobs name the environment, so with reviewers
-set a real deploy is approved twice (the DEPLOY-1 comment in `deploy.yml`).
+`migrate-production.yml` runs on a push to `main` and on a manual dispatch,
+which must then be started from `main`. Both of its jobs name the
+environment, so the policy holds for the whole run. `deploy.yml`, which named
+the `production` environment and needed four secrets there, was retired by
+DEP2; no workflow names `production` any more (Vercel's Git integration still
+records its deployments under it, which needs no secret and no rule).
 
 When F-28 was verified on 2026-09-24, Dependabot alerts were on and
 **Dependabot security updates were off**. Turning the setting on is an
@@ -309,12 +302,11 @@ same required checks as any other PR, and Dependabot's `cooldown` and
 `open-pull-requests-limit` do not apply to them.
 
 When I-09 was verified on 2026-09-29, SHA pinning was **not** required, and
-the environment (GitHub lists it as `Production`; the API resolves
-`production` to it) had **no** branch policy and **no** protection rules.
-Its deploy secrets are unset
-([docs/deployment.md §1.2](docs/deployment.md#12-the-actions-pipeline-optional-and-not-configured-deploy-1)),
-so SHA pinning and the branch policy can go on now, and reviewers with the
-first secret.
+the `production` environment (GitHub lists it as `Production`; the API
+resolves `production` to it) had **no** branch policy, **no** protection rules
+and no secrets. SHA pinning can go on now. The `production-migrations`
+environment did not exist then; give it the branch policy above before its
+secret ([docs/deployment.md §3](docs/deployment.md#3-vercel-project--environment)).
 
 ## Secret scanning
 

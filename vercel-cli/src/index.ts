@@ -236,7 +236,6 @@ program
     "read PRODUCTION_DIRECT_DATABASE_URL (a satellite: SATELLITE_DIRECT_DATABASE_URL) from a .env file",
   )
   .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
-  .option("--allow-pooled", "permit a pooled connection string (not recommended)")
   .option(...ALLOW_UNVERIFIED_TARGET)
   .option(...FORCE_SCHEMA)
   .option("--dry-run", "show what would run (production is not pulled, so the target is not checked)")
@@ -257,7 +256,6 @@ const deployCommand = program
   )
   .option("--from-env <file>", "read the migration URL (PRODUCTION_DIRECT_DATABASE_URL) from a .env file")
   .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
-  .option("--allow-pooled", "permit a pooled connection string")
   .option(...ALLOW_UNVERIFIED_TARGET)
   .option(...FORCE_SCHEMA)
   .option(...ALLOW_REF)
@@ -284,7 +282,6 @@ const upCommand = program
     "deprecated: lands in shell history. The DIRECT connection string for migrations; set PRODUCTION_DIRECT_DATABASE_URL (a satellite: SATELLITE_DIRECT_DATABASE_URL) instead",
   )
   .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
-  .option("--allow-pooled", "permit a pooled connection string")
   .option(...ALLOW_UNVERIFIED_TARGET)
   .option(...FORCE_SCHEMA)
   .option(...ALLOW_REF)

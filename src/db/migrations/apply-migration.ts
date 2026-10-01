@@ -1,4 +1,5 @@
 import type { ClientBase, Pool, PoolClient } from "pg";
+import { MIGRATION_LOCK_POLL_MS } from "../migration-lock";
 import { createAppPool } from "../schema-config";
 
 /**
@@ -83,20 +84,137 @@ export function migrationTimeoutStatements(
 }
 
 /**
- * Issued once on the application runner's dedicated session, right after
- * checkout and before `pg_advisory_lock` (F-94). A role default applies to
- * every session of that role: docs/deployment.md §5 has a pooled deployment
- * give its role `statement_timeout = '30s'`, and by default migrations connect
- * as that same role. Under it a second runner's wait for the advisory lock was
+ * Issued once on each runner's dedicated session, right after checkout and
+ * before `pg_advisory_lock` (F-94; the Better Auth runner's lock session since
+ * DEP2). A role default applies to every session of that role:
+ * docs/deployment.md §5 has a pooled deployment give its role
+ * `statement_timeout = '30s'`, and by default migrations connect as that same
+ * role. Under it a second runner's wait for the advisory lock was
  * cancelled after 30 s instead of queueing behind the first. Clearing both
  * settings for the session makes that wait (and the ledger bootstrap and
- * reads around it) unbounded, as intended; each file's `set local` ceilings
- * still apply inside its own transaction.
+ * reads around it) unbounded, as intended, unless DB_MIGRATE_LOCK_WAIT_MS
+ * bounds the wait itself ({@link acquireMigrationLock}); each file's `set
+ * local` ceilings still apply inside its own transaction.
  */
 export const RUNNER_SESSION_STATEMENTS: readonly string[] = [
   "set lock_timeout = 0",
   "set statement_timeout = 0",
 ];
+
+/**
+ * The session-level advisory lock both runners hold for their whole run
+ * (review #85; the Better Auth runner since DEP2), so two runs started
+ * together serialise instead of colliding on the ledger or on the DDL. One
+ * key for both: they run one after the other and never nested, so sharing it
+ * cannot deadlock, and a hand `db:auth:migrate` cannot interleave with the
+ * workflow's `db:app:migrate`. A SESSION lock, so it lives on a client checked
+ * out for the run, never on `pool.query`.
+ */
+export const MIGRATION_LOCK_SQL = "select pg_advisory_lock(hashtext('app_schema_migrations'))";
+const MIGRATION_TRY_LOCK_SQL =
+  "select pg_try_advisory_lock(hashtext('app_schema_migrations')) as locked";
+export const MIGRATION_UNLOCK_SQL = "select pg_advisory_unlock(hashtext('app_schema_migrations'))";
+
+/** The clock {@link acquireMigrationLock} waits on; a test passes its own. */
+export interface LockClock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+const SYSTEM_CLOCK: LockClock = {
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
+/**
+ * Takes {@link MIGRATION_LOCK_SQL} on `client` (DEP2). `waitMs` is
+ * `resolveMigrationLockWait()` (`src/db/migration-lock.ts`): `undefined`
+ * waits as long as it takes, as the runners always did; a number retries
+ * `pg_try_advisory_lock` every second until that many milliseconds have
+ * passed and then throws, so an unattended run fails with the reason instead
+ * of hanging behind a forgotten session until its job times out. The session
+ * must already have cleared its ceilings ({@link RUNNER_SESSION_STATEMENTS}),
+ * or a role's `lock_timeout` would cut the unbounded wait short.
+ */
+export async function acquireMigrationLock(
+  client: Pick<ClientBase, "query">,
+  waitMs: number | undefined,
+  clock: LockClock = SYSTEM_CLOCK,
+): Promise<void> {
+  if (waitMs === undefined) {
+    await client.query(MIGRATION_LOCK_SQL);
+    return;
+  }
+  const deadline = clock.now() + waitMs;
+  for (;;) {
+    const { rows } = await client.query<{ locked: boolean }>(MIGRATION_TRY_LOCK_SQL);
+    if (rows[0]?.locked === true) return;
+    const remaining = deadline - clock.now();
+    if (remaining <= 0) {
+      throw new Error(
+        `another session holds the migration lock: gave up after DB_MIGRATE_LOCK_WAIT_MS=${waitMs}ms ` +
+          "and applied nothing. A concurrent run, or a session left holding the lock, shows in " +
+          "pg_locks with locktype 'advisory' (docs/troubleshooting.md).",
+      );
+    }
+    await clock.sleep(Math.min(MIGRATION_LOCK_POLL_MS, remaining));
+  }
+}
+
+/**
+ * One query for both of {@link assertMigrationSession}'s questions: the schema
+ * unqualified DDL lands in, and who owns the ledger in DB_SCHEMA, if it exists.
+ */
+const MIGRATION_SESSION_SQL = `
+  select current_schema() as schema_name,
+         current_user as login,
+         (select pg_get_userbyid(c.relowner) from pg_class c
+           where c.oid = to_regclass(format('%I.app_schema_migrations', $1::text))) as ledger_owner`;
+
+/**
+ * Refuses a migration session that would build in the wrong place or as the
+ * wrong role (DEP2). Both runners call it on the session that migrates, after
+ * `ensureSchema` and before anything else is created: the app runner's ledger
+ * bootstrap, Better Auth's `getMigrations`.
+ *
+ * 1. `current_schema()` must be `schema` (DB_SCHEMA). Every migration
+ *    statement is unqualified, so it lands wherever the session's search_path
+ *    resolves. Without the startup `search_path` (DB_SEARCH_PATH_VIA_OPTIONS
+ *    off, or a role default naming another schema) that was `public`, and the
+ *    ledger and 0001 were created there silently, beside an empty DB_SCHEMA.
+ * 2. When DB_SCHEMA already has a ledger, its owner must be `current_user`.
+ *    0005's default privileges are per creating role, so tables another role
+ *    creates get no grants for the runtime role, and they break the audit
+ *    trigger's owner rule (the retention and erasure paths admit only the
+ *    table owner). A fresh database has no ledger, so nothing to compare.
+ */
+export async function assertMigrationSession(
+  client: Pick<ClientBase, "query">,
+  schema: string,
+): Promise<void> {
+  const { rows } = await client.query<{
+    schema_name: string | null;
+    login: string;
+    ledger_owner: string | null;
+  }>(MIGRATION_SESSION_SQL, [schema]);
+  const session = rows[0];
+  if (!session) throw new Error("could not read the migration session's schema and role.");
+  if (session.schema_name !== schema) {
+    throw new Error(
+      `the session's search_path resolves to ${session.schema_name ?? "no existing schema"}, ` +
+        `not DB_SCHEMA ${schema} (DB_SEARCH_PATH_VIA_OPTIONS is off, or a role default points ` +
+        "elsewhere); nothing was created there.",
+    );
+  }
+  if (session.ledger_owner !== null && session.ledger_owner !== session.login) {
+    throw new Error(
+      `${schema}.app_schema_migrations is owned by ${session.ledger_owner}, but this session ` +
+        `migrates as ${session.login}: what ${session.login} creates would get no runtime grants ` +
+        "(0005's default privileges are per creating role) and would break the audit trigger's " +
+        `owner rule. Migrate as ${session.ledger_owner}; nothing was changed.`,
+    );
+  }
+}
 
 /**
  * A pool whose every connection runs under the migration ceilings for its
@@ -143,12 +261,13 @@ const LEDGER_INSERT_SQL = "insert into app_schema_migrations (id, checksum) valu
  *
  * The file runs under {@link MigrationTimeouts} set with `set local` (F-94),
  * so they end with its transaction. The runner's session-level advisory lock
- * is taken outside any file and is an unbounded wait on purpose (the runner
- * clears both settings for its session first, {@link RUNNER_SESSION_STATEMENTS}):
- * a second runner should queue behind the first, and that wait blocks no
- * application query. Every lock a file takes is held until its commit, because the file
- * is one transaction; docs/deployment.md §5 has what that means for writing
- * one that is safe on a live database.
+ * is taken outside any file and is not under these ceilings on purpose (the
+ * runner clears both settings for its session first,
+ * {@link RUNNER_SESSION_STATEMENTS}): a second runner should queue behind the
+ * first, for as long as DB_MIGRATE_LOCK_WAIT_MS allows (unbounded when unset),
+ * and that wait blocks no application query. Every lock a file takes is held
+ * until its commit, because the file is one transaction; docs/deployment.md §5
+ * has what that means for writing one that is safe on a live database.
  */
 export async function applyMigrationInTransaction(
   client: PoolClient,

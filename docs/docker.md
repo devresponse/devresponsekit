@@ -184,7 +184,12 @@ probe answers `503 schema_behind` for a gap in either half (§7).
 `db:auth:migrate` loads the app's auth configuration, so it needs the
 required variables of §3 in the shell or the checkout's `.env`; the Better
 Auth schema does not depend on their values, which is why
-`.github/workflows/deploy.yml` runs it with CI placeholders.
+`.github/workflows/migrate-production.yml` runs it with CI placeholders.
+Point both at the **direct** endpoint, as the role that owns the schema:
+they refuse a pooled or re-pointed `DATABASE_URL`, a session whose
+`search_path` does not resolve to `DB_SCHEMA`, and a role that does not own
+the existing ledger, each with exit code 1 and the reason ([Deployment
+§5](deployment.md#5-operations--gotchas)).
 
 No source checkout where the migration runs? The Dockerfile's `builder`
 stage has the whole toolchain. Build it with the same `--build-arg`s as the

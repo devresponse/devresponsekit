@@ -271,8 +271,9 @@ writes the config file (and, with `--create`, creates the project). Every comman
 
 **Migrations run before promotion.** `deploy` applies migrations first and promotes only if they
 succeed. If a migration fails, the currently-live build keeps serving against the schema it
-understands, and nothing is promoted. This is the ordering the repo's own deploy workflow
-documents, and the reason it is documented is that the reverse has caused outages.
+understands, and nothing is promoted. The kit's own production path keeps the same order a
+different way: its migrate workflow applies each push's migrations and the schema gate holds the
+build until they are in. The reverse has caused outages.
 
 **Migrations run against production, checked rather than assumed (F-47).** The migration URL is
 named explicitly: `PRODUCTION_DIRECT_DATABASE_URL` in the shell or the `--from-env` file (a
@@ -356,8 +357,9 @@ read-only `git` and refuses the run unless:
   kit merge.
 
 The kit's own `migrate` does not need the default branch.
-[docs/deployment.md §1.1](../docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)
-has the kit's production migrated from the open pull request's branch before it merges.
+[docs/deployment.md §1.1](../docs/deployment.md#11-the-live-path-vercel-git-integration-automated-migrations-schema-gate)
+has the kit's production migrated from the open pull request's branch before it merges, while
+its migrate workflow is not configured.
 `drk-deploy migrate` run from that branch, clean and pushed, does that with the target checked.
 Nothing is fetched, because a fetch writes refs: "pushed" and "origin/main" are the remote-tracking
 refs as the checkout last fetched them, and the output says so. Run `git fetch` first if the branch
@@ -410,7 +412,9 @@ behind`) line: the migrations are idempotent, so a run with nothing new to apply
 **A pooled connection string is refused.** Migrations need the _direct_ endpoint: DDL and the
 advisory lock the migration runner takes do not survive a transaction pooler, and the failure is
 silent rather than loud. Neon's `-pooler` host, a `.pooler.` host (Supabase), port 6543 and
-`pgbouncer=true` are all refused. Pass `--allow-pooled` only if you know why you are doing it.
+`pgbouncer=true` are all refused, and there is no override: since DEP2 the kit's migration runners
+refuse the same URLs themselves, so one let through here would only fail there (after `up` had
+synced the environment). Use the provider's direct connection string.
 
 **Secrets are never printed.** Values reach the terminal only through a mask that shows a length
 and a short fingerprint (`(set, 44 chars, fp 3f8a1c2d)`) — enough to compare two runs, useless to
@@ -433,17 +437,18 @@ work used to be inlined into the production client bundle. A variable the build 
 project, where `vercel pull` finds it. The one exception is the migration runners
 (`pnpm db:auth:migrate` and `db:app:migrate`). They are the kit's own scripts and read its
 configuration from the shell (`DB_MIGRATE_LOCALES`, the `DB_MIGRATE_LOCK_TIMEOUT_MS` /
-`DB_MIGRATE_STATEMENT_TIMEOUT_MS` ceilings both runners set, and the server environment the auth
-runner validates when it loads), so they keep the shell's variables, but never the token.
+`DB_MIGRATE_STATEMENT_TIMEOUT_MS` ceilings both runners set, the `DB_MIGRATE_LOCK_WAIT_MS` bound on
+their advisory-lock wait, and the server environment the auth runner validates when it loads), so
+they keep the shell's variables, but never the token.
 
 **Better Auth's migrations run first, and need only the migration URL (F-141).** `db:auth:migrate`
-runs before `db:app:migrate`, the order `pnpm db:provision` and the kit's deploy workflow use. It
+runs before `db:app:migrate`, the order `pnpm db:provision` and the kit's migrate workflow use. It
 used to run second, so an auth step that failed left the application's migrations applied under a
 build that was never promoted. The auth runner imports the kit's `@/lib/auth` for Better Auth's
 options, and that import validates the kit's whole server environment, which used to have to come
 from your shell or the kit checkout's `.env`. Now each required value the shell does not set
 (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX` and
-`SSO_HANDOFF_APPLICATION_ID`) is handed to it as the CI-only placeholder the kit's deploy workflow
+`SSO_HANDOFF_APPLICATION_ID`) is handed to it as the CI-only placeholder the kit's migrate workflow
 uses. None of them shapes the Better Auth schema, and none reaches the database. A value your shell
 does set is kept, and checked as before, but for one case: when `BETTER_AUTH_URL` is the placeholder,
 the step also leaves out your shell's `COOKIE_DOMAIN` and `API_JWT_ISSUER`. The kit checks both
@@ -1177,10 +1182,10 @@ CI audits this lockfile too. The kit's `Dependency audit` workflow
 catches what `pnpm audit` misses (the `path-to-regexp@6` row above). Before F-28 neither check
 looked here, so this tree's advisories surfaced only as alerts in the Security tab.
 
-The floors also cover the kit's optional Actions deploy (`.github/workflows/deploy.yml`): it
-installs its Vercel CLI from this lockfile (`pnpm --dir vercel-cli install --frozen-lockfile --prod`),
-so a bump of `vercel` here moves both. It used to run `pnpm add -g vercel@54.14.5`, which resolves
-without these overrides and so installed the exact versions they replace (I-09).
+The kit's optional Actions deploy (`.github/workflows/deploy.yml`) used to install its Vercel CLI
+from this lockfile too (I-09). DEP2 retired it: the kit's production migrations run in
+`.github/workflows/migrate-production.yml`, which installs no Vercel CLI, so this lockfile now
+serves drk-deploy alone.
 
 This lockfile has its own advisory allowlist: `pnpm --dir vercel-cli audit` reads
 `pnpm.auditConfig.ignoreGhsas` from this package's `package.json` and never the kit's root

@@ -815,12 +815,6 @@ test("resolveMigrationUrl: explicit sources only, and a satellite never inherits
         { SATELLITE_DIRECT_DATABASE_URL: SATELLITE_URL },
         { url: FLAG, source: "--database-url" },
       ],
-      [
-        "pooled, explicitly allowed",
-        { databaseUrl: POOLED, allowPooled: true },
-        {},
-        { url: POOLED, source: "--database-url" },
-      ],
     ];
   for (const [name, options, env, expected] of cases) {
     assert.deepEqual(resolveMigrationUrl(options, env), expected, name);
@@ -852,18 +846,18 @@ test("resolveMigrationUrl: refuses a missing, inherited, malformed or pooled URL
       refusal(/^No database URL/, /deliberately NOT used/),
     ],
     ["kit, not a postgres URL", { databaseUrl: "mysql://u@h/db" }, {}, refusal(/not a postgres:\/\//)],
-    ["kit, pooled flag", { databaseUrl: POOLED }, {}, refusal(/POOLED/, /--allow-pooled/)],
+    ["kit, pooled flag", { databaseUrl: POOLED }, {}, refusal(/POOLED/, /no override/)],
     [
       "kit, pooled shell variable",
       {},
       { PRODUCTION_DIRECT_DATABASE_URL: POOLED },
-      refusal(/POOLED/, /--allow-pooled/),
+      refusal(/POOLED/, /no override/),
     ],
     [
       "satellite, pooled",
       { satellite: true },
       { SATELLITE_DIRECT_DATABASE_URL: POOLED },
-      refusal(/POOLED/, /--allow-pooled/),
+      refusal(/POOLED/, /no override/),
     ],
   ];
   for (const [name, options, env, matches] of cases) {
@@ -871,7 +865,7 @@ test("resolveMigrationUrl: refuses a missing, inherited, malformed or pooled URL
   }
 });
 
-test("F-47: every pooled shape is refused for migrations, not only Neon's `-pooler.`", () => {
+test("F-47, DEP2: every pooled shape is refused for migrations, not only Neon's `-pooler.`, with no override", () => {
   const pooled: [string, string, RegExp][] = [
     ["Neon", "postgresql://u@ep-x-pooler.us-east-2.aws.neon.tech/db", /-pooler/],
     ["Supabase", "postgresql://u@aws-0-us-east-1.pooler.supabase.com:5432/postgres", /\.pooler\./],
@@ -889,10 +883,15 @@ test("F-47: every pooled shape is refused for migrations, not only Neon's `-pool
       () => resolveMigrationUrl({ databaseUrl: url }, {}),
       (err: unknown) => reason.test((err as Error).message),
     );
-    assert.equal(
-      resolveMigrationUrl({ databaseUrl: url, allowPooled: true }, {}).url,
-      url,
-      `${name}, allowed`,
+    // DEP2: the kit's runners refuse every pooled shape themselves, so the old
+    // `allowPooled` override would only pass the URL on to a certain failure.
+    // A caller still handing it in gets the same refusal.
+    assert.throws(
+      () => resolveMigrationUrl({ databaseUrl: url, allowPooled: true } as never, {}),
+      (err: unknown) =>
+        refusal(/^That looks like a POOLED connection string/, /no override/)(err) &&
+        !/--allow-pooled/.test((err as CliError).hint ?? ""),
+      `${name}, the retired override`,
     );
   }
   // The direct shapes that must NOT trip it.
@@ -981,7 +980,8 @@ test("F-47: verifyMigrationTarget matches Neon's pooled host to its direct twin,
   const matches: [string, Record<string, string>, string, string][] = [
     ["direct vs pooled DATABASE_URL", { DATABASE_URL: PRODUCTION_POOLED }, PRODUCTION_DIRECT, "DATABASE_URL"],
     [
-      "pooled vs pooled (with --allow-pooled)",
+      // Matched here, though resolveMigrationUrl refuses a pooled migration URL first.
+      "pooled vs pooled",
       { DATABASE_URL: PRODUCTION_POOLED },
       PRODUCTION_POOLED,
       "DATABASE_URL",
@@ -1038,10 +1038,10 @@ test("F-47: the port is part of the database, and Supabase's shared pooler is to
       { DATABASE_URL: "postgresql://app@db.example.com:5433/app" },
       "postgresql://owner@db.example.com:5433/app",
     ],
-    // One project reached through the shared pooler in session mode (5432,
-    // which keeps DDL and advisory locks, so --allow-pooled) and in
-    // transaction mode (6543): the port picks the pooling mode, the project
-    // in the username is the database.
+    // One project reached through the shared pooler in session mode (5432)
+    // and in transaction mode (6543): the port picks the pooling mode, the
+    // project in the username is the database. (resolveMigrationUrl refuses
+    // either as a migration URL before this match runs.)
     [
       "Supabase shared pooler, the same project in both modes",
       { DATABASE_URL: `postgresql://postgres.prodref@${SUPAVISOR}:6543/postgres` },
@@ -1130,11 +1130,6 @@ test("F-47: a migration URL whose query re-points the connection is refused", as
       !err.message.includes("prod-password") &&
       !(err.hint ?? "").includes("prod-password");
     assert.throws(() => resolveMigrationUrl({ databaseUrl: url }, {}), repointed, `resolve: ${param}`);
-    assert.throws(
-      () => resolveMigrationUrl({ databaseUrl: url, allowPooled: true }, {}),
-      repointed,
-      `resolve, --allow-pooled does not cover it: ${param}`,
-    );
     assert.throws(
       () =>
         verifyMigrationTarget({

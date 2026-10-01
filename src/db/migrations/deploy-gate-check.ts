@@ -4,9 +4,12 @@ import {
   type LedgerRow,
   describeError,
   evaluateLedger,
+  evaluateOwnerRatchet,
+  evaluateRuntimePrivileges,
   isConnectionError,
 } from "../deploy-gate";
 import { CORE_MIGRATION_LEDGER_IDS } from "./migration-plan";
+import { listRuntimeLoginMembers, verifyCurrentUserPrivileges } from "./runtime-privileges-db";
 
 /**
  * One attempt of the production build's schema gate (DEP1): the database
@@ -88,6 +91,12 @@ function sqlState(err: unknown): string | null {
  * build's files, and its gaps are reported with the ledger's, so one attempt
  * names everything missing. Connection-class errors anywhere are
  * `unreachable`, retried by the loop; any other error is `fatal`.
+ *
+ * Once the schema is current, the runtime's privileges (DEP3): a non-owner
+ * must hold exactly the manifest (`verifyCurrentUserPrivileges`, judged by
+ * `evaluateRuntimePrivileges`); an owner fails the ratchet when a
+ * least-privilege login already exists for the schema
+ * (`listRuntimeLoginMembers`, `evaluateOwnerRatchet`).
  */
 export async function checkDatabase(
   pool: Pool,
@@ -160,7 +169,15 @@ export async function checkDatabase(
         `Better Auth index(es) missing: ${plan.toBeAddedIndexes.map((entry) => `${entry.table}.${entry.name}`).join(", ")}`,
       );
     }
-    return gaps.length > 0 ? result("behind", gaps) : result("ok", []);
+    if (gaps.length > 0) return result("behind", gaps);
+
+    const verdict = identity.isOwner
+      ? evaluateOwnerRatchet(
+          identity.currentUser,
+          await listRuntimeLoginMembers(pool, options.schema),
+        )
+      : evaluateRuntimePrivileges(await verifyCurrentUserPrivileges(pool, options.schema));
+    return result(verdict.status, [...verdict.reasons]);
   } catch (err) {
     return result(isConnectionError(err) ? "unreachable" : "fatal", [describeError(err)]);
   }

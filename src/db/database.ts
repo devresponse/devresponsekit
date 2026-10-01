@@ -1,6 +1,7 @@
 import { Kysely, PostgresDialect } from "kysely";
 import { createAppPool, SEARCH_PATH_VIA_OPTIONS } from "./schema-config";
 import { intFromEnv } from "@/lib/env";
+import { DEFAULT_IDLE_IN_TX_TIMEOUT_MS, DEFAULT_STATEMENT_TIMEOUT_MS } from "./session-defaults";
 import type { AppDatabase } from "./schema/app-schema";
 
 /**
@@ -39,8 +40,9 @@ export const pgPool = createAppPool({
   // with DB_SEARCH_PATH_VIA_OPTIONS=0 neither is sent and the operator sets
   // them as role defaults instead (`ALTER ROLE <app_role> SET
   // statement_timeout = '30s'` / `idle_in_transaction_session_timeout =
-  // '30s'` — docs/deployment.md §5). Keep the role values in step with the
-  // defaults below.
+  // '30s'` — docs/deployment.md §5). The defaults below are the constants
+  // `pnpm db:runtime-login` writes as the runtime login's role defaults
+  // (src/db/session-defaults.ts, DEP3), so the two paths cannot drift.
   ...(SEARCH_PATH_VIA_OPTIONS
     ? {
         // Ceiling on a single statement, so one runaway scan can't pin a
@@ -48,13 +50,16 @@ export const pgPool = createAppPool({
         // query), so the default comfortably exceeds any legitimate page/list
         // query. Tunable via PG_STATEMENT_TIMEOUT_MS; raise it if a
         // deployment runs legitimately long single statements.
-        statement_timeout: intFromEnv("PG_STATEMENT_TIMEOUT_MS", 30_000),
+        statement_timeout: intFromEnv("PG_STATEMENT_TIMEOUT_MS", DEFAULT_STATEMENT_TIMEOUT_MS),
         // statement_timeout bounds a single statement, but a transaction that
         // stalls on an await BETWEEN statements would otherwise pin its
         // connection + any locks it holds indefinitely. Cap idle-in-transaction
         // time so a stuck request can't wedge the pool (P3-15). Tunable via
         // PG_IDLE_IN_TX_TIMEOUT_MS.
-        idle_in_transaction_session_timeout: intFromEnv("PG_IDLE_IN_TX_TIMEOUT_MS", 30_000),
+        idle_in_transaction_session_timeout: intFromEnv(
+          "PG_IDLE_IN_TX_TIMEOUT_MS",
+          DEFAULT_IDLE_IN_TX_TIMEOUT_MS,
+        ),
       }
     : {}),
 });

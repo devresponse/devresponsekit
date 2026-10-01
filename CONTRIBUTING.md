@@ -140,6 +140,13 @@ marker on the line directly above it, with a reason of at least 20 characters:
 `create function` without `or replace` are refused with or without one. The full rule is
 [docs/deployment.md → Compatibility: expand, then contract](docs/deployment.md#compatibility-expand-then-contract).
 
+A new table also needs an entry in the runtime role's privilege manifest,
+`TABLE_GRANTS` in `src/db/runtime-privileges.ts`, and a new `SECURITY DEFINER`
+function one in `FUNCTION_GRANTS`: `tests/unit/runtime-privileges.test.ts`
+fails until they have one, and `db:app:migrate` reconciles the role to it
+([docs/deployment.md §8.1](docs/deployment.md#81-the-privilege-manifest)).
+Never give a foreign key on `app_audit_events` an `ON DELETE CASCADE`.
+
 ## Security
 
 Do not file security vulnerabilities as public issues — see

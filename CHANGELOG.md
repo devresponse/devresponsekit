@@ -112,6 +112,15 @@ For a deployment running 2.0.0.
    nothing runs `db:app:migrate` or `db:auth:migrate` with a pooled URL,
    with `DB_SEARCH_PATH_VIA_OPTIONS=0`, or as a role that does not own the
    schema: each is now refused.
+8. **None for the runtime privileges (DEP3).** Production keeps connecting
+   as the owner until the least-privilege login is adopted
+   ([docs/deployment.md §8](docs/deployment.md#8-least-privilege-runtime-role-optional-recommended)),
+   so nothing it does changes. The first `db:app:migrate` after the merge
+   logs `[migrate] runtime role auth_runtime: N grants, M revokes`, the next
+   one `in sync`, and the production build still passes with
+   `[deploy-gate] PASS … runtime=owner` and the owner warning. Never set
+   `DB_RUNTIME_LOGIN_PASSWORD` in Vercel, and never create a database login
+   in the Neon Console.
 
 ### Security fixes the satellite forks must port
 
@@ -129,6 +138,27 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Added
 
+- **`pnpm db:runtime-login` (DEP3).** Creates, or rotates the password of, a
+  LOGIN role that inherits `<DB_SCHEMA>_runtime` (`INHERIT`, no `SET`), with
+  the role defaults a pooled connection needs (`search_path`, and both 30 s
+  timeouts, from the same constants as the runtime pool), then connects as it
+  without startup parameters and verifies the privileges. Run as the owner
+  against the direct endpoint; the password (`DB_RUNTIME_LOGIN_PASSWORD`) is
+  sent only as a client-side SCRAM-SHA-256 verifier, and nothing printed
+  carries it or a URL. See
+  [docs/deployment.md §8.3](docs/deployment.md#83-pnpm-dbruntime-login-creating-rotating-and-adopting-a-login).
+- **The schema gate checks the runtime's privileges, with a ratchet
+  (DEP3).** Once the schema is current, a production build that connects as
+  a non-owner must hold exactly the privilege manifest (missing or extra:
+  `behind`, polled; a bypassing attribute or membership: `fatal`), and a build
+  that connects as the owner fails once a least-privilege login exists for
+  its schema. `PASS` now names `runtime=owner|non-owner`. See
+  [docs/deployment.md §8.5](docs/deployment.md#85-the-gates-privilege-check-the-ratchet-and-break-glass).
+- **CI runs the app as a non-owner login (DEP3).** The
+  `E2E + accessibility (Playwright)` job migrates as a non-superuser owner
+  shaped like Neon's, creates a login with `pnpm db:runtime-login`, and runs
+  the gate, the server, `db:prune` and `mcp:reap` as that login in the pooled
+  shape; it fails on any `permission denied` in the server log.
 - **Every push to `main` migrates production (DEP2).**
   `.github/workflows/migrate-production.yml` runs `pnpm db:auth:migrate`,
   then `pnpm db:app:migrate`, against production's direct endpoint as the
@@ -202,6 +232,14 @@ of 2.0.0's list below. Each entry names what to carry over.
 
 ### Changed
 
+- **`db:app:migrate` reconciles the runtime role's privileges (DEP3).** Every
+  run ends, under the migration lock, by bringing `<DB_SCHEMA>_runtime` to the
+  manifest in `src/db/runtime-privileges.ts`, Better Auth's tables included,
+  issuing only the grants and revokes needed (`in sync` on a steady state). The
+  role loses `INSERT`, `UPDATE` and `DELETE` on `app_schema_migrations` and
+  `DELETE` on `app_users`. This has no effect while the app connects as the
+  owner. See
+  [docs/deployment.md §8.2](docs/deployment.md#82-the-reconcile-at-the-end-of-every-dbappmigrate).
 - **drk-deploy treats a gated git integration as safe, and tells its own
   build what it migrated (DEP1).** `deploy` and `up` no longer refuse a kit
   project that Vercel deploys on every push when the checkout's build runs

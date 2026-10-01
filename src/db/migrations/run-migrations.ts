@@ -23,6 +23,7 @@ import {
   reconcileLedgerChecksum,
   shouldIncludeLocales,
 } from "./migration-plan";
+import { reconcileRuntimePrivileges } from "./runtime-privileges-db";
 
 /**
  * Lightweight migration runner.
@@ -64,6 +65,12 @@ import {
  * that for the lock (`acquireMigrationLock`); and, before the ledger is
  * created, a session whose search_path does not resolve to DB_SCHEMA or a role
  * that does not own the existing ledger (`assertMigrationSession`).
+ *
+ * Runtime privileges (DEP3): after the last file, still holding the lock, the
+ * run reconciles the NOLOGIN `<DB_SCHEMA>_runtime` role to the manifest in
+ * `src/db/runtime-privileges.ts` (`reconcileRuntimePrivileges`), Better
+ * Auth's tables included. A steady-state run changes nothing and logs `in
+ * sync`; a missing role is reported, never created (0005 creates it).
  *
  * Integrity (review #86): the ledger also stores a sha256 `checksum` of each
  * applied file — of its NORMALISED content (`normalizeMigrationSql`: comments
@@ -258,6 +265,11 @@ async function main() {
       console.log(`[migrate] apply  ${migration.id}`);
       await applyMigrationInTransaction(client, { id: migration.id, sql, checksum }, timeouts);
     }
+
+    // DEP3: bring `<DB_SCHEMA>_runtime` to the privilege manifest, still under
+    // the lock and after the last file, so a grant a file (or Better Auth's
+    // migrator, outside the ledger) left out of line is repaired on every run.
+    await reconcileRuntimePrivileges(client, DB_SCHEMA, (line) => console.log(`[migrate] ${line}`));
 
     console.log("[migrate] done");
   } finally {

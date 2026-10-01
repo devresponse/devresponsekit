@@ -4,6 +4,7 @@ import {
   migrationChecksum,
   missingCoreMigrations,
 } from "./migrations/migration-plan";
+import type { PrivilegeReport } from "./runtime-privileges";
 
 /**
  * The production build's schema gate (DEP1): the pure half.
@@ -284,6 +285,71 @@ export function evaluateLedger(
 }
 
 /* ------------------------------------------------------------------ */
+/*  The runtime's privileges (DEP3)                                     */
+/* ------------------------------------------------------------------ */
+
+/** At most `max` items, then how many more: a reason stays one readable line. */
+function some(items: readonly string[], max = 8): string {
+  return items.length <= max
+    ? items.join(", ")
+    : `${items.slice(0, max).join(", ")} and ${items.length - max} more`;
+}
+
+/**
+ * What the gate makes of a NON-OWNER runtime's privileges, checked once the
+ * schema is current (DEP3, docs/deployment.md §8): `verifyCurrentUserPrivileges`
+ * for the build's own login.
+ *
+ * - A forbidden attribute (SUPERUSER, CREATEROLE, …) or membership (the ledger
+ *   owner, `pg_write_all_data`, `neon_superuser`, …) is `fatal`: the login
+ *   bypasses its grants, and no migration changes that.
+ * - A missing or forbidden privilege is `behind`: the migrate job's reconcile
+ *   may still be running, so the gate polls. It also means code cannot go
+ *   live ahead of the grants it needs.
+ */
+export function evaluateRuntimePrivileges(report: PrivilegeReport): AttemptResult {
+  const fatal: string[] = [];
+  if (report.attributes.length > 0) {
+    fatal.push(`the runtime login has the forbidden attribute(s) ${some(report.attributes)}`);
+  }
+  if (report.memberships.length > 0) {
+    fatal.push(
+      `the runtime login is a member of ${some(report.memberships)}, which bypasses its grants: create it with pnpm db:runtime-login, never in the Neon Console`,
+    );
+  }
+  if (fatal.length > 0) return { status: "fatal", reasons: fatal };
+  const behind: string[] = [];
+  if (report.missing.length > 0) {
+    behind.push(
+      `the runtime login lacks ${some(report.missing)}: db:app:migrate's reconcile grants them`,
+    );
+  }
+  if (report.forbidden.length > 0) {
+    behind.push(
+      `the runtime login holds ${some(report.forbidden)}, which the privilege manifest forbids: db:app:migrate's reconcile revokes table grants, the rest is the owner's to revoke`,
+    );
+  }
+  return behind.length > 0 ? { status: "behind", reasons: behind } : { status: "ok", reasons: [] };
+}
+
+/**
+ * The ratchet for an OWNER runtime (DEP3): once a least-privilege login exists
+ * for this schema (`logins`, from `listRuntimeLoginMembers`), a build that
+ * still connects as the owner is `fatal`, so a runtime that has been moved to
+ * the login cannot drift back by accident. With no login it passes, and the
+ * script prints {@link OWNER_WARNING}.
+ */
+export function evaluateOwnerRatchet(owner: string, logins: readonly string[]): AttemptResult {
+  if (logins.length === 0) return { status: "ok", reasons: [] };
+  return {
+    status: "fatal",
+    reasons: [
+      `a least-privilege login (${some(logins)}) exists for this schema but this build connects as the owner ${owner}; point DATABASE_URL at the login (pnpm db:runtime-login, docs/deployment.md §8.3), or follow the break-glass procedure in docs/deployment.md §8.5`,
+    ],
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Errors                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -456,9 +522,12 @@ export function formatAttemptLine(
   return `${GATE_PREFIX} attempt ${n} ${kind}: ${joined(reasons)}`;
 }
 
-/** `[deploy-gate] PASS schema current after <s>s`. */
-export function formatPassLine(elapsedMs: number): string {
-  return `${GATE_PREFIX} PASS schema current after ${seconds(elapsedMs)}`;
+/**
+ * `[deploy-gate] PASS schema current after <s>s runtime=<owner|non-owner>`.
+ * A non-owner PASS also means its privileges matched the manifest (DEP3).
+ */
+export function formatPassLine(elapsedMs: number, isOwner: boolean): string {
+  return `${GATE_PREFIX} PASS schema current after ${seconds(elapsedMs)} runtime=${isOwner ? "owner" : "non-owner"}`;
 }
 
 /** The last line of a failed gate, with what production is doing and what to do next. */

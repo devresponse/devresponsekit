@@ -606,7 +606,7 @@ describe("#83 — audit table: append-only trigger, SECURITY DEFINER prune, runt
     expect(pub.rows[0]!.ok).toBe(false);
   });
 
-  it(`the runtime role ${RUNTIME_ROLE} exists (NOLOGIN) with INSERT/SELECT only on the audit table and full DML elsewhere`, async () => {
+  it(`the runtime role ${RUNTIME_ROLE} exists (NOLOGIN) with INSERT/SELECT on the audit table, SELECT on the ledger, no DELETE on app_users, and full DML elsewhere`, async () => {
     const role = await sql<{ rolcanlogin: boolean }>`
       select rolcanlogin from pg_roles where rolname = ${RUNTIME_ROLE}
     `.execute(db);
@@ -629,8 +629,15 @@ describe("#83 — audit table: append-only trigger, SECURITY DEFINER prune, runt
     expect(await priv("app_audit_events", "UPDATE")).toBe(false);
     expect(await priv("app_audit_events", "DELETE")).toBe(false);
     expect(await priv("app_audit_events", "TRUNCATE")).toBe(false);
-    expect(await priv("app_users", "DELETE")).toBe(true);
+    // DEP3: the privilege manifest (src/db/runtime-privileges.ts), applied by
+    // the reconcile at the end of every db:app:migrate. Erasure goes through
+    // app_users_pseudonymise, and only migrations write the ledger.
+    expect(await priv("app_users", "DELETE")).toBe(false);
+    expect(await priv("app_users", "UPDATE")).toBe(true);
+    expect(await priv("app_schema_migrations", "SELECT")).toBe(true);
+    expect(await priv("app_schema_migrations", "INSERT")).toBe(false);
     expect(await priv("app_organizations", "UPDATE")).toBe(true);
+    expect(await priv("app_organizations", "DELETE")).toBe(true);
     const fn = await sql<{ ok: boolean }>`
       select has_function_privilege(${RUNTIME_ROLE}::name, 'app_audit_events_prune(integer, integer)', 'execute') as ok
     `.execute(db);

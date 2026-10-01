@@ -3,6 +3,7 @@ import { invalidOriginSuffixes, splitOriginSuffixList } from "@/lib/admin/origin
 import { isSameIdentifier } from "@/lib/api-auth/resources";
 import { parseClientIpSource } from "@/lib/client-ip-source";
 import { DEFAULT_SSO_SESSION_LIFETIME_HOURS } from "@/lib/session-lifetime";
+import { DEFAULT_IDLE_IN_TX_TIMEOUT_MS, DEFAULT_STATEMENT_TIMEOUT_MS } from "@/db/session-defaults";
 import {
   cookieDomainProblem,
   ed25519PrivateJwkProblem,
@@ -148,12 +149,22 @@ const serverEnvSchema = z
      * silently becoming `NaN` and being handed to `pg` (P2-12). database.ts
      * also reads them defensively via {@link intFromEnv} — it is imported by
      * env-poor cron scripts (outbox:drain, db:prune) that must NOT require the
-     * full schema — with the SAME defaults. Keep the two in sync.
+     * full schema — with the SAME defaults. Keep the two in sync. The two
+     * session ceilings come from src/db/session-defaults.ts, which the runtime
+     * login's role defaults read too (DEP3).
      */
     PGPOOL_MAX: z.coerce.number().int().positive().default(10),
     PG_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-    PG_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
-    PG_IDLE_IN_TX_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    PG_STATEMENT_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_STATEMENT_TIMEOUT_MS),
+    PG_IDLE_IN_TX_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_IDLE_IN_TX_TIMEOUT_MS),
     /**
      * The graceful-shutdown watchdog budget in ms (`src/lib/shutdown.server.ts`)
      * and the row cap of one administrator CSV export

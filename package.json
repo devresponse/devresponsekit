@@ -25,6 +25,7 @@
     "db:reset": "tsx src/db/reset-database.ts",
     "db:reset:reload": "tsx src/db/reset-database.ts --yes --reload",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
+    "db:runtime-login": "tsx scripts/db-runtime-login.ts",
     "deploy:gate": "tsx scripts/deploy-gate.ts",
     "db:prune": "tsx --conditions=react-server scripts/prune-retention.ts",
     "outbox:drain": "tsx --conditions=react-server scripts/drain-outbox.ts",

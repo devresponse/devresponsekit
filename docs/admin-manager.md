@@ -2109,9 +2109,10 @@ What the trigger does and does not guarantee (review #83):
   `app.audit_retention` from a session connected as the **runtime role** does
   nothing. It still works from a session connected as the **owner** — which is
   what the application does by default, until the operator switches
-  `DATABASE_URL` to the runtime role (next bullet); that residual gap is
-  documented, tested (`tests/db/schema-integrity.db.test.ts`), and closed only
-  by the role switch.
+  `DATABASE_URL` to a login that inherits the runtime role
+  (`pnpm db:runtime-login`, see the privilege-boundary bullet below); that
+  residual gap is documented, tested (`tests/db/schema-integrity.db.test.ts`),
+  and closed only by the switch.
 - **An erasure is the only other UPDATE (F-151).** `app_users_pseudonymise(app_user_id)`
   (0008) is a `SECURITY DEFINER` function owned by the schema owner, like the
   prune function, and the admin erase route calls it ([§8.1](#data-export-and-erasure-f-151)).
@@ -2137,12 +2138,14 @@ What the trigger does and does not guarantee (review #83):
   below 30 is honoured as 30 (the worker logs the clamp). Shortening the floor
   is a new migration run as the owner, never an application setting.
 - **The privilege boundary is the runtime role, not the trigger.** When the
-  application connects as the least-privilege `<DB_SCHEMA>_runtime` role
-  ([Deployment §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended))
+  application connects as a login that inherits the least-privilege
+  `<DB_SCHEMA>_runtime` role (made by `pnpm db:runtime-login`,
+  [Deployment §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended))
   it holds `INSERT`/`SELECT` only on `app_audit_events` — no `UPDATE`,
-  `DELETE` or `TRUNCATE` — and executes the prune and erasure functions by
-  grant. Until an
-  operator switches the runtime to that role, the application still connects
+  `DELETE` or `TRUNCATE` — and no `DELETE` on `app_users`, and executes the
+  prune and erasure functions by grant; every `pnpm db:app:migrate`
+  reconciles the role to that manifest. Until an
+  operator switches the runtime to such a login, the application still connects
   as the owner, which can disable the trigger like any owner; the trigger then
   guards against accidental or scripted mutation, not against a compromised
   owner credential.

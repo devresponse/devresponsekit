@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type BetterAuthMigrationPlan, checkDatabase } from "@/db/migrations/deploy-gate-check";
 import { REQUIRED_CORE_MIGRATIONS } from "@/db/migrations/migration-plan";
+import { listRuntimeLoginMembers } from "@/db/migrations/runtime-privileges-db";
 import { resolveDatabaseUrl } from "@/db/schema-config";
 
 /**
@@ -33,11 +34,23 @@ import { resolveDatabaseUrl } from "@/db/schema-config";
  *      puts back what the gate named.
  *   j. A ledger the login cannot read (42501), or one with no checksum
  *      column (42703), is behind.
+ *   k. The runtime's privileges, once the schema is current (DEP3): a
+ *      non-owner missing a grant, or holding a ledger write, is behind; one
+ *      that belongs to a role bypassing its grants is fatal; and an owner
+ *      build fails the ratchet once a LOGIN member of the runtime role exists,
+ *      but never on the ADMIN-only membership a non-superuser owner (Neon's
+ *      neondb_owner) gets by creating that role.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts).
  */
 const SCHEMA = "__dbtest_gate";
 const RUNTIME_ROLE = `${SCHEMA}_runtime`;
+const LOGIN_ROLE = `${SCHEMA}_app_login`;
+/** (k)'s non-superuser owner, and the roles it creates; no schema needed. */
+const NEON_SCHEMA = `${SCHEMA}_neon`;
+const NEON_OWNER = `${NEON_SCHEMA}_owner`;
+const NEON_RUNTIME = `${NEON_SCHEMA}_runtime`;
+const NEON_LOGIN = `${NEON_SCHEMA}_app_login`;
 const ROOT = process.cwd();
 const RELEASE = "0002-release.sql";
 const FILES = new Map(
@@ -122,8 +135,17 @@ function gateEnv(extra: Record<string, string>): Record<string, string | undefin
   };
 }
 
+/** The login and runtime role go first: the owner granted their memberships. */
+async function dropNeonOwnerScratch(): Promise<void> {
+  for (const role of [NEON_LOGIN, NEON_RUNTIME, NEON_OWNER]) {
+    await admin.query(`drop role if exists "${role}"`);
+  }
+}
+
 async function dropScratch(): Promise<void> {
+  await dropNeonOwnerScratch();
   await admin.query(`drop schema if exists "${SCHEMA}" cascade`);
+  await admin.query(`drop role if exists "${LOGIN_ROLE}"`);
   const { rows } = await admin.query("select 1 from pg_roles where rolname = $1", [RUNTIME_ROLE]);
   if (rows.length > 0) {
     await admin.query(`drop owned by "${RUNTIME_ROLE}"`);
@@ -269,7 +291,9 @@ describe("the schema gate against a live database (DEP1)", () => {
     expect(lines).toContain(
       `[deploy-gate] target host=${url.hostname} port=${url.port || "5432"} database=${url.pathname.slice(1)} schema=${SCHEMA} user=${decodeURIComponent(url.username)} runtime=owner`,
     );
-    expect(lines.at(-1)).toMatch(/^\[deploy-gate\] PASS schema current after [\d.]+s$/);
+    expect(lines.at(-1)).toMatch(
+      /^\[deploy-gate\] PASS schema current after [\d.]+s runtime=owner$/,
+    );
     expect(ran.stdout).not.toContain(DATABASE_URL);
     const password = decodeURIComponent(url.password);
     if (password) {
@@ -465,5 +489,118 @@ describe("the schema gate against a live database (DEP1)", () => {
       );
     }
     expect(await check(gatePool(SCHEMA))).toMatchObject({ status: "ok", reasons: [] });
+  });
+  describe("(k) the runtime's privileges, once the schema is current (DEP3)", () => {
+    /** One attempt as the runtime role (`set role`), a non-owner. */
+    const asRuntime = async () => {
+      const pool = gatePool(SCHEMA);
+      await pool.query(`set role "${RUNTIME_ROLE}"`);
+      return check(pool);
+    };
+
+    it("passes a non-owner that holds exactly the manifest", async () => {
+      expect(await asRuntime()).toMatchObject({ status: "ok", reasons: [] });
+    });
+
+    it("is behind while a grant is missing", async () => {
+      await admin.query(`revoke insert on "${SCHEMA}".app_outbox from "${RUNTIME_ROLE}"`);
+      try {
+        expect(await asRuntime()).toMatchObject({
+          status: "behind",
+          reasons: [
+            "the runtime login lacks INSERT on app_outbox: db:app:migrate's reconcile grants them",
+          ],
+        });
+      } finally {
+        await admin.query(`grant insert on "${SCHEMA}".app_outbox to "${RUNTIME_ROLE}"`);
+      }
+    });
+
+    it("is behind while it holds a ledger write the manifest forbids", async () => {
+      await admin.query(`grant insert on "${SCHEMA}".app_schema_migrations to "${RUNTIME_ROLE}"`);
+      try {
+        const result = await asRuntime();
+        expect(result.status).toBe("behind");
+        expect(result.reasons).toEqual([
+          expect.stringMatching(
+            /^the runtime login holds INSERT on app_schema_migrations, which the privilege manifest forbids/,
+          ),
+        ]);
+      } finally {
+        await admin.query(
+          `revoke insert on "${SCHEMA}".app_schema_migrations from "${RUNTIME_ROLE}"`,
+        );
+      }
+    });
+
+    it("is fatal when it belongs to a role that bypasses its grants", async () => {
+      await admin.query(`grant pg_read_all_data to "${RUNTIME_ROLE}"`);
+      try {
+        const result = await asRuntime();
+        expect(result.status).toBe("fatal");
+        expect(result.reasons).toEqual([
+          expect.stringMatching(/^the runtime login is a member of pg_read_all_data, /),
+        ]);
+      } finally {
+        await admin.query(`revoke pg_read_all_data from "${RUNTIME_ROLE}"`);
+      }
+    });
+
+    it("the ratchet: an owner build is fatal once a LOGIN member of the runtime role exists", async () => {
+      expect(await check(gatePool(SCHEMA))).toMatchObject({ status: "ok", reasons: [] });
+      await admin.query(`create role "${LOGIN_ROLE}" login`);
+      try {
+        await admin.query(`grant "${RUNTIME_ROLE}" to "${LOGIN_ROLE}"`);
+        const result = await check(gatePool(SCHEMA));
+        expect(result.status).toBe("fatal");
+        expect(result.reasons).toEqual([
+          `a least-privilege login (${LOGIN_ROLE}) exists for this schema but this build connects as the owner ${decodeURIComponent(new URL(DATABASE_URL).username)}; point DATABASE_URL at the login (pnpm db:runtime-login, docs/deployment.md §8.3), or follow the break-glass procedure in docs/deployment.md §8.5`,
+        ]);
+        // The break-glass step: a login that can no longer log in is no
+        // longer counted, and the owner build passes again.
+        await admin.query(`alter role "${LOGIN_ROLE}" nologin`);
+        expect(await check(gatePool(SCHEMA))).toMatchObject({ status: "ok", reasons: [] });
+      } finally {
+        await admin.query(`drop role if exists "${LOGIN_ROLE}"`);
+      }
+    });
+
+    it("the ratchet never counts the membership a non-superuser owner gets by creating the runtime role", async () => {
+      // Neon's shape: neondb_owner, a non-superuser CREATEROLE login, created
+      // auth_runtime in 0005, and Postgres 16+ made it an ADMIN-only member of
+      // it. The (k) case above runs as a superuser, which gets no such
+      // membership; counting this one would fail every production build.
+      const asOwner = gatePool(SCHEMA);
+      await admin.query(`create role "${NEON_OWNER}" login createrole`);
+      try {
+        await asOwner.query(`set role "${NEON_OWNER}"`);
+        await asOwner.query(`create role "${NEON_RUNTIME}" nologin`);
+        const { rows } = await admin.query(
+          `select m.admin_option, m.inherit_option, m.set_option
+             from pg_auth_members m
+            where m.roleid = $1::regrole and m.member = $2::regrole`,
+          [NEON_RUNTIME, NEON_OWNER],
+        );
+        expect(rows).toEqual([{ admin_option: true, inherit_option: false, set_option: false }]);
+        expect(await listRuntimeLoginMembers(asOwner, NEON_SCHEMA)).toEqual([]);
+        expect(await listRuntimeLoginMembers(admin, NEON_SCHEMA)).toEqual([]);
+
+        // A login the owner makes the way db:runtime-login does is counted.
+        await asOwner.query(`create role "${NEON_LOGIN}" login`);
+        await asOwner.query(
+          `grant "${NEON_RUNTIME}" to "${NEON_LOGIN}" with inherit true, set false`,
+        );
+        expect(await listRuntimeLoginMembers(asOwner, NEON_SCHEMA)).toEqual([NEON_LOGIN]);
+        expect(await listRuntimeLoginMembers(admin, NEON_SCHEMA)).toEqual([NEON_LOGIN]);
+
+        // createrole_self_grant (16+) makes the creator an inheriting member;
+        // the build's own user is still never counted.
+        await admin.query(`grant "${NEON_RUNTIME}" to "${NEON_OWNER}" with inherit true`);
+        expect(await listRuntimeLoginMembers(asOwner, NEON_SCHEMA)).toEqual([NEON_LOGIN]);
+      } finally {
+        await asOwner.query("reset role");
+        await dropNeonOwnerScratch();
+      }
+    });
   });
 });

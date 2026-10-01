@@ -10,6 +10,8 @@ import {
   type LedgerRow,
   describeError,
   evaluateLedger,
+  evaluateOwnerRatchet,
+  evaluateRuntimePrivileges,
   formatAttemptLine,
   formatFailLine,
   formatPassLine,
@@ -23,6 +25,7 @@ import {
   runGateLoop,
 } from "@/db/deploy-gate";
 import { CONSOLIDATED_CORE_MIGRATIONS, migrationChecksum } from "@/db/migrations/migration-plan";
+import type { PrivilegeReport } from "@/db/runtime-privileges";
 
 /**
  * The production build's schema gate, its pure half (DEP1): which builds it
@@ -362,6 +365,98 @@ describe("runGateLoop", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  The runtime's privileges (DEP3)                                     */
+/* ------------------------------------------------------------------ */
+
+const CLEAN: PrivilegeReport = { missing: [], forbidden: [], attributes: [], memberships: [] };
+
+describe("evaluateRuntimePrivileges and evaluateOwnerRatchet (DEP3)", () => {
+  it("passes a login that holds exactly the manifest", () => {
+    expect(evaluateRuntimePrivileges(CLEAN)).toEqual({ status: "ok", reasons: [] });
+  });
+
+  it("is behind on a missing or a forbidden privilege: the reconcile may still be running", () => {
+    expect(evaluateRuntimePrivileges({ ...CLEAN, missing: ["INSERT on app_outbox"] })).toEqual({
+      status: "behind",
+      reasons: [
+        "the runtime login lacks INSERT on app_outbox: db:app:migrate's reconcile grants them",
+      ],
+    });
+    const both = evaluateRuntimePrivileges({
+      ...CLEAN,
+      missing: ["SELECT on session"],
+      forbidden: ["INSERT on app_schema_migrations"],
+    });
+    expect(both.status).toBe("behind");
+    expect(both.reasons).toHaveLength(2);
+    expect(both.reasons[1]).toMatch(
+      /^the runtime login holds INSERT on app_schema_migrations, which the privilege manifest forbids/,
+    );
+  });
+
+  it("names at most eight items and counts the rest", () => {
+    const missing = Array.from({ length: 11 }, (_, i) => `SELECT on t${i}`);
+    expect(evaluateRuntimePrivileges({ ...CLEAN, missing }).reasons[0]).toBe(
+      "the runtime login lacks SELECT on t0, SELECT on t1, SELECT on t2, SELECT on t3, SELECT on t4, SELECT on t5, SELECT on t6, SELECT on t7 and 3 more: db:app:migrate's reconcile grants them",
+    );
+  });
+
+  it("is fatal on a forbidden attribute or membership, ahead of anything missing", () => {
+    const verdict = evaluateRuntimePrivileges({
+      missing: ["SELECT on session"],
+      forbidden: [],
+      attributes: ["SUPERUSER"],
+      memberships: ["neon_superuser"],
+    });
+    expect(verdict.status).toBe("fatal");
+    expect(verdict.reasons).toEqual([
+      "the runtime login has the forbidden attribute(s) SUPERUSER",
+      "the runtime login is a member of neon_superuser, which bypasses its grants: create it with pnpm db:runtime-login, never in the Neon Console",
+    ]);
+  });
+
+  it("the ratchet: an owner build passes until a login exists, then is fatal", () => {
+    expect(evaluateOwnerRatchet("neondb_owner", [])).toEqual({ status: "ok", reasons: [] });
+    expect(evaluateOwnerRatchet("neondb_owner", ["auth_app"])).toEqual({
+      status: "fatal",
+      reasons: [
+        "a least-privilege login (auth_app) exists for this schema but this build connects as the owner neondb_owner; point DATABASE_URL at the login (pnpm db:runtime-login, docs/deployment.md §8.3), or follow the break-glass procedure in docs/deployment.md §8.5",
+      ],
+    });
+  });
+
+  it("drives the loop: a privilege gap is polled until the grants land, a ratchet stops at once", async () => {
+    const reports: PrivilegeReport[] = [
+      { ...CLEAN, forbidden: ["INSERT on app_schema_migrations"] },
+      { ...CLEAN, missing: ["SELECT on session"] },
+      CLEAN,
+    ];
+    const lines: string[] = [];
+    const gap = await runGateLoop({
+      attempt: async (n) => evaluateRuntimePrivileges(reports[n - 1]!),
+      now: () => 0,
+      sleep: async () => undefined,
+      waitMs: 600_000,
+      pollMs: GATE_POLL_MS,
+      log: (line) => lines.push(line),
+    });
+    expect(gap).toMatchObject({ outcome: "pass", attempts: 3 });
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^\[deploy-gate\] attempt 1 behind: the runtime login holds /);
+
+    const ratchet = await runGateLoop({
+      attempt: async () => evaluateOwnerRatchet("neondb_owner", ["auth_app"]),
+      now: () => 0,
+      sleep: async () => undefined,
+      waitMs: 600_000,
+      pollMs: GATE_POLL_MS,
+      log: () => undefined,
+    });
+    expect(ratchet).toMatchObject({ outcome: "fail", kind: "fatal", attempts: 1 });
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  evaluateLedger                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -558,7 +653,12 @@ describe("the lines the gate prints", () => {
     expect(formatAttemptLine(3, "unreachable", ["57P03 starting up", "b."])).toBe(
       "[deploy-gate] attempt 3 unreachable: 57P03 starting up; b",
     );
-    expect(formatPassLine(12_345)).toBe("[deploy-gate] PASS schema current after 12.3s");
+    expect(formatPassLine(12_345, true)).toBe(
+      "[deploy-gate] PASS schema current after 12.3s runtime=owner",
+    );
+    expect(formatPassLine(500, false)).toBe(
+      "[deploy-gate] PASS schema current after 0.5s runtime=non-owner",
+    );
     expect(formatFailLine("behind", ["the ledger lacks 0003-x.sql."])).toBe(
       "[deploy-gate] FAIL behind: the ledger lacks 0003-x.sql. Production was not changed: Vercel does not promote a failed build. Apply the migrations against the DIRECT endpoint (docs/deployment.md §1.1), then redeploy this commit.",
     );

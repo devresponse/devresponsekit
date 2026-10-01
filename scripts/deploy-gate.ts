@@ -134,6 +134,7 @@ async function main(): Promise<number> {
     const files = readCoreFiles();
     const said = new Set<string>();
     let targetShown = false;
+    let isOwner = true;
     const outcome = await runGateLoop({
       attempt: async () => {
         const result = await checkDatabase(pool, {
@@ -141,6 +142,7 @@ async function main(): Promise<number> {
           files,
           betterAuth,
         });
+        if (result.identity) isOwner = result.identity.isOwner;
         if (result.identity && !targetShown) {
           targetShown = true;
           log(
@@ -168,7 +170,7 @@ async function main(): Promise<number> {
     });
 
     if (outcome.outcome === "pass") {
-      log(formatPassLine(outcome.elapsedMs));
+      log(formatPassLine(outcome.elapsedMs, isOwner));
       return 0;
     }
     log(formatFailLine(outcome.kind, outcome.reasons));

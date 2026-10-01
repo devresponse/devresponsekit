@@ -149,7 +149,17 @@ jobs:
     env:
       # CI-only values; the suites sign in with the seeded admin and
       # exercise the real Better Auth + admin APIs against the service DB.
-      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
+      #
+      # DEP3: the app, the gate and the runtime jobs run as a least-privilege
+      # LOGIN (auth_app_ci, a member of auth_runtime made by `pnpm
+      # db:runtime-login`), never as the owner, so a code path that needs more
+      # than the privilege manifest grants fails here ("permission denied").
+      # The steps that need the owner (migrate, the login command, the seed)
+      # set DATABASE_URL to CI_OWNER_DATABASE_URL on the step: app_owner is a
+      # non-superuser with CREATEROLE that owns the database, the shape of
+      # Neon's neondb_owner. The superuser only creates app_owner.
+      DATABASE_URL: postgresql://auth_app_ci:ci-only-runtime-login-password-not-for-production@localhost:5444/devresponse_db
+      CI_OWNER_DATABASE_URL: postgresql://app_owner:ci-only-owner-db-password-not-for-production@localhost:5444/devresponse_db
       DB_SCHEMA: auth
       BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
       BETTER_AUTH_URL: http://localhost:3000
@@ -217,16 +227,55 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Migrate and seed
+      # DEP3: the owner production has. pgcrypto and pg_trgm are trusted
+      # extensions, and PG17's public schema belongs to pg_database_owner, so
+      # owning the database is enough for the migrations.
+      - name: Create a non-superuser owner (Neon's shape)
         run: |
-          pnpm db:auth:migrate
-          pnpm db:app:migrate
-          pnpm db:seed
+          docker exec ${{ job.services.postgres.id }} psql -v ON_ERROR_STOP=1 -U devresponse -d devresponse_db \
+            -c "create role app_owner login createrole password 'ci-only-owner-db-password-not-for-production'" \
+            -c "alter database devresponse_db owner to app_owner"
 
-      - name: Start server
+      # 0005 creates auth_runtime as a non-superuser here, and the run ends by
+      # reconciling it to the privilege manifest.
+      - name: Migrate (as the owner)
+        env:
+          DATABASE_URL: ${{ env.CI_OWNER_DATABASE_URL }}
+        run: pnpm db:auth:migrate && pnpm db:app:migrate
+
+      - name: Create the runtime login
+        env:
+          DATABASE_URL: ${{ env.CI_OWNER_DATABASE_URL }}
+          DB_RUNTIME_LOGIN_PASSWORD: ci-only-runtime-login-password-not-for-production
+        run: pnpm db:runtime-login --login auth_app_ci
+
+      # ensureSchema needs CREATE on the database, which the login lacks.
+      - name: Seed (as the owner)
+        env:
+          DATABASE_URL: ${{ env.CI_OWNER_DATABASE_URL }}
+        run: pnpm db:seed
+
+      # Production's pooled shape: no startup parameters, so search_path and
+      # the timeouts come from the login's role defaults. The gate must PASS
+      # as a non-owner, which proves the login holds exactly the manifest.
+      - name: Deploy schema gate (as the runtime login, pooled shape)
+        env:
+          VERCEL_ENV: production
+          DB_SEARCH_PATH_VIA_OPTIONS: "0"
+          DEPLOY_GATE_WAIT_MS: "30000"
         run: |
-          pnpm start &
-          timeout 60 bash -c 'until curl -fsS http://localhost:3000/en/sign-in > /dev/null; do sleep 1; done'
+          set -o pipefail
+          pnpm deploy:gate | tee "$RUNNER_TEMP/gate.log"
+          grep -q 'runtime=non-owner' "$RUNNER_TEMP/gate.log"
+
+      # Readiness covers the ledger read and Better Auth's catalog check, as
+      # the login.
+      - name: Start server (as the runtime login, pooled shape)
+        env:
+          DB_SEARCH_PATH_VIA_OPTIONS: "0"
+        run: |
+          pnpm start > "$RUNNER_TEMP/server.log" 2>&1 &
+          timeout 90 bash -c 'until curl -fsS http://localhost:3000/api/health/ready > /dev/null; do sleep 1; done'
 
       - name: E2E suite
         run: pnpm test:e2e
@@ -240,12 +289,28 @@ jobs:
           PLAYWRIGHT_NO_SERVER: "1"
           PLAYWRIGHT_BASE_URL: http://localhost:3000
 
+      # The definer EXECUTE grant (the audit prune) and the runtime DELETEs.
+      - name: Runtime jobs as the login
+        env:
+          DB_SEARCH_PATH_VIA_OPTIONS: "0"
+        run: pnpm db:prune && pnpm mcp:reap
+
+      # The logger does not serialise pg's error code, so match the text. A
+      # route that swallowed a 42501 into a 500 or a fallback fails here.
+      - name: No privilege errors in the server log
+        if: ${{ !cancelled() }}
+        run: |
+          ! grep -nE 'permission denied|must be owner of' "$RUNNER_TEMP/server.log"
+
       - name: Upload Playwright traces
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-results
-          path: test-results/
+          path: |
+            test-results/
+            ${{ runner.temp }}/server.log
+            ${{ runner.temp }}/gate.log
           retention-days: 7
           if-no-files-found: ignore
 

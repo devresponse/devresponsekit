@@ -730,6 +730,24 @@ or push again.
   `FAIL fatal: the server environment is invalid (<keys>)` names production
   variables the app refuses at boot: fix them in Vercel (Configuration). Any
   other `fatal` carries the database's own error, such as a failed password.
+- **`FAIL behind: the runtime login lacks …` or `… holds …, which the
+  privilege manifest forbids`** (DEP3) — the app connects as a least-privilege
+  login whose privileges differ from `src/db/runtime-privileges.ts`. The
+  migrate run's line before `[migrate] done` says what its reconcile did
+  (`[migrate] runtime role auth_runtime: …`); if that run failed or never ran,
+  re-run it (or `pnpm db:app:migrate` against the direct endpoint) and
+  redeploy. A forbidden `CREATE on schema public` or `CREATE on the database`
+  is not a table grant, so the reconcile leaves it: revoke it as the owner.
+- **`FAIL fatal: the runtime login has the forbidden attribute(s) …` or `is a
+  member of …`** — the login bypasses its grants, typically because it was
+  made in the Neon Console, which adds `neon_superuser`. Create a login with
+  `pnpm db:runtime-login`, point `DATABASE_URL` at it and redeploy
+  ([deployment.md §8.3](./deployment.md#83-pnpm-dbruntime-login-creating-rotating-and-adopting-a-login)).
+- **`FAIL fatal: a least-privilege login (…) exists for this schema but this
+  build connects as the owner …`** — the ratchet: production's `DATABASE_URL`
+  is the owner's although a login exists. Point it back at the login, or, if
+  going back to the owner is deliberate, follow the break-glass steps in
+  [deployment.md §8.5](./deployment.md#85-the-gates-privilege-check-the-ratchet-and-break-glass).
 - **`FAIL unreachable: <error>`** — no check reached the database before the
   deadline (a cold start or a blip is retried every 10 seconds). Check the
   provider's status, and that production's `DATABASE_URL` is right, then
@@ -801,7 +819,7 @@ there is nothing to redeploy: the newer commit's build is the one that ships.
   that may not create schemas in the database, usually the least-privilege
   runtime login of
   [deployment.md §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended)
-  (`auth_runtime`). Both runners run `create schema if not exists` before
+  (`auth_app`). Both runners run `create schema if not exists` before
   they create anything, and Postgres checks `CREATE` on the database even
   when the schema exists, so the run stops there. Store the owner's URL (on
   Neon usually `neondb_owner`). Nothing was changed.
@@ -811,6 +829,18 @@ there is nothing to redeploy: the newer commit's build is the one that ships.
   another admin role. Tables another role creates get no runtime grants and
   break the audit trigger's owner rule, so the runner refuses instead of
   migrating as `B`. Store the owner's URL. Nothing was changed.
+- **`runtime role auth_runtime: privileges outside the manifest that no grant
+  to auth_runtime explains`** (DEP3) — the run's last step, the reconcile of
+  [deployment.md §8.2](./deployment.md#82-the-reconcile-at-the-end-of-every-dbappmigrate),
+  found a privilege it cannot revoke, because it comes from `PUBLIC` or from a
+  role `auth_runtime` belongs to; the message names which, and what to
+  revoke. Every migration file was already applied and ledgered; only the
+  reconcile changed nothing. Revoke it as the owner and re-run.
+- **`runtime role auth_runtime: still out of line after the repair`** — the
+  reconcile's grants or revokes did not take, which Postgres reports only as
+  a warning: the migrating role does not own the table, function or schema
+  named. Migrate as the owner of every object in the schema (the Better Auth
+  tables included), or transfer them to it, and re-run.
 - **The run is green, but the build still failed `behind`** — the secret
   points at another database or schema than production's runtime
   `DATABASE_URL` and `DB_SCHEMA`, and the migrations landed there. Compare it

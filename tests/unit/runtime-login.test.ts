@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  LOGIN_PASSWORD_ENV,
   type LoginSession,
   type RuntimeLoginDeps,
   ownerUrlProblem,
@@ -43,6 +44,10 @@ interface Scenario {
   connectLoginError?: Error;
   connectOwnerError?: Error;
   reconcileError?: Error;
+  /** `--retire-except`'s login as pg_roles has it: absent (null), or whether it can log in. */
+  keep?: { rolcanlogin: boolean } | null;
+  /** The LOGIN members of the runtime role the retire query answers. */
+  members?: { rolname: string; sessions?: number; acts_as?: boolean }[];
 }
 
 interface Run {
@@ -85,6 +90,15 @@ async function run(scenario: Scenario = {}): Promise<Run> {
       if (sql.includes("member_of")) {
         steps.push("login?");
         return { rows: (scenario.existing ? [scenario.existing] : []) as R[] };
+      }
+      if (sql.startsWith("select rolcanlogin from pg_roles")) {
+        steps.push("keep?");
+        return { rows: (scenario.keep ? [scenario.keep] : []) as R[] };
+      }
+      if (sql.includes("pg_stat_activity")) {
+        steps.push("members?");
+        const members = (scenario.members ?? []).map((m) => ({ sessions: 0, acts_as: true, ...m }));
+        return { rows: members as R[] };
       }
       steps.push(sql);
       if (scenario.failOn?.test(sql)) {
@@ -458,7 +472,172 @@ describe("db:runtime-login: verification as the login", () => {
   });
 });
 
+describe("db:runtime-login: the retire modes (DEP4)", () => {
+  const OLD = "auth_app_202608010000";
+  const OLDER = "auth_app_202607010000";
+  const NEW = "auth_app_202610010101";
+  /** LOGIN members of auth_runtime that are NOT rotated kit logins, and must survive. */
+  const OUTSIDE = [
+    "auth_app",
+    "auth_app_ci",
+    "auth_app_20261001010",
+    "auth_sat_x",
+    "tenant_app_202608010000",
+  ];
+  const drops = (role: string) => [
+    "begin",
+    `drop owned by "${role}"`,
+    `drop role "${role}"`,
+    "commit",
+  ];
+
+  it("--retire-except drops every other rotated login, and nothing outside the pattern", async () => {
+    const r = await run({
+      argv: ["--retire-except", NEW],
+      env: { [LOGIN_PASSWORD_ENV]: undefined },
+      keep: { rolcanlogin: true },
+      members: [OLDER, OLD, NEW, ...OUTSIDE].map((rolname) => ({ rolname })),
+    });
+    expect(r.code).toBe(0);
+    // No reconcile, no password, no login created: only the drops.
+    expect(r.steps).toEqual(["preflight", "keep?", "members?", ...drops(OLDER), ...drops(OLD)]);
+    expect(r.lines).toEqual([
+      `[db:runtime-login] retired ${OLDER}`,
+      `[db:runtime-login] retired ${OLD}`,
+      `[db:runtime-login] retired 2 login(s); kept ${NEW}`,
+    ]);
+    expect(r.ownerEnded).toBe(true);
+    expect(r.loginUrl).toBeNull();
+  });
+
+  it("--retire-all drops every rotated login, never the session's own role", async () => {
+    const r = await run({
+      argv: ["--retire-all"],
+      preflight: { superuser: true, user_name: OLDER },
+      members: [OLDER, OLD, NEW, ...OUTSIDE].map((rolname) => ({ rolname })),
+    });
+    expect(r.code).toBe(0);
+    expect(r.steps).toEqual(["preflight", "members?", ...drops(OLD), ...drops(NEW)]);
+    expect(r.lines.at(-1)).toBe("[db:runtime-login] retired 2 login(s)");
+  });
+
+  it("with nothing to retire, says so and exits 0", async () => {
+    const r = await run({
+      argv: ["--retire-all"],
+      members: OUTSIDE.map((rolname) => ({ rolname })),
+    });
+    expect(r.code).toBe(0);
+    expect(r.steps).toEqual(["preflight", "members?"]);
+    expect(r.lines).toEqual([
+      "[db:runtime-login] nothing to retire: no LOGIN member of auth_runtime is named auth_app_<12 digits>",
+    ]);
+  });
+
+  it.each<[string, { rolcanlogin: boolean } | null, string]>([
+    ["does not exist", null, "does not exist"],
+    ["cannot log in", { rolcanlogin: false }, "cannot log in"],
+  ])("--retire-except naming a login that %s: exit 1, nothing retired", async (_, keep, what) => {
+    const r = await run({
+      argv: [`--retire-except=${NEW}`],
+      keep,
+      members: [{ rolname: OLD }],
+    });
+    expect(r.code).toBe(1);
+    expect(r.steps).toEqual(["preflight", "keep?"]);
+    expect(r.lines).toEqual([
+      `[db:runtime-login] FAILED --retire-except ${NEW} ${what}: nothing was retired. Name the login production connects as`,
+    ]);
+    expect(r.ownerEnded).toBe(true);
+  });
+
+  it("keeps a login with open sessions, retires the rest, and exits 1", async () => {
+    const r = await run({
+      argv: ["--retire-all"],
+      members: [{ rolname: OLDER, sessions: 2 }, { rolname: OLD }],
+    });
+    expect(r.code).toBe(1);
+    expect(r.steps).toEqual(["preflight", "members?", ...drops(OLD)]);
+    expect(r.lines).toEqual([
+      `[db:runtime-login] kept ${OLDER}: 2 open session(s) in pg_stat_activity. A pooler keeps idle server connections for a while after its last client, so retry later, or pass --force`,
+      `[db:runtime-login] retired ${OLD}`,
+      `[db:runtime-login] FAILED 1 login(s) not retired: ${OLDER}`,
+    ]);
+  });
+
+  it("--force retires a login with open sessions too, and says so", async () => {
+    const r = await run({
+      argv: ["--retire-all", "--force"],
+      members: [{ rolname: OLDER, sessions: 2 }, { rolname: OLD }],
+    });
+    expect(r.code).toBe(0);
+    expect(r.steps).toEqual(["preflight", "members?", ...drops(OLDER), ...drops(OLD)]);
+    expect(r.lines[0]).toBe(
+      `[db:runtime-login] retired ${OLDER} (--force: its 2 open session(s) lose their role)`,
+    );
+  });
+
+  it("skips DROP OWNED where the session lacks the login's privileges (Neon's ADMIN-only owner)", async () => {
+    const r = await run({ argv: ["--retire-all"], members: [{ rolname: OLD, acts_as: false }] });
+    expect(r.code).toBe(0);
+    expect(r.steps).toEqual(["preflight", "members?", "begin", `drop role "${OLD}"`, "commit"]);
+  });
+
+  it("a drop that fails is rolled back and reported, and the others still go", async () => {
+    const r = await run({
+      argv: ["--retire-all"],
+      members: [{ rolname: OLDER }, { rolname: OLD }],
+      failOn: new RegExp(`^drop role "${OLDER}"`),
+    });
+    expect(r.code).toBe(1);
+    expect(r.steps).toEqual([
+      "preflight",
+      "members?",
+      "begin",
+      `drop owned by "${OLDER}"`,
+      `drop role "${OLDER}"`,
+      "rollback",
+      ...drops(OLD),
+    ]);
+    expect(r.lines).toEqual([
+      `[db:runtime-login] could not retire ${OLDER}: 42501 permission denied to create role`,
+      `[db:runtime-login] retired ${OLD}`,
+      `[db:runtime-login] FAILED 1 login(s) not retired: ${OLDER}`,
+    ]);
+  });
+
+  it("runs as the owner only, and refuses a remote host without --allow-remote", async () => {
+    const notOwner = await run({
+      argv: ["--retire-all"],
+      preflight: { ledger_owner: "neondb_owner" },
+    });
+    expect(notOwner.code).toBe(1);
+    expect(notOwner.steps).toEqual(["preflight"]);
+
+    const remote = "postgresql://owner:owner-secret@ep-x.neon.tech/neondb?sslmode=require";
+    const refused = await run({ argv: ["--retire-all"], env: { DATABASE_URL: remote } });
+    expect(refused.code).toBe(1);
+    expect(refused.steps).toEqual([]);
+    expect(refused.lines[0]).toMatch(/It drops database logins\./);
+    const allowed = await run({
+      argv: ["--retire-all", "--allow-remote"],
+      env: { DATABASE_URL: remote },
+    });
+    expect(allowed.code).toBe(0);
+  });
+});
+
 describe("parseRuntimeLoginArgs", () => {
+  it("reads the retire modes", () => {
+    expect(parseRuntimeLoginArgs(["--retire-except", "auth_app_202610010101"], "auth")).toEqual({
+      ok: true,
+      args: expect.objectContaining({ retire: { except: "auth_app_202610010101" }, force: false }),
+    });
+    expect(parseRuntimeLoginArgs(["--retire-all", "--force", "--allow-remote"], "auth")).toEqual({
+      ok: true,
+      args: expect.objectContaining({ retire: { except: null }, force: true, allowRemote: true }),
+    });
+  });
+
   it("defaults, and reads both flag forms", () => {
     expect(parseRuntimeLoginArgs([], "auth")).toEqual({
       ok: true,
@@ -468,6 +647,8 @@ describe("parseRuntimeLoginArgs", () => {
         allowRemote: false,
         verifyHost: null,
         plaintextPassword: false,
+        retire: null,
+        force: false,
       },
     });
     expect(
@@ -489,6 +670,8 @@ describe("parseRuntimeLoginArgs", () => {
         allowRemote: true,
         verifyHost: "db.local",
         plaintextPassword: false,
+        retire: null,
+        force: false,
       },
     });
   });
@@ -507,7 +690,28 @@ describe("parseRuntimeLoginArgs", () => {
     [["--verify-host"], /^--verify-host needs a host name/],
     [["--allow-remote=yes"], /^--allow-remote takes no value$/],
     [["--plaintext-password=1"], /^--plaintext-password takes no value$/],
-    [["--force"], /^unknown argument --force$/],
+    [["--force"], /^--force applies only to --retire-except and --retire-all$/],
+    [["--force=1", "--retire-all"], /^--force takes no value$/],
+    [["--retire-all=yes"], /^--retire-all takes no value$/],
+    [["--retire-except"], /^--retire-except needs the login to keep$/],
+    [["--retire-except", "auth_sat_x"], /^--retire-except auth_sat_x is not a kit login name/],
+    [["--retire-except=neondb_owner"], /is not a kit login name/],
+    [
+      ["--retire-all", "--retire-except", "auth_app"],
+      /^--retire-except and --retire-all exclude each other$/,
+    ],
+    [
+      ["--retire-except", "auth_app", "--retire-all"],
+      /^--retire-except and --retire-all exclude each other$/,
+    ],
+    [
+      ["--retire-all", "--login", "auth_app_x", "--plaintext-password"],
+      /^--login, --plaintext-password cannot be combined with a retire mode$/,
+    ],
+    [
+      ["--verify-host", "db.local", "--retire-except=auth_app"],
+      /^--verify-host cannot be combined with a retire mode$/,
+    ],
   ])("refuses %j", (argv, error) => {
     const parsed = parseRuntimeLoginArgs(argv, "auth");
     expect(parsed.ok).toBe(false);

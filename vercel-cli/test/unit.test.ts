@@ -1582,7 +1582,7 @@ test("I-14: --dry-run is claimed for exactly the commands whose --help declares 
       })
     ).stdout;
   const top = await help();
-  const commands = [...top.slice(top.indexOf("\nCommands:\n")).matchAll(/^ {2}([a-z][\w:]*)/gm)]
+  const commands = [...top.slice(top.indexOf("\nCommands:\n")).matchAll(/^ {2}([a-z][\w:-]*)/gm)]
     .map((match) => match[1]!)
     .filter((command) => command !== "help");
   assert.ok(commands.length >= 12, `every command is listed: ${commands.join(" ")}`);
@@ -1596,7 +1596,15 @@ test("I-14: --dry-run is claimed for exactly the commands whose --help declares 
   )
     .flat()
     .sort();
-  assert.deepEqual(declared, ["db:provision", "deploy", "env:prune", "env:sync", "migrate", "up"]);
+  assert.deepEqual(declared, [
+    "db:provision",
+    "db:runtime-login",
+    "deploy",
+    "env:prune",
+    "env:sync",
+    "migrate",
+    "up",
+  ]);
 
   // The names after `lead`, up to the full stop: "a, b and c", however it wraps.
   const listed = (text: string, lead: RegExp): string[] => {

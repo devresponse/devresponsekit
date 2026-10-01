@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { runPnpm } from "./exec.js";
+import { pnpmCommand, run, runPnpm } from "./exec.js";
 import { CliError, step } from "./log.js";
 import { authMigrationEnv, migrationEnv } from "./migration-env.js";
 
@@ -189,6 +189,39 @@ export async function applyMigrations(options: MigrateOptions): Promise<void> {
     inheritShell,
     failureMessage: "Application migrations failed — production was NOT promoted",
   });
+}
+
+/** The kit's least-privilege login command (DEP3), which `drk-deploy db:runtime-login` drives (DEP4). */
+export const RUNTIME_LOGIN_SCRIPT = "db:runtime-login";
+
+/** Whether the kit checkout has `pnpm db:runtime-login`: a checkout from before DEP3 does not. */
+export function hasRuntimeLoginScript(kitRoot: string): boolean {
+  const pkgPath = join(kitRoot, "package.json");
+  if (!existsSync(pkgPath)) return false;
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
+    return typeof pkg.scripts?.[RUNTIME_LOGIN_SCRIPT] === "string";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Runs `pnpm db:runtime-login <args>` in the kit checkout and resolves with
+ * its exit code, its output streamed (DEP4). `env` is `runtimeLoginEnv`'s:
+ * the owner URL, the schema and the password travel there, never in `args`.
+ * The child gets the allow-listed shell (`inheritedEnv`), not the whole one:
+ * unlike the migration runners it reads nothing of the kit's configuration
+ * but what `env` names, and never the Vercel token.
+ */
+export async function runKitRuntimeLogin(
+  kitRoot: string,
+  args: string[],
+  env: Record<string, string | undefined>,
+): Promise<number> {
+  const { command, prefix } = pnpmCommand();
+  const result = await run(command, [...prefix, RUNTIME_LOGIN_SCRIPT, ...args], { cwd: kitRoot, env });
+  return result.code;
 }
 
 /** Installs dependencies in the kit checkout so the migration runner can run. */

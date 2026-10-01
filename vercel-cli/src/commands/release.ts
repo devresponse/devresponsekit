@@ -559,7 +559,7 @@ export const releaseRunner: ReleaseRunner = {
  * The one place a `vercel` child is spawned, always with the invocation's
  * `env` (F-48), less the token for `build` (F-139).
  */
-async function runVercel(
+export async function runVercel(
   { vercelJs, root, env }: VercelInvocation,
   args: string[],
   failureMessage: string,
@@ -596,12 +596,12 @@ function rollbackArgs(vercel: Pick<VercelInvocation, "orgId">, to: ServingDeploy
 }
 
 /** The rollback as an operator types it, with the recorded deployment filled in (F-51). */
-function rollbackCommand(vercel: Pick<VercelInvocation, "orgId">, to: ServingDeployment): string {
+export function rollbackCommand(vercel: Pick<VercelInvocation, "orgId">, to: ServingDeployment): string {
   return `vercel ${rollbackArgs(vercel, to).join(" ")}`;
 }
 
 /** A recorded deployment, as the operator reads it: its own URL when known, and its id. */
-function describeDeployment(deployment: ServingDeployment): string {
+export function describeDeployment(deployment: ServingDeployment): string {
   return deployment.url ? `https://${deployment.url} (${deployment.id})` : deployment.id;
 }
 
@@ -614,7 +614,7 @@ function describeDeployment(deployment: ServingDeployment): string {
  * VERCEL_ORG_ID that disagrees with the config, and a checkout already linked
  * to another project.
  */
-function vercelInvocation(
+export function vercelInvocation(
   cliRoot: string,
   config: ProjectConfig,
   profile: DeploymentProfile,

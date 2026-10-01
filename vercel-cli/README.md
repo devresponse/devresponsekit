@@ -242,24 +242,26 @@ reported the issuer's real signing key under "must NOT be set on this satellite"
 
 ## Commands
 
-| Command        | What it does                                                                                                         |
-| -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `login`        | Stores a Vercel token (typed with the input hidden), after proving it works. Saved to your user profile.             |
-| `init`         | Links this checkout to a Vercel project and records the target and its settings.                                     |
-| `doctor`       | Checks Node, pnpm, the Vercel CLI, credentials and the project link. Changes nothing.                                |
-| `status`       | Project, latest production deployment, and a live health probe.                                                      |
-| `env:check`    | Reports what production is missing, has wrong, or must not have. Public values are read back. Exit 1 on a problem.   |
-| `env:sync`     | Creates every variable this target needs, generating the secrets it may.                                             |
-| `env:prune`    | Removes variables that must not exist here, including a satellite's stray signing key. Refuses the kit's project.    |
-| `db:provision` | Creates a marketplace Postgres store and connects it to the project. Refused unless this deployment owns a database. |
-| `db:status`    | Shows the database variables wired into the project.                                                                 |
-| `migrate`      | Applies the kit's migrations to production, checked first. Refused for a satellite that does not own its schema.     |
-| `deploy`       | Pull → migrate (checked) → build → promote → verify (no migrate step when the target does not own a schema).         |
-| `up`           | `env:sync` then `deploy`. The whole thing.                                                                           |
+| Command            | What it does                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `login`            | Stores a Vercel token (typed with the input hidden), after proving it works. Saved to your user profile.             |
+| `init`             | Links this checkout to a Vercel project and records the target and its settings.                                     |
+| `doctor`           | Checks Node, pnpm, the Vercel CLI, credentials and the project link. Changes nothing.                                |
+| `status`           | Project, latest production deployment, and a live health probe.                                                      |
+| `env:check`        | Reports what production is missing, has wrong, or must not have. Public values are read back. Exit 1 on a problem.   |
+| `env:sync`         | Creates every variable this target needs, generating the secrets it may.                                             |
+| `env:prune`        | Removes variables that must not exist here, including a satellite's stray signing key. Refuses the kit's project.    |
+| `db:provision`     | Creates a marketplace Postgres store and connects it to the project. Refused unless this deployment owns a database. |
+| `db:status`        | Shows the database variables wired into the project.                                                                 |
+| `db:runtime-login` | Moves the kit's production onto a new least-privilege login ([below](#dbruntime-login-the-least-privilege-login)).   |
+| `migrate`          | Applies the kit's migrations to production, checked first. Refused for a satellite that does not own its schema.     |
+| `deploy`           | Pull → migrate (checked) → build → promote → verify (no migrate step when the target does not own a schema).         |
+| `up`               | `env:sync` then `deploy`. The whole thing.                                                                           |
 
-Every command is safe to re-run, and every command but `login` reads the recorded target first.
-Six of them take `--dry-run`, which shows the plan and changes nothing: `env:sync`, `env:prune`,
-`db:provision`, `migrate`, `deploy` and `up`. The rest have no such flag (I-14): `doctor`,
+Every command is safe to re-run (`db:runtime-login` mints a new login each time), and every command
+but `login` reads the recorded target first. Seven of them take `--dry-run`, which shows the plan
+and changes nothing: `env:sync`, `env:prune`, `db:provision`, `db:runtime-login`, `migrate`,
+`deploy` and `up`. The rest have no such flag (I-14): `doctor`,
 `status`, `env:check` and `db:status` only read, `login` saves the token it has verified, and `init`
 writes the config file (and, with `--create`, creates the project). Every command also takes
 `--config <file>`, the deployment's config file (default: `DRK_DEPLOY_CONFIG`, else
@@ -977,6 +979,99 @@ Postgres that silently points the consumer at an **empty** database. It boots, `
 answers 200 because the connection itself works, and every session lookup and handoff nonce burn
 then misses. The answer there is the kit's connection string, not a new store.
 
+### `db:runtime-login`: the least-privilege login
+
+The kit's production connects as the table owner until it is moved onto a least-privilege login
+([docs/deployment.md §8](../docs/deployment.md#8-least-privilege-runtime-role-optional-recommended)).
+This command does that in one run (DEP4), from a clean kit checkout at origin's default branch, with
+the owner's DIRECT URL exported:
+
+```bash
+export PRODUCTION_DIRECT_DATABASE_URL='postgresql://neondb_owner:…@ep-….neon.tech/neondb?sslmode=require'
+drk-deploy db:runtime-login --dry-run      # the plan: nothing is created or written
+drk-deploy db:runtime-login --redeploy
+# once the new deployment is live and healthy:
+drk-deploy db:runtime-login --retire-except <the login it printed>
+```
+
+In order, refusing (exit 2) with nothing created or written at each check:
+
+1. The config is the kit's (a satellite is refused: it has no kit command, and its own login is a
+   follow-up), the token works, and the project is read.
+2. The kit checkout is clean (untracked files count), pushed, and at origin's default branch: the
+   kit command reconciles the runtime role to the privilege manifest it finds there.
+3. The owner URL is `PRODUCTION_DIRECT_DATABASE_URL`, from the shell or `--from-env`, never
+   `DATABASE_URL`, and neither pooled nor re-pointed ([F-47](#f-47-the-migration-url-is-named-and-checked-against-production)).
+4. **The identity check.** Production's `DATABASE_URL` is stored `sensitive`, so it cannot be
+   read back. Every production build on Vercel runs the schema gate, which prints the database it
+   connected to: the LAST `[deploy-gate] target host=… port=… database=… schema=… user=… runtime=…`
+   line in the serving deployment's build log is the reference. The owner URL must reach that
+   database (host with Neon's `-pooler` removed, port, database name), and `--schema` (default
+   `auth`) must be the schema it names. A mismatch has no override. A deployment built before the
+   gate prints no line, and neither does one `deploy` or `up` built on this machine and promoted
+   prebuilt (the gate skips there, and that build log stays local): push to the production branch so
+   a git-integration build serves production, or pass `--allow-unverified-target`, and then you type
+   the database name (unless `--yes`). The line's `user=` is the login production connects as now.
+5. A new login, `<schema>_app_<UTC yyyymmddhhmm>`, and a 43-character password from
+   `randomBytes(32)`, both held in memory: the password is never printed, written to disk or put in
+   argv. A login with the name production already uses is refused (wait a minute).
+6. The runtime URL: the owner URL with the login, on Neon's `-pooler` host (derived, or
+   `--pooled-host` for another provider, or `--endpoint direct`), the same port and database, and
+   only `sslmode` and `channel_binding` kept: `options` would be refused by the pooler.
+7. `pnpm db:runtime-login --login <login> --allow-remote --verify-host <runtime host>` in the kit
+   checkout creates the login with a client-side SCRAM verifier (or `--plaintext-password`) and
+   verifies it THROUGH the runtime host. Its environment carries the owner URL, the schema and the
+   password, no `DB_SEARCH_PATH_VIA_OPTIONS`, no `.env` and no Vercel token. A non-zero exit
+   (exit 1) writes nothing to Vercel; its last line names the remedy.
+8. `DATABASE_URL` and `DB_SEARCH_PATH_VIA_OPTIONS` (`0` pooled, `1` direct) are written to
+   Production as `sensitive`: an existing entry is edited by id and keeps its targets, a missing
+   one is created for Production. Only `DATABASE_URL production sensitive written` is printed.
+   The listing is read before step 7, so two entries covering Production, or one that also covers
+   Development (which takes no sensitive value), stop the run before anything is created.
+9. With `--redeploy`: `vercel redeploy <serving deployment> --target=production` (the token goes
+   to that child only), then the production origin must serve the new deployment, pass the health
+   probe, and its gate line must read `user=<login> runtime=non-owner`. Without it, the exact
+   redeploy command is printed: the variables take effect only on a new deployment.
+10. The next step: `--retire-except <login>` once the new deployment is live and healthy.
+
+Rotation is the same command: every run mints a new login, so the deployment still serving keeps
+its own until the redeploy replaces it.
+
+| Flag                                 | Meaning                                                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `--endpoint pooled\|direct`          | where the app connects (default `pooled`)                                                      |
+| `--pooled-host <host>`               | the pooled host when it is not Neon's                                                          |
+| `--connection-limit <n>`             | the login's connection limit (default `-1`, none)                                              |
+| `--redeploy`                         | redeploy production and prove it connects as the login                                         |
+| `--plaintext-password`               | passed to the kit command, for a server that refuses a pre-hashed SCRAM verifier               |
+| `--retire-except <login>`            | drop every rotated login but this one, which must be the one production connects as            |
+| `--retire-all`                       | drop every rotated login: break-glass back to the owner, refused while production uses a login |
+| `--force`                            | with a retire mode: override both refusals above, and retire logins with open sessions         |
+| `--schema <s>`, `--from-env <file>`  | the schema (default `auth`); a `.env` file to read `PRODUCTION_DIRECT_DATABASE_URL` from       |
+| `--allow-unverified-target`, `--yes` | go ahead without a gate line, typing the database name; `--yes` skips typing it                |
+| `--dry-run`                          | read, check and print the plan; create, write and redeploy nothing                             |
+
+The retire modes run steps 1 to 4, then the kit's own `--retire-except` / `--retire-all`, which
+drops only LOGIN members of `<schema>_runtime` named `<schema>_app_` and 12 digits: `auth_app`,
+`auth_app_ci` and a satellite's `<schema>_sat_*` are never touched. A login with sessions open is
+kept (a pooler holds idle connections for a while), and the run exits 1 saying to retry later.
+Retiring a login makes every deployment built with it unusable as an Instant Rollback target. While
+production connects as the owner, `--retire-except` has no login to name: use `--retire-all`. While
+it connects as a kit login, `--retire-all` refuses, and going back to the owner is the break-glass
+in [docs/deployment.md §8.5](../docs/deployment.md#85-the-gates-privilege-check-the-ratchet-and-break-glass):
+after a rotation, `--retire-all --force` and then an owner redeploy at once, because a build that
+connects as the owner fails the gate's ratchet while any rotated login exists.
+
+**Exit codes.** 2: refused, nothing created or written. 1: the kit command failed, nothing written
+to Vercel; a rerun mints another login. A login that failed verification is left behind, and while
+production connects as the owner every owner-connected production build fails the gate's ratchet
+until a rerun succeeds or `--retire-all` drops it (when production connects as a kit login,
+`--retire-except <that login>` drops it). 3: something failed after a write, and
+the message says the way back: a failed env write leaves production as it was (a deployment keeps
+the environment it was built with), so rerun; a redeploy that fails its gate is not promoted, and
+production still serves the previous deployment; a redeploy that serves but is unhealthy, or whose
+gate does not name the login, is rolled back with the printed `vercel promote`.
+
 ---
 
 ## Using it from CI
@@ -1059,7 +1154,11 @@ project (F-50).
 same `--config`.
 `src/lib/release-tree.ts` reads a checkout's git state (`inspectTree`) and holds the rules for what
 may be released and whether Vercel's git integration also deploys production, as pure functions
-(F-49). `src/commands/` is one file per command group.
+(F-49). `src/commands/` is one file per command group. `src/commands/runtime-login.ts` reaches
+every step that touches Vercel, the kit or the network through `RuntimeLoginRunner`, and
+`test/runtime-login.test.ts` asserts its order and that the generated password reaches nothing
+but the kit's environment and the `DATABASE_URL` value (DEP4); `src/lib/gate-target.ts` reads the
+schema gate's `target` line and `src/lib/runtime-url.ts` builds the runtime URL, both pure.
 `src/lib/build-stamp.ts` holds the stamp `pnpm build` writes (through `src/write-build-stamp.ts`)
 and the check the entry point runs before it parses a command (I-14). `test/unit.test.ts` runs that
 check against a copy of the built package under `dist/`, whose source a test changes, and runs the

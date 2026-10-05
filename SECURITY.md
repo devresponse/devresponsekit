@@ -131,7 +131,8 @@ when any lockfile's list mutes a GHSA that has no row.
 
 | GHSA | Lockfile | Package | Severity | Why it is not reachable | Review by |
 | --- | --- | --- | --- | --- | --- |
-| _none_ | — | — | — | Both allowlists are **empty**: the app's since 2026-09-04, and the CLI's has never had an entry. Every advisory is fixed by a version bump or an override floor (next section, and [the CLI's floors](vercel-cli/README.md#dependency-override-floors)). Add a row here, and the id to **that lockfile's** `ignoreGhsas`, only for an advisory that has **no** fixed release and meets the reachability rule below — never for anything reachable at runtime. | — |
+| `GHSA-vfj7-8cjw-p6xm` | `pnpm-lock.yaml` | `braces@3.0.3` | high | Stack-exhaustion DoS on deeply nested patterns; **no fixed release exists** (patched range `<0.0.0`, `braces` latest is 3.0.3), so no floor can close it. `pnpm why braces` shows it arriving only via devDependencies (`eslint-config-next > @next/eslint-plugin-next > fast-glob > micromatch`, and `kysely-codegen > micromatch`): lint and type generation, never imported by `src/` and absent from the standalone runtime image. Added 2026-10-05. | 2026-11-05 |
+| `GHSA-vfj7-8cjw-p6xm` | `vercel-cli/pnpm-lock.yaml` | `braces@3.0.3` | high | Same advisory, no fixed release. `pnpm --dir vercel-cli why braces` shows it arriving only via `vercel > @vercel/{backends,node,express,hono,remix-builder,static-build,…} > ts-morph > @ts-morph/common > fast-glob > micromatch`: the framework adapters a Next.js deployment installs and never runs (the model case below). `@vercel/next` does not depend on it, and `drk-deploy`'s own source imports none of the chain. Added 2026-10-05. | 2026-11-05 |
 
 To re-verify reachability for a future entry:
 

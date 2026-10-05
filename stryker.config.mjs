@@ -33,7 +33,7 @@ import { readFileSync } from "node:fs";
  *
  * @type {import('@stryker-mutator/api/core').PartialStrykerOptions}
  */
-export default {
+const config = {
   testRunner: "vitest",
   vitest: { configFile: "vitest.config.ts" },
   coverageAnalysis: "perTest",
@@ -93,6 +93,8 @@ export default {
   // `high`/`low` only color the report.
   thresholds: { high: 90, low: 80, break: 85 },
 };
+
+export default config;
 
 /**
  * `file:start-end` mutate targets, one per named top-level function of `file`

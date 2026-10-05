@@ -135,6 +135,12 @@ test("saved time zone, date format and language apply across the app (F-37)", as
 
     // Language: the save moves this page to French at once.
     await page.goto("/en/app/account/preferences");
+    // Wait for hydration before touching the form. Unlike Eucla above, "fr" is
+    // in the server markup, so selectOption could land before React hydrates
+    // and have its value reset to the stored "en"; the save then never
+    // switches locale. Before hydration the zone list holds only "System" and
+    // the stored zone; the full list arrives with the post-hydration render.
+    await expect.poll(() => select("timeZone").locator("option").count()).toBeGreaterThan(2);
     await select("preferredLocale").selectOption("fr");
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page).toHaveURL(/\/fr\/app\/account\/preferences$/);

@@ -43,7 +43,9 @@
     },
     "auditConfig": {
       "//": "Allowlist for `pnpm --dir vercel-cli audit --audit-level high`. Each muted advisory arrives only through code drk-deploy never executes — see SECURITY.md ('Dependency advisory allowlist') for the row, rationale and review-by date. Drop entries when the upstream fix lands.",
-      "ignoreGhsas": ["GHSA-vfj7-8cjw-p6xm"]
+      "ignoreGhsas": [
+        "GHSA-vfj7-8cjw-p6xm"
+      ]
     }
   }
 }

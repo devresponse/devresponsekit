@@ -11,9 +11,14 @@ import type { AuthPolicySettingsInput } from "@/lib/validation/auth-policy";
  *
  * Threat / contract:
  *   - These helpers do NOT scope: callers MUST have already authorized the
- *     target (`canAccessOrg` for an org row; `isSuperadmin` for the
- *     platform-default row, `organizationId = null`). The org detail page
- *     and every route handler perform that check before calling in.
+ *     target (`canAccessOrg` for an org row). The platform-default row
+ *     (`organizationId = null`) is the policy every tenant inherits, so a
+ *     route handler gates it on `hasCrossOrgReach` — NOT `isSuperadmin`,
+ *     which is also true for an ORG-BOUND bearer credential owned by a
+ *     superuser (MACHINE-2; see `api/administrator/auth-settings/defaults`).
+ *     The RSC pages only ever see a cookie session, where the two agree;
+ *     the org detail page also reads the row (never writes it) to show an
+ *     org with no override what it inherits.
  *   - Rows are stored normalized (lowercased, deduped domains/methods) so
  *     the signup-time resolver never has to guess.
  */

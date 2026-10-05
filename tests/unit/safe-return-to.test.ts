@@ -17,7 +17,10 @@ describe("getSafeReturnTo", () => {
   });
 
   it("rejects backslash smuggling", () => {
-    expect(getSafeReturnTo("/\evil.example.com")).toBe("/en/app/dashboard");
+    expect(getSafeReturnTo("/\\evil.example.com")).toBe("/en/app/dashboard");
+    // A valid locale and page around the backslash, so only the backslash
+    // rule can refuse it (the leading-slash case above also fails the locale).
+    expect(getSafeReturnTo("/en/app/dashboard\\evil.example.com")).toBe("/en/app/dashboard");
   });
 
   it("rejects API and auth/status routes", () => {
@@ -86,7 +89,7 @@ describe("getSafeReturnToInLocale", () => {
       "",
       "https://evil.example.com/x",
       "//evil.example.com/x",
-      "/\evil.example.com",
+      "/\\evil.example.com",
       "/api/sso/launch?applicationId=portal&locale=en",
       "/en/sign-in",
       "/zz/app/dashboard",

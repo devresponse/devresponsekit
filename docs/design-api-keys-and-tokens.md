@@ -326,7 +326,7 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 - **Confidentiality at rest** — no plaintext secret is ever stored; JWTs hold no server secret.
 - **Least privilege** — `scopes ∩ owner permissions`, enforced at both creation and use; no credential out-scopes its creator (§7).
 - **Tenant isolation** — credentials act in their bound org, not the active-org cookie (MACHINE-1).
-- **Revocation completeness** — keys/clients via `status`; a Better Auth ban immediately stops all of a user's machine credentials **including outstanding JWTs** (AUTH-1), and `unban` restores them. The `jti` denylist is enforced at resolution but has no writer wired yet (§6.5) — until it does, ban-the-owner is the per-token kill switch.
+- **Revocation completeness** — keys/clients via `status`; a Better Auth ban immediately stops all of a user's machine credentials **including outstanding JWTs** (AUTH-1), and `unban` restores them. Every JWT request re-reads its source credential (the `cid` claim), so revoking or rotating the key or client retires its outstanding tokens on their next request (§6.5). There is no per-token (`jti`) denylist: it was removed rather than wired, and banning the owner is the principal-wide kill switch.
 - **Side-channel resistance** — constant-time secret comparison (P2-3).
 - **Auditability** — every issuance, admin permission/scope denial (`api.access.denied`) and mutation writes an audit event with a `requestId` that matches the response `x-request-id` header. A successful read, a refused token, an `account.*` scope denial, a status or membership refusal and a `429` write none (F-76).
 

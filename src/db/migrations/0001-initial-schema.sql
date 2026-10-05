@@ -430,8 +430,10 @@ insert into app_organizations (slug, name, status, is_default)
 values ('default', 'Default Organization', 'active', true)
 on conflict (slug) do nothing;
 
--- Permission catalog. The `superuser` marker is not individually checked
--- at runtime (the role's power comes from holding every other key). This
+-- Permission catalog. The `superuser` marker IS the source of superadmin
+-- authority: the runtime checks it directly (`isSuperadmin`) and expands any
+-- holder to the full permission set (`getUserAccessContext`), so attaching it
+-- to any role grants platform-wide superadmin (see the grant below). This
 -- frozen baseline predates the `admin.groups.*` keys (backfilled by 0002),
 -- so the rule is: the UNION of every core migration's seeded rows (this file
 -- + 0002 onward) MUST equal `ADMIN_PERMISSION_CATALOG` in

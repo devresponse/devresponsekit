@@ -54,6 +54,9 @@ export function StopImpersonationButton({
         // admin lands back inside the shell. Locale = first path segment.
         const seg = window.location.pathname.split("/")[1] ?? "";
         const locale = isSupportedLocale(seg) ? seg : "en";
+        // A full document load is the point here: router.push would keep the
+        // client router cache built under the impersonated user.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- see above
         window.location.assign(`/${locale}/app/dashboard`);
         return;
       }

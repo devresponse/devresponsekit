@@ -90,6 +90,7 @@ export function ImpersonateUserButton({
       // under the new identity. The active locale is the first path segment.
       const seg = window.location.pathname.split("/")[1] ?? "";
       const locale = isSupportedLocale(seg) ? seg : "en";
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- full reload, see above
       window.location.assign(`/${locale}/app/dashboard`);
     } finally {
       setBusy(false);

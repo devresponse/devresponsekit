@@ -20,8 +20,8 @@ importers:
   .:
     dependencies:
       '@vercel/sdk':
-        specifier: 1.28.38
-        version: 1.28.38
+        specifier: 1.28.45
+        version: 1.28.45
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -30,11 +30,11 @@ importers:
         version: 62.2.0(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)
     devDependencies:
       '@types/node':
-        specifier: 26.6.3
-        version: 26.6.3
+        specifier: 26.6.5
+        version: 26.6.5
       prettier:
-        specifier: 3.9.9
-        version: 3.9.9
+        specifier: 3.9.10
+        version: 3.9.10
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -717,8 +717,8 @@ packages:
   '@types/node@20.11.0':
     resolution: {integrity: sha512-o9bjXmDNcF7GbM4CNQpmi+TutCgap/K3w1JyKgxAjqx41zp9qlIAVFi0IhCNsJcXolEqLWhbFbEeL0PvYm4pcQ==}
 
-  '@types/node@26.6.3':
-    resolution: {integrity: sha512-dsqMQQoeTLqu9wynDD00q573mNzso3IdQOAfHRJqLCcmCFPoGo9A1bDpUcv/9tnKpErQWv9uKeGfl37EIS02Yg==}
+  '@types/node@26.6.5':
+    resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -990,8 +990,8 @@ packages:
   '@vercel/sandbox@3.3.0':
     resolution: {integrity: sha512-TclqRD2joExyECTrrHsioi3Onw20X2YfpOYEzs3JpJUtAjOKYw2bMeXldKrUg+TB/TT7tPdDu8uKNxj9NE7QUg==}
 
-  '@vercel/sdk@1.28.38':
-    resolution: {integrity: sha512-DofYDwD2EGbwN6gvmxqnhrTQsahHbCw+ylTCZYpyekzHz70GNCcjIUWg98z6ucBV97aimlpiVlHg4K53nxxRfw==}
+  '@vercel/sdk@1.28.45':
+    resolution: {integrity: sha512-hv/67JaFoOSyTISnQNKX2rZoa6DUn0TPlhoes8A6QFm1T3B0jnZz+VCVTF6jigHFqw6Zs0CYJS7X9u4F1ffItQ==}
 
   '@vercel/static-build@15.0.0':
     resolution: {integrity: sha512-N51FsE1hlQ5YDe/J5JiaLYixdxf9FA6vQ2NP6rLM3fYAb59tgDXtrPV5czJ5JjDGbeiMuYgFPOPxc/5sLQMiDw==}
@@ -1562,8 +1562,8 @@ packages:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
 
-  prettier@3.9.9:
-    resolution: {integrity: sha512-Z/CJHIkdujO/OtN7nXUii0Rf3VT5SRuhjBA82Xvu2XhBUgX3nhP67T0LHceBdQLex7OOFGTox+Q5Yg8Jk2Qivg==}
+  prettier@3.9.10:
+    resolution: {integrity: sha512-skGHTH1Yb9QvaTC4hWnRTzEYtCpApF0UMBPz+t/0ZPzP8ihefo/btKd+QA7pUE0fEwA1SbS/NmhyEcstdXOIdA==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -1766,6 +1766,7 @@ packages:
   vercel@62.2.0:
     resolution: {integrity: sha512-hwet6qXoOfZEc6waIx1VgI2nLl83wwuZZnFqKSsKJ47UFi9waEezPmAV7uNOx8Fq+6JTJIi+lRnxFXr9YFW3Eg==}
     engines: {node: '>= 20'}
+    deprecated: Known CLI self-upgrade bug. Reinstall vercel@latest using your package manager instead of running vc upgrade from this version.
     hasBin: true
 
   web-vitals@0.2.4:
@@ -1833,8 +1834,8 @@ packages:
   zod@4.1.11:
     resolution: {integrity: sha512-WPsqwxITS2tzx1bzhIKsEs19ABD5vmCVa4xBo2tq/SrV4RNZtfws1EnCWQXM6yh8bD08a1idvkB5MZSBiZsjwg==}
 
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
 
@@ -2245,7 +2246,7 @@ snapshots:
     dependencies:
       undici-types: 5.26.5
 
-  '@types/node@26.6.3':
+  '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
 
@@ -2664,14 +2665,14 @@ snapshots:
       tar-stream: 3.1.7
       undici: 6.29.0
       xdg-app-paths: 5.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sdk@1.28.38':
+  '@vercel/sdk@1.28.45':
     dependencies:
-      zod: 4.6.5
+      zod: 4.6.7
 
   '@vercel/static-build@15.0.0(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@vercel/build-utils@14.15.0)':
     dependencies:
@@ -3219,7 +3220,7 @@ snapshots:
 
   picomatch@4.0.7: {}
 
-  prettier@3.9.9: {}
+  prettier@3.9.10: {}
 
   pretty-ms@7.0.1:
     dependencies:
@@ -3287,7 +3288,7 @@ snapshots:
       async-retry: 1.3.3
       debug: 4.4.3
       ws: 8.22.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - bare-abort-controller
       - bufferutil
@@ -3540,4 +3541,4 @@ snapshots:
 
   zod@4.1.11: {}
 
-  zod@4.6.5: {}
+  zod@4.6.7: {}
